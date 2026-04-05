@@ -118,6 +118,11 @@ async function handleLaunch() {
     // 导航到目标 URL
     await invoke('navigate_to_url', { url: url.value })
     view.value = 'running'
+
+    // 尝试设置 Dock 图标为服务 favicon
+    invoke('set_dock_icon_from_url', { url: url.value }).catch((e) => {
+      console.warn('Dock 图标设置失败:', e)
+    })
   } catch (e: any) {
     showMessage(`启动失败: ${e}`, 'error')
     loading.value = false
@@ -137,6 +142,8 @@ async function handleStop() {
 
 async function goBackToSettings() {
   await handleStop()
+  // 恢复默认 Dock 图标
+  invoke('reset_dock_icon').catch(() => {})
   // 使用 Rust 命令导航回设置页（自动区分 dev/prod）
   await invoke('navigate_to_settings', { devUrl: window.location.origin })
   view.value = 'settings'

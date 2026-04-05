@@ -6,6 +6,10 @@ use tauri::{Emitter, Manager};
 #[cfg(not(debug_assertions))]
 use tauri::WebviewUrl;
 
+/// 默认 Dock 图标数据（编译时嵌入，用于恢复）
+#[cfg(target_os = "macos")]
+static DEFAULT_ICON_BYTES: &[u8] = include_bytes!("../icons/icon.png");
+
 /// 存储子进程信息（句柄 + 进程组 ID）
 pub struct AppState {
     pub child: Mutex<Option<Child>>,
@@ -30,6 +34,8 @@ pub fn run() {
             navigate_to_settings,
             check_url_reachable,
             resize_window,
+            set_dock_icon_from_url,
+            reset_dock_icon,
         ])
         .setup(|app| {
             // 应用退出时自动清理子进程
@@ -291,4 +297,236 @@ fn resize_window(window: tauri::WebviewWindow, width: f64, height: f64) -> Resul
     window
         .set_size(tauri::LogicalSize { width, height })
         .map_err(|e| format!("调整窗口失败: {}", e))
+}
+
+/// 从目标 URL 获取 favicon 并设置为 macOS Dock 图标
+#[tauri::command]
+async fn set_dock_icon_from_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let parsed = url.parse::<url::Url>().map_err(|e| format!("无效的 URL: {}", e))?;
+    let origin = parsed.origin().ascii_serialization();
+
+    let (icon_bytes, fmt) = fetch_favicon(&origin).await?;
+
+    // NSApplication 必须在主线程调用，通过 run_on_main_thread 调度
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    app.run_on_main_thread(move || {
+        let result = set_macos_dock_icon(&icon_bytes, &fmt);
+        let _ = tx.send(result);
+    }).map_err(|e| format!("调度到主线程失败: {}", e))?;
+
+    rx.recv().map_err(|e| format!("等待主线程执行失败: {}", e))?
+}
+
+/// 恢复默认 Dock 图标
+#[tauri::command]
+fn reset_dock_icon(app: tauri::AppHandle) -> Result<(), String> {
+    let icon_bytes = DEFAULT_ICON_BYTES.to_vec();
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    app.run_on_main_thread(move || {
+        let result = set_macos_dock_icon(&icon_bytes, "png");
+        let _ = tx.send(result);
+    }).map_err(|e| format!("调度到主线程失败: {}", e))?;
+
+    rx.recv().map_err(|e| format!("等待主线程执行失败: {}", e))?
+}
+
+/// 检测字节数据是否为有效图片格式
+fn detect_image_format(data: &[u8]) -> Option<String> {
+    if data.len() < 4 { return None; }
+    // PNG: 89 50 4E 47
+    if data[0..4] == [0x89, 0x50, 0x4E, 0x47] { return Some("png".to_string()); }
+    // JPEG: FF D8 FF
+    if data[0..3] == [0xFF, 0xD8, 0xFF] { return Some("jpeg".to_string()); }
+    // ICO: 00 00 01 00
+    if data[0..4] == [0x00, 0x00, 0x01, 0x00] { return Some("ico".to_string()); }
+    // SVG (文本)
+    let head = String::from_utf8_lossy(&data[..data.len().min(100)]);
+    if head.contains("<svg") { return Some("svg".to_string()); }
+    // GIF: 47 49 46
+    if data[0..3] == [0x47, 0x49, 0x46] { return Some("gif".to_string()); }
+    // WebP: 52 49 46 46 ... 57 45 42 50
+    if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" { return Some("webp".to_string()); }
+    None
+}
+
+/// 尝试获取 favicon 字节数据和格式
+async fn fetch_favicon(origin: &str) -> Result<(Vec<u8>, String), String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    // 尝试获取的候选 URL 列表
+    let candidates: Vec<(&str, &str)> = vec![
+        ("/apple-touch-icon.png", "png"),
+        ("/favicon.ico", "ico"),
+        ("/favicon-32x32.png", "png"),
+        ("/favicon-16x16.png", "png"),
+    ];
+
+    for (path, _expected_fmt) in &candidates {
+        let _full_url = format!("{}{}", origin, path);
+        if let Some(bytes) = fetch_icon_url(&client, origin, path).await {
+            // 用 magic bytes 验证是否为真正的图片
+            if let Some(detected) = detect_image_format(&bytes) {
+                return Ok((bytes, detected));
+            }
+        }
+    }
+
+    // 解析 HTML 中的 <link> 图标
+    let html_url = format!("{}/", origin);
+    if let Ok(resp) = client.get(&html_url).send().await {
+        if resp.status().is_success() {
+            if let Ok(html) = resp.text().await {
+                let icons = extract_icons_from_html(&html);
+                // 按 png > ico > svg 优先级尝试
+                for (href, _) in &icons {
+                    if let Some(bytes) = fetch_icon_url(&client, origin, href).await {
+                        if let Some(detected) = detect_image_format(&bytes) {
+                            return Ok((bytes, detected));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Err("未能获取到 favicon".to_string())
+}
+
+async fn fetch_icon_url(client: &reqwest::Client, origin: &str, path: &str) -> Option<Vec<u8>> {
+    let full_url = if path.starts_with("http") {
+        path.to_string()
+    } else if path.starts_with("//") {
+        format!("https:{}", path)
+    } else if path.starts_with('/') {
+        format!("{}{}", origin, path)
+    } else {
+        format!("{}/{}", origin, path)
+    };
+    let resp = client.get(&full_url).send().await.ok()?;
+    if !resp.status().is_success() { return None; }
+    let bytes = resp.bytes().await.ok()?;
+    if bytes.is_empty() { return None; }
+    Some(bytes.to_vec())
+}
+
+/// 从 HTML 中提取所有 icon 链接及其格式 (href, format)
+fn extract_icons_from_html(html: &str) -> Vec<(String, String)> {
+    let mut results = Vec::new();
+    // 把整个 HTML 当作一个字符串搜索，避免按行分割丢失跨行标签
+    let lower = html.to_lowercase();
+    let search_from = 0usize;
+    let mut pos = search_from;
+    while let Some(link_start) = lower[pos..].find("<link ") {
+        let abs_start = pos + link_start;
+        // 找到标签结束
+        let tag_end = lower[abs_start..].find('>').unwrap_or(lower.len() - abs_start - 1);
+        let tag = &lower[abs_start..abs_start + tag_end];
+
+        let rel = extract_attr(tag, "rel");
+        let href = extract_attr(tag, "href");
+        let type_attr = extract_attr(tag, "type");
+
+        if let (Some(rel_val), Some(href_val)) = (rel, href) {
+            let is_icon = rel_val.contains("icon") || rel_val.contains("shortcut");
+            if is_icon {
+                // 推断格式
+                let fmt = if type_attr.as_deref() == Some("image/svg+xml") || href_val.ends_with(".svg") {
+                    "svg".to_string()
+                } else if href_val.ends_with(".png") || type_attr.as_deref() == Some("image/png") {
+                    "png".to_string()
+                } else {
+                    "ico".to_string()
+                };
+                // apple-touch-icon 优先
+                let priority = rel_val.contains("apple-touch");
+                results.push((href_val, fmt, priority));
+            }
+        }
+        pos = abs_start + tag_end + 1;
+        if pos >= lower.len() { break; }
+    }
+    // apple-touch-icon 排前面
+    results.sort_by(|a, b| b.2.cmp(&a.2));
+    results.into_iter().map(|(h, f, _)| (h, f)).collect()
+}
+
+/// 从 HTML 标签属性中提取值
+fn extract_attr(tag: &str, attr: &str) -> Option<String> {
+    let patterns = [format!("{}=\"", attr), format!("{}='", attr)];
+    for pattern in patterns {
+        if let Some(start) = tag.find(&pattern) {
+            let value_start = start + pattern.len();
+            let quote = &pattern[pattern.len() - 1..];
+            if let Some(end) = tag[value_start..].find(quote) {
+                return Some(tag[value_start..value_start + end].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// macOS: 设置 Dock 图标（支持 PNG/ICO/SVG）
+#[cfg(target_os = "macos")]
+fn set_macos_dock_icon(data: &[u8], fmt: &str) -> Result<(), String> {
+    use objc2::AnyThread;
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::{NSData, MainThreadMarker, NSSize, NSString as NSNSString};
+
+    let mtm = MainThreadMarker::new().ok_or("不在主线程")?;
+    let app = NSApplication::sharedApplication(mtm);
+
+    // Dock 图标的标准逻辑尺寸（points），512x512 像素对应 256x256 points (2x Retina)
+    let dock_points: f64 = 256.0;
+
+    if fmt == "svg" {
+        let tmp_path = std::env::temp_dir().join("qqr-dock-icon.svg");
+        std::fs::write(&tmp_path, data).map_err(|e| format!("写入临时文件失败: {}", e))?;
+        let ns_path = NSNSString::from_str(tmp_path.to_str().unwrap_or(""));
+        let ns_image = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path)
+            .ok_or("NSImage 无法加载 SVG 文件")?;
+        // 设置逻辑尺寸，确保 Retina 下不会渲染过大
+        ns_image.setSize(NSSize { width: dock_points, height: dock_points });
+        unsafe { app.setApplicationIconImage(Some(&ns_image)) };
+        return Ok(());
+    }
+
+    let resized = resize_for_dock(data)?;
+    let ns_data = NSData::with_bytes(&resized);
+    let ns_image = NSImage::initWithData(NSImage::alloc(), &ns_data)
+        .ok_or("NSImage 无法创建图片")?;
+    // initWithData 会将像素尺寸当作 point 尺寸（512px → 512pt），
+    // 在 Retina (2x) 下会导致图标渲染为 2 倍大小。
+    // 修正：设置为 256pt，告诉系统这是 2x 分辨率数据。
+    ns_image.setSize(NSSize { width: dock_points, height: dock_points });
+    unsafe { app.setApplicationIconImage(Some(&ns_image)) };
+    Ok(())
+}
+
+/// 将 favicon 处理为 Dock 图标（与默认图标相同的 512x512 尺寸）
+fn resize_for_dock(data: &[u8]) -> Result<Vec<u8>, String> {
+    let img = image::load_from_memory(data)
+        .map_err(|e| format!("解码图片失败: {}", e))?;
+
+    // 与默认 icon.png 相同尺寸 512x512，避免 setApplicationIconImage 渲染偏大
+    let size: u32 = 512;
+
+    // 缩放铺满画布（macOS 会自动加圆角遮罩）
+    let (w, h) = (img.width(), img.height());
+    let scale = size as f32 / w.max(h) as f32;
+    let new_w = (w as f32 * scale).round() as u32;
+    let new_h = (h as f32 * scale).round() as u32;
+    let resized = img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3);
+
+    let mut canvas = image::RgbaImage::new(size, size);
+    let x = ((size - new_w) / 2) as i64;
+    let y = ((size - new_h) / 2) as i64;
+    image::imageops::overlay(&mut canvas, &resized, x, y);
+
+    let mut buf = Vec::new();
+    canvas.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+        .map_err(|e| format!("编码 PNG 失败: {}", e))?;
+    Ok(buf)
 }
