@@ -123,6 +123,8 @@ async function handleLaunch() {
     invoke('set_dock_icon_from_url', { url: url.value }).catch((e) => {
       console.warn('Dock 图标设置失败:', e)
     })
+    // 尝试设置窗口标题为服务页面标题
+    invoke('set_window_title_from_url', { url: url.value }).catch(() => {})
   } catch (e: any) {
     showMessage(`启动失败: ${e}`, 'error')
     loading.value = false

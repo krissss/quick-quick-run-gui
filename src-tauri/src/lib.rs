@@ -36,6 +36,7 @@ pub fn run() {
             resize_window,
             set_dock_icon_from_url,
             reset_dock_icon,
+            set_window_title_from_url,
         ])
         .setup(|app| {
             // 应用退出时自动清理子进程
@@ -170,34 +171,34 @@ fn kill_process(
 ) -> Result<String, String> {
     #[cfg(not(target_os = "windows"))]
     {
-        // 1. 用进程组 kill（杀掉 sh 和它拉起的所有子进程）
-        let pgid = state.pgid.lock().unwrap();
-        if let Some(p) = *pgid {
-            unsafe {
-                // 先 SIGTERM 优雅退出
-                libc::killpg(p as i32, libc::SIGTERM);
-            }
-            drop(pgid); // 提前释放锁
-
-            std::thread::sleep(std::time::Duration::from_millis(300));
-
-            // 再 SIGKILL 强制清除残留
+        // 1. SIGTERM 进程组
+        {
             let pgid = state.pgid.lock().unwrap();
             if let Some(p) = *pgid {
-                unsafe {
-                    libc::killpg(p as i32, libc::SIGKILL);
-                }
+                unsafe { libc::killpg(p as i32, libc::SIGTERM); }
+            }
+        } // pgid 锁在这里释放
+
+        std::thread::sleep(std::time::Duration::from_millis(300));
+
+        // 2. SIGKILL 残留
+        {
+            let pgid = state.pgid.lock().unwrap();
+            if let Some(p) = *pgid {
+                unsafe { libc::killpg(p as i32, libc::SIGKILL); }
             }
         }
 
-        // 2. 用 Child 句柄也 kill 一下
-        let mut child_guard = state.child.lock().unwrap();
-        if let Some(ref mut c) = *child_guard {
-            let _ = c.kill();
-        }
-
-        let pid = child_guard.as_ref().map(|c| c.id()).unwrap_or(0);
-        *child_guard = None;
+        // 3. 用 Child 句柄也 kill 一下
+        let pid = {
+            let mut child_guard = state.child.lock().unwrap();
+            if let Some(ref mut c) = *child_guard {
+                let _ = c.kill();
+            }
+            let pid = child_guard.as_ref().map(|c| c.id()).unwrap_or(0);
+            *child_guard = None;
+            pid
+        }; // child 锁释放
 
         {
             let mut pgid = state.pgid.lock().unwrap();
@@ -237,6 +238,9 @@ fn navigate_to_url(window: tauri::WebviewWindow, url: String) -> Result<(), Stri
 /// 导航回设置页面（dev 模式用 Vite 地址，生产用 index.html）
 #[tauri::command]
 fn navigate_to_settings(window: tauri::WebviewWindow, dev_url: Option<String>) -> Result<(), String> {
+    // 恢复默认窗口标题
+    window.set_title("Quick Quick Run GUI").map_err(|e| format!("设置标题失败: {}", e))?;
+
     #[cfg(debug_assertions)]
     {
         let url_str = dev_url.unwrap_or_else(|| "http://localhost:5173".to_string());
@@ -248,6 +252,40 @@ fn navigate_to_settings(window: tauri::WebviewWindow, dev_url: Option<String>) -
         window.navigate(WebviewUrl::App("index.html".into())).map_err(|e| format!("导航失败: {}", e))?;
     }
     Ok(())
+}
+
+/// 从目标 URL 获取页面标题并设置为窗口标题
+#[tauri::command]
+async fn set_window_title_from_url(window: tauri::WebviewWindow, url: String) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    let resp = client.get(&url).send().await.map_err(|e| format!("请求失败: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+
+    let html = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+    let title = extract_html_title(&html);
+
+    if let Some(title) = title {
+        window.set_title(&title).map_err(|e| format!("设置标题失败: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// 从 HTML 中提取 <title> 内容
+fn extract_html_title(html: &str) -> Option<String> {
+    let lower = html.to_lowercase();
+    let start = lower.find("<title>")?;
+    let end = lower.find("</title>")?;
+    if end <= start + 7 { return None; }
+    let title = html[start + 7..end].trim().to_string();
+    if title.is_empty() { return None; }
+    Some(title)
 }
 
 /// 检测目标 URL 是否可达（用于等待服务就绪）
