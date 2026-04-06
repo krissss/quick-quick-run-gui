@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 // 视图状态: 'settings' | 'running'
 const view = ref<'settings' | 'running'>('settings')
@@ -24,7 +26,7 @@ const MAX_HISTORY = 20
 
 // 服务就绪检测
 const checkingReady = ref(false)
-const readyTimeout = ref(15) // 默认等待 15 秒
+const readyTimeout = ref(15)
 
 // localStorage keys
 const LS_KEY_CMD = 'qqr-command'
@@ -34,19 +36,16 @@ const LS_KEY_WIN_W = 'qqr-win-w'
 const LS_KEY_WIN_H = 'qqr-win-h'
 
 onMounted(() => {
-  // 恢复上次输入
   const savedCmd = localStorage.getItem(LS_KEY_CMD)
   const savedUrl = localStorage.getItem(LS_KEY_URL)
   if (savedCmd) command.value = savedCmd
   if (savedUrl) url.value = savedUrl
 
-  // 恢复窗口大小
   const savedW = localStorage.getItem(LS_KEY_WIN_W)
   const savedH = localStorage.getItem(LS_KEY_WIN_H)
   if (savedW) winWidth.value = Number(savedW)
   if (savedH) winHeight.value = Number(savedH)
 
-  // 恢复命令历史
   try {
     const raw = localStorage.getItem(LS_KEY_HISTORY)
     if (raw) history.value = JSON.parse(raw)
@@ -67,6 +66,10 @@ function selectFromHistory(item: string) {
   showHistory.value = false
 }
 
+function hideHistory() {
+  setTimeout(() => { showHistory.value = false }, 200)
+}
+
 function showMessage(msg: string, type: 'success' | 'error' | 'info' = 'info') {
   message.value = msg
   message_type.value = type
@@ -85,25 +88,18 @@ async function handleLaunch() {
 
   loading.value = true
   try {
-    // 保存到 localStorage
     localStorage.setItem(LS_KEY_CMD, command.value)
     localStorage.setItem(LS_KEY_URL, url.value)
     localStorage.setItem(LS_KEY_WIN_W, String(winWidth.value))
     localStorage.setItem(LS_KEY_WIN_H, String(winHeight.value))
 
-    // 启动命令
-    const result = await invoke<string>('launch_command', {
-      command: command.value,
-    })
+    const result = await invoke<string>('launch_command', { command: command.value })
     showMessage(result, 'success')
 
-    // 保存到历史
     saveToHistory(command.value)
 
-    // 调整窗口大小
     await invoke('resize_window', { width: winWidth.value, height: winHeight.value }).catch(() => {})
 
-    // 等待服务就绪
     checkingReady.value = true
     const reachable = await invoke<boolean>('check_url_reachable', {
       url: url.value,
@@ -112,18 +108,13 @@ async function handleLaunch() {
     checkingReady.value = false
 
     if (!reachable) {
-      showMessage(`⚠️ ${readyTimeout.value}秒内未检测到服务就绪，仍尝试加载...`, 'error')
+      showMessage(`${readyTimeout.value}秒内未检测到服务就绪，仍尝试加载...`, 'error')
     }
 
-    // 导航到目标 URL
     await invoke('navigate_to_url', { url: url.value })
     view.value = 'running'
 
-    // 尝试设置 Dock 图标为服务 favicon
-    invoke('set_dock_icon_from_url', { url: url.value }).catch((e) => {
-      console.warn('Dock 图标设置失败:', e)
-    })
-    // 尝试设置窗口标题为服务页面标题
+    invoke('set_dock_icon_from_url', { url: url.value }).catch(() => {})
     invoke('set_window_title_from_url', { url: url.value }).catch(() => {})
   } catch (e: any) {
     showMessage(`启动失败: ${e}`, 'error')
@@ -144,9 +135,7 @@ async function handleStop() {
 
 async function goBackToSettings() {
   await handleStop()
-  // 恢复默认 Dock 图标
   invoke('reset_dock_icon').catch(() => {})
-  // 使用 Rust 命令导航回设置页（自动区分 dev/prod）
   await invoke('navigate_to_settings', { devUrl: window.location.origin })
   view.value = 'settings'
   loading.value = false
@@ -154,425 +143,101 @@ async function goBackToSettings() {
 </script>
 
 <template>
-  <div class="app">
-    <!-- 设置页面 -->
-    <div v-if="view === 'settings'" class="settings-page">
-      <div class="container">
-        <h1 class="title">⚡ Quick Quick Run GUI</h1>
-        <p class="subtitle">通用 Web App 包装器 — 输入命令，加载 URL，即刻运行</p>
+  <!-- 设置页面 -->
+  <div v-if="view === 'settings'" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-4">
+    <div class="w-full max-w-xl rounded-2xl border border-border bg-card/60 backdrop-blur-md p-8 space-y-5">
+      <div class="text-center space-y-1">
+        <h1 class="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-violet-500 bg-clip-text text-transparent">
+          Quick Quick Run GUI
+        </h1>
+        <p class="text-xs text-muted-foreground">通用 Web App 包装器 — 输入命令，加载 URL，即刻运行</p>
+      </div>
 
-        <!-- 消息提示 -->
-        <div v-if="message" :class="['message', `message-${message_type}`]">
-          {{ message }}
-        </div>
+      <!-- 消息提示 -->
+      <div
+        v-if="message"
+        :class="[
+          'px-3 py-2 rounded-lg text-xs',
+          message_type === 'success' && 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
+          message_type === 'error' && 'bg-red-500/10 text-red-400 border border-red-500/20',
+          message_type === 'info' && 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
+        ]"
+      >
+        {{ message }}
+      </div>
 
-        <!-- 命令输入（带历史） -->
-        <div class="form-group">
-          <label for="command">🚀 启动命令</label>
-          <div class="input-with-history">
-            <input
-              id="command"
-              v-model="command"
-              type="text"
-              placeholder="例如: cd ~/Softs/my-app && ./my-server --port 8080"
-              class="input"
-              @focus="showHistory = history.length > 0"
-              @blur="setTimeout(() => showHistory = false, 200)"
-            />
-            <!-- 历史下拉 -->
-            <div v-if="showHistory && history.length > 0" class="history-dropdown">
-              <div
-                v-for="(item, idx) in history"
-                :key="idx"
-                class="history-item"
-                @mousedown.prevent="selectFromHistory(item)"
-              >
-                <span class="history-icon">📋</span>
-                <span class="history-text">{{ item }}</span>
-              </div>
-            </div>
-          </div>
-          <span class="hint">支持 cd、&&、管道等完整 shell 语法</span>
-        </div>
-
-        <!-- URL 输入 -->
-        <div class="form-group">
-          <label for="url">🌐 目标 URL</label>
-          <input
-            id="url"
-            v-model="url"
-            type="text"
-            placeholder="例如: http://localhost:3000"
-            class="input"
+      <!-- 命令输入 -->
+      <div class="space-y-1.5">
+        <label class="text-xs font-semibold text-muted-foreground">启动命令</label>
+        <div class="relative">
+          <Input
+            v-model="command"
+            placeholder="例如: cd ~/my-app && npm run dev"
+            @focus="showHistory = history.length > 0"
+            @blur="hideHistory"
           />
-          <span class="hint">启动命令后，WebView 将导航到此地址（会自动检测服务是否就绪）</span>
-        </div>
-
-        <!-- 窗口大小 -->
-        <div class="form-group">
-          <label>🖥 窗口尺寸</label>
-          <div class="row-inputs">
-            <div class="size-field">
-              <span>宽度</span>
-              <input v-model.number="winWidth" type="number" min="400" max="3840" class="input-sm" />
-            </div>
-            <div class="size-field">
-              <span>高度</span>
-              <input v-model.number="winHeight" type="number" min="300" max="2160" class="input-sm" />
+          <!-- 历史下拉 -->
+          <div
+            v-if="showHistory && history.length > 0"
+            class="absolute top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto rounded-lg border border-border bg-popover/95 backdrop-blur-sm z-50"
+          >
+            <div
+              v-for="(item, idx) in history"
+              :key="idx"
+              class="px-3 py-2 text-xs text-muted-foreground truncate cursor-pointer hover:bg-accent/50 transition-colors"
+              @mousedown.prevent="selectFromHistory(item)"
+            >
+              {{ item }}
             </div>
           </div>
-          <span class="hint">启动后自动调整窗口大小</span>
         </div>
+        <p class="text-[11px] text-muted-foreground/60">支持 cd、&&、管道等完整 shell 语法</p>
+      </div>
 
-        <!-- 操作按钮 -->
-        <button
-          class="btn btn-primary"
-          :disabled="loading || checkingReady"
-          @click="handleLaunch"
-        >
-          <span v-if="checkingReady" class="spinner"></span>
-          {{ checkingReady ? '等待服务就绪...' : loading ? '启动中...' : '▶ 启动' }}
-        </button>
+      <!-- URL 输入 -->
+      <div class="space-y-1.5">
+        <label class="text-xs font-semibold text-muted-foreground">目标 URL</label>
+        <Input v-model="url" placeholder="例如: http://localhost:3000" />
+        <p class="text-[11px] text-muted-foreground/60">启动命令后，WebView 将导航到此地址</p>
+      </div>
 
-        <div class="footer">
-          <p>进程 PID: <code>{{ pid ?? '-' }}</code></p>
-          <p v-if="history.length > 0" class="history-count">已保存 {{ history.length }} 条命令历史</p>
+      <!-- 窗口大小 -->
+      <div class="space-y-1.5">
+        <label class="text-xs font-semibold text-muted-foreground">窗口尺寸</label>
+        <div class="flex gap-3">
+          <div class="flex items-center gap-2 flex-1 text-xs text-muted-foreground">
+            <span>宽度</span>
+            <Input v-model="winWidth" type="number" class="w-20 text-center" />
+          </div>
+          <div class="flex items-center gap-2 flex-1 text-xs text-muted-foreground">
+            <span>高度</span>
+            <Input v-model="winHeight" type="number" class="w-20 text-center" />
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- 运行中页面（顶部工具栏） -->
-    <div v-if="view === 'running'" class="toolbar">
-      <button class="btn btn-sm btn-secondary" @click="goBackToSettings">
-        ← 返回设置
-      </button>
-      <span class="toolbar-info">{{ url }}</span>
-      <button class="btn btn-sm btn-danger" @click="handleStop">
-        ⏹ 停止进程
-      </button>
+      <!-- 启动按钮 -->
+      <Button
+        class="w-full h-11 text-sm font-semibold"
+        :disabled="loading || checkingReady"
+        @click="handleLaunch"
+      >
+        <span v-if="checkingReady" class="inline-block w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+        {{ checkingReady ? '等待服务就绪...' : loading ? '启动中...' : '启动' }}
+      </Button>
+
+      <!-- 底部信息 -->
+      <div class="text-center text-[11px] text-muted-foreground/50 space-y-0.5">
+        <p>PID: <code class="bg-secondary/50 px-1.5 py-0.5 rounded text-muted-foreground">{{ pid ?? '-' }}</code></p>
+        <p v-if="history.length > 0">已保存 {{ history.length }} 条命令历史</p>
+      </div>
     </div>
   </div>
+
+  <!-- 运行中工具栏 -->
+  <div v-if="view === 'running'" class="fixed top-0 inset-x-0 h-10 flex items-center gap-2.5 px-3 bg-background/95 backdrop-blur-sm border-b border-border z-[9999]">
+    <Button variant="secondary" size="sm" @click="goBackToSettings">返回设置</Button>
+    <span class="flex-1 text-[11px] text-muted-foreground truncate">{{ url }}</span>
+    <Button variant="destructive" size="sm" @click="handleStop">停止进程</Button>
+  </div>
 </template>
-
-<style scoped>
-.app {
-  width: 100%;
-  min-height: 100vh;
-}
-
-.settings-page {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-  color: #e0e0e0;
-}
-
-.container {
-  width: 90%;
-  max-width: 600px;
-  padding: 36px 32px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 16px;
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.title {
-  font-size: 26px;
-  font-weight: 700;
-  text-align: center;
-  margin: 0 0 6px;
-  background: linear-gradient(90deg, #00d4ff, #7b2ff7);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.subtitle {
-  text-align: center;
-  font-size: 13px;
-  color: #888;
-  margin: 0 0 28px;
-}
-
-.form-group {
-  margin-bottom: 18px;
-}
-
-.form-group label {
-  display: block;
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 5px;
-  color: #ccc;
-}
-
-.input-with-history {
-  position: relative;
-}
-
-.input {
-  width: 100%;
-  padding: 11px 14px;
-  font-size: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.3);
-  color: #fff;
-  outline: none;
-  transition: border-color 0.2s;
-  box-sizing: border-box;
-  font-family: inherit;
-}
-
-.input:focus {
-  border-color: #00d4ff;
-  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
-}
-
-.input::placeholder {
-  color: #555;
-}
-
-.hint {
-  display: block;
-  font-size: 11px;
-  color: #666;
-  margin-top: 4px;
-}
-
-/* 历史下拉 */
-.history-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  max-height: 200px;
-  overflow-y: auto;
-  margin-top: 4px;
-  background: rgba(20, 20, 35, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  z-index: 100;
-  backdrop-filter: blur(10px);
-}
-
-.history-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
-  cursor: pointer;
-  transition: background 0.15s;
-  font-size: 13px;
-}
-
-.history-item:hover {
-  background: rgba(0, 212, 255, 0.08);
-}
-
-.history-icon {
-  flex-shrink: 0;
-  font-size: 12px;
-}
-
-.history-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #bbb;
-}
-
-/* 窗口尺寸 */
-.row-inputs {
-  display: flex;
-  gap: 12px;
-}
-
-.size-field {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #aaa;
-}
-
-.input-sm {
-  width: 80px;
-  padding: 7px 10px;
-  font-size: 13px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.3);
-  color: #fff;
-  outline: none;
-  text-align: center;
-}
-
-.input-sm:focus {
-  border-color: #00d4ff;
-}
-
-/* 按钮 */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  padding: 13px 24px;
-  font-size: 15px;
-  font-weight: 600;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-primary {
-  background: linear-gradient(90deg, #00d4ff, #7b2ff7);
-  color: #fff;
-}
-
-.btn-primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 20px rgba(0, 212, 255, 0.35);
-}
-
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-sm {
-  width: auto;
-  padding: 5px 12px;
-  font-size: 12px;
-}
-
-.btn-secondary {
-  background: rgba(255, 255, 255, 0.08);
-  color: #ccc;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-}
-
-.btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.btn-danger {
-  background: rgba(255, 70, 70, 0.12);
-  color: #ff6b6b;
-  border: 1px solid rgba(255, 70, 70, 0.22);
-}
-
-.btn-danger:hover {
-  background: rgba(255, 70, 70, 0.22);
-}
-
-.spinner {
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* 消息提示 */
-.message {
-  padding: 9px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  margin-bottom: 16px;
-}
-
-.message-success {
-  background: rgba(0, 200, 100, 0.1);
-  color: #4ade80;
-  border: 1px solid rgba(0, 200, 100, 0.18);
-}
-
-.message-error {
-  background: rgba(255, 70, 70, 0.1);
-  color: #ff6b6b;
-  border: 1px solid rgba(255, 70, 70, 0.18);
-}
-
-.message-info {
-  background: rgba(0, 150, 255, 0.1);
-  color: #60a5fa;
-  border: 1px solid rgba(0, 150, 255, 0.18);
-}
-
-.footer {
-  margin-top: 20px;
-  text-align: center;
-  font-size: 12px;
-  color: #555;
-}
-
-.footer code {
-  background: rgba(255, 255, 255, 0.06);
-  padding: 2px 7px;
-  border-radius: 4px;
-  font-size: 11px;
-  color: #aaa;
-}
-
-.history-count {
-  margin-top: 4px;
-  color: #666;
-}
-
-/* 工具栏 */
-.toolbar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  background: rgba(18, 18, 28, 0.94);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  z-index: 9999;
-}
-
-.toolbar-info {
-  flex: 1;
-  font-size: 11px;
-  color: #777;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 滚动条 */
-::-webkit-scrollbar {
-  width: 5px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-</style>
