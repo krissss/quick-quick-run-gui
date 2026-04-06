@@ -14,6 +14,12 @@
     "core:event:default",
     "core:event:allow-emit",
     "core:event:allow-listen",
-    "store:default"
+    "store:default",
+    "dialog:default",
+    "dialog:allow-save",
+    "dialog:allow-open",
+    "fs:default",
+    "fs:allow-write-file",
+    "fs:allow-read-text-file"
   ]
 }

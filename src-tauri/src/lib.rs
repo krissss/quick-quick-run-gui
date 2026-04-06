@@ -28,6 +28,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(AppState {
             processes: Mutex::new(HashMap::new()),
         })
@@ -153,6 +155,9 @@ async fn launch_app_window(
     width: f64,
     height: f64,
     app_name: String,
+    bg_r: u8,
+    bg_g: u8,
+    bg_b: u8,
 ) -> Result<String, String> {
     let window_label = window_label_for(&app_id);
 
@@ -185,6 +190,7 @@ async fn launch_app_window(
     )
     .title(&app_name)
     .inner_size(width, height)
+    .background_color(tauri::utils::config::Color(bg_r, bg_g, bg_b, 255))
     .center()
     .build()
     .map_err(|e| format!("创建窗口失败: {}", e))?;
@@ -311,22 +317,20 @@ async fn check_url_inner(url: &str, timeout_secs: u64) -> bool {
 }
 
 /// 构建独立窗口加载的 URL
-fn build_app_window_url(target_url: &str, app_id: &str) -> tauri::WebviewUrl {
+fn build_app_window_url(target_url: &str, _app_id: &str) -> tauri::WebviewUrl {
     #[cfg(debug_assertions)]
     {
         let url = format!(
-            "http://localhost:5173/app-window.html?url={}&appId={}",
+            "http://localhost:5173/app-window.html?url={}",
             urlencoding::encode(target_url),
-            urlencoding::encode(app_id),
         );
         tauri::WebviewUrl::External(url.parse().unwrap())
     }
     #[cfg(not(debug_assertions))]
     {
         let path = format!(
-            "app-window.html?url={}&appId={}",
+            "app-window.html?url={}",
             urlencoding::encode(target_url),
-            urlencoding::encode(app_id),
         );
         tauri::WebviewUrl::App(path.into())
     }

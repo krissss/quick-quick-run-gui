@@ -5,6 +5,9 @@ import { listen } from '@tauri-apps/api/event'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { loadApps, saveApps, exportData, importData, type AppItem } from '@/lib/store'
+import { save } from '@tauri-apps/plugin-dialog'
+import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
+import { writeFile, readTextFile } from '@tauri-apps/plugin-fs'
 
 // ── 状态 ──
 const loading = ref(false)
@@ -106,9 +109,17 @@ function iconGradient(name: string) {
 }
 
 // ── 启动 ──
+function getBackgroundRGB(): [number, number, number] {
+  const rgb = getComputedStyle(document.body).backgroundColor
+  const m = rgb.match(/\d+/g)
+  if (m && m.length >= 3) return [+m[0], +m[1], +m[2]]
+  return [255, 255, 255]
+}
+
 async function launchApp(app: AppItem) {
   loading.value = true
   try {
+    const [bgR, bgG, bgB] = getBackgroundRGB()
     const result = await invoke<string>('launch_app_window', {
       appId: app.id,
       command: app.command,
@@ -116,6 +127,9 @@ async function launchApp(app: AppItem) {
       width: app.width,
       height: app.height,
       appName: app.name,
+      bgR,
+      bgG,
+      bgB,
     })
     showMessage(result, 'success')
     if (!app.iconUrl) {
@@ -145,36 +159,32 @@ async function fetchAndSaveIcon(app: AppItem) {
 async function handleExport() {
   try {
     const json = await exportData()
-    const blob = new Blob([json], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'qqr-apps-export.json'
-    a.click()
-    URL.revokeObjectURL(url)
-    showMessage('已导出', 'success')
+    const filePath = await save({
+      defaultPath: 'qqr-apps-export.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    })
+    if (!filePath) return // 用户取消
+    await writeFile(filePath, new TextEncoder().encode(json))
+    showMessage(`已导出到 ${filePath}`, 'success')
   } catch (e: any) {
     showMessage(`导出失败: ${e}`, 'error')
   }
 }
 
 async function handleImport() {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = '.json'
-  input.onchange = async () => {
-    const file = input.files?.[0]
-    if (!file) return
-    try {
-      const json = await file.text()
-      const imported = await importData(json)
-      apps.value = imported
-      showMessage(`已导入 ${imported.length} 个应用`, 'success')
-    } catch (e: any) {
-      showMessage(`导入失败: ${e}`, 'error')
-    }
+  try {
+    const filePath = await dialogOpen({
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      multiple: false,
+    })
+    if (!filePath) return // 用户取消
+    const json = await readTextFile(filePath)
+    const imported = await importData(json)
+    apps.value = imported
+    showMessage(`已导入 ${imported.length} 个应用`, 'success')
+  } catch (e: any) {
+    showMessage(`导入失败: ${e}`, 'error')
   }
-  input.click()
 }
 
 // ── 消息 ──
@@ -186,19 +196,19 @@ function showMessage(msg: string, type: 'success' | 'error' | 'info' = 'info') {
 
 const messageClass = computed(() => {
   const m = message_type.value
-  if (m === 'success') return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-  if (m === 'error') return 'bg-red-500/10 text-red-400 border-red-500/20'
-  return 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+  if (m === 'success') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+  if (m === 'error') return 'bg-red-50 text-red-700 border-red-200'
+  return 'bg-blue-50 text-blue-700 border-blue-200'
 })
 </script>
 
 <template>
-  <div class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-foreground">
+  <div class="min-h-screen bg-background text-foreground">
     <div class="p-6 max-w-4xl mx-auto">
       <!-- 标题 -->
       <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-xl font-bold bg-gradient-to-r from-cyan-400 to-violet-500 bg-clip-text text-transparent">
+          <h1 class="text-xl font-bold bg-gradient-to-r from-cyan-600 to-violet-600 bg-clip-text text-transparent">
             Quick Quick Run GUI
           </h1>
           <p class="text-xs text-muted-foreground mt-0.5">点击启动应用，或添加新配置</p>
