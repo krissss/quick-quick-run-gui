@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::io::BufRead;
 use std::process::{Child, Command, Stdio};
 #[cfg(not(target_os = "windows"))]
 use std::os::unix::process::CommandExt;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 #[cfg(not(debug_assertions))]
 use tauri::WebviewUrl;
@@ -13,9 +14,10 @@ static DEFAULT_ICON_BYTES: &[u8] = include_bytes!("../icons/icon.png");
 
 /// 每个正在运行的应用进程信息
 pub struct ProcessInfo {
-    pub child: Child,
+    pub child: Option<Child>,
     #[cfg(not(target_os = "windows"))]
-    pub pgid: u32,
+    pub pgid: Option<u32>,
+    pub logs: Arc<Mutex<Vec<String>>>,
 }
 
 /// 全局进程状态，支持多个应用同时运行
@@ -37,6 +39,7 @@ pub fn run() {
             launch_app_window,
             stop_app_window,
             get_running_apps,
+            get_app_logs,
             check_url_reachable,
             set_dock_icon_from_url,
             reset_dock_icon,
@@ -71,12 +74,14 @@ fn kill_app_process(handle: &tauri::AppHandle, app_id: &str) {
         };
         if let Some(mut info) = info {
             #[cfg(not(target_os = "windows"))]
-            {
-                unsafe { libc::killpg(info.pgid as i32, libc::SIGTERM); }
+            if let Some(pgid) = info.pgid {
+                unsafe { libc::killpg(pgid as i32, libc::SIGTERM); }
                 std::thread::sleep(std::time::Duration::from_millis(200));
-                unsafe { libc::killpg(info.pgid as i32, libc::SIGKILL); }
+                unsafe { libc::killpg(pgid as i32, libc::SIGKILL); }
             }
-            let _ = info.child.kill();
+            if let Some(mut child) = info.child {
+                let _ = child.kill();
+            }
         }
     }
     let _ = handle.emit("app-stopped", app_id.to_string());
@@ -94,10 +99,12 @@ fn force_kill_all(handle: &tauri::AppHandle) {
     };
     for mut info in infos {
         #[cfg(not(target_os = "windows"))]
-        {
-            unsafe { libc::killpg(info.pgid as i32, libc::SIGTERM); }
+        if let Some(pgid) = info.pgid {
+            unsafe { libc::killpg(pgid as i32, libc::SIGTERM); }
         }
-        let _ = info.child.kill();
+        if let Some(mut child) = info.child {
+            let _ = child.kill();
+        }
     }
     std::thread::sleep(std::time::Duration::from_millis(200));
 }
@@ -142,6 +149,34 @@ fn window_label_for(app_id: &str) -> String {
     format!("app-{}", short)
 }
 
+// ── 日志读取 ──
+
+/// 启动后台线程读取进程 stdout/stderr 并转发事件
+fn spawn_log_reader(
+    app: &tauri::AppHandle,
+    app_id: &str,
+    output: impl std::io::Read + Send + 'static,
+    logs: Arc<Mutex<Vec<String>>>,
+) {
+    let app_handle = app.clone();
+    let app_id = app_id.to_string();
+    std::thread::spawn(move || {
+        let reader = std::io::BufReader::new(output);
+        for line in reader.lines().flatten() {
+            let _ = app_handle.emit("app-log", serde_json::json!({
+                "app_id": app_id,
+                "line": line,
+            }));
+            let mut buf = logs.lock().unwrap();
+            buf.push(line);
+            if buf.len() > 2000 {
+                let remove_count = buf.len() - 2000;
+                buf.drain(0..remove_count);
+            }
+        }
+    });
+}
+
 // ── IPC 命令 ──
 
 /// 启动应用并在新窗口中运行
@@ -170,14 +205,41 @@ async fn launch_app_window(
     // 先杀掉同 app_id 的旧进程
     kill_app_process(&app, &app_id);
 
-    // 启动 shell 进程
-    let (child, pid) = spawn_shell_command(&command)?;
+    let has_command = !command.trim().is_empty();
 
+    // 日志缓冲
+    let logs = Arc::new(Mutex::new(Vec::new()));
+
+    // 启动进程（如果有命令）
+    let mut child_opt: Option<Child> = None;
     #[cfg(not(target_os = "windows"))]
-    let pgid = pid;
+    let mut pgid_opt: Option<u32> = None;
+    let mut result_pid: Option<u32> = None;
 
-    // 等待 URL 可达
-    let _reachable = check_url_inner(&url, 15).await;
+    if has_command {
+        let (mut child, pid) = spawn_shell_command(&command)?;
+        result_pid = Some(pid);
+
+        // 取出 stdout/stderr 用于日志读取
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        if let Some(out) = stdout {
+            spawn_log_reader(&app, &app_id, out, logs.clone());
+        }
+        if let Some(err) = stderr {
+            spawn_log_reader(&app, &app_id, err, logs.clone());
+        }
+
+        child_opt = Some(child);
+        #[cfg(not(target_os = "windows"))]
+        {
+            pgid_opt = Some(pid);
+        }
+
+        // 等待 URL 可达
+        let _reachable = check_url_inner(&url, 15).await;
+    }
 
     // 构建独立窗口的 URL
     let window_url = build_app_window_url(&url, &app_id);
@@ -210,30 +272,31 @@ async fn launch_app_window(
     state.processes.lock().unwrap().insert(
         app_id.clone(),
         ProcessInfo {
-            child,
+            child: child_opt,
             #[cfg(not(target_os = "windows"))]
-            pgid,
+            pgid: pgid_opt,
+            logs,
         },
     );
 
     let _ = app.emit("app-launched", app_id.clone());
 
     // 异步设置 dock 图标和窗口标题（不阻塞返回）
-    let app_for_icon = app.clone();
-    let url_for_icon = url.clone();
-    let app_id_for_title = app_id.clone();
-    tokio::spawn(async move {
-        // 设置 dock 图标
-        let _ = set_dock_icon_from_url_inner(&app_for_icon, &url_for_icon).await;
-
-        // 设置窗口标题（从页面 <title> 获取）
-        let label = window_label_for(&app_id_for_title);
-        if let Some(win) = app_for_icon.get_webview_window(&label) {
-            let _ = set_window_title_inner(&win, &url_for_icon).await;
-        }
-    });
-
-    Ok(format!("进程已启动, PID: {}", pid))
+    if has_command {
+        let app_for_icon = app.clone();
+        let url_for_icon = url.clone();
+        let app_id_for_title = app_id.clone();
+        tokio::spawn(async move {
+            let _ = set_dock_icon_from_url_inner(&app_for_icon, &url_for_icon).await;
+            let label = window_label_for(&app_id_for_title);
+            if let Some(win) = app_for_icon.get_webview_window(&label) {
+                let _ = set_window_title_inner(&win, &url_for_icon).await;
+            }
+        });
+        Ok(format!("进程已启动, PID: {}", result_pid.unwrap()))
+    } else {
+        Ok("窗口已打开".to_string())
+    }
 }
 
 /// 停止应用并关闭窗口
@@ -266,6 +329,17 @@ fn stop_app_window(
 #[tauri::command]
 fn get_running_apps(state: tauri::State<'_, AppState>) -> Vec<String> {
     state.processes.lock().unwrap().keys().cloned().collect()
+}
+
+/// 获取指定应用的日志缓冲
+#[tauri::command]
+fn get_app_logs(state: tauri::State<'_, AppState>, app_id: String) -> Vec<String> {
+    let processes = state.processes.lock().unwrap();
+    if let Some(info) = processes.get(&app_id) {
+        info.logs.lock().unwrap().clone()
+    } else {
+        vec![]
+    }
 }
 
 /// 检测目标 URL 是否可达
@@ -373,7 +447,7 @@ async fn set_dock_icon_from_url_inner(app: &tauri::AppHandle, url: &str) -> Resu
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     let app = app.clone();
     app.run_on_main_thread(move || {
-        let result = set_macos_dock_icon(&icon_bytes, &fmt);
+        let result = set_macos_dock_icon(&icon_bytes, &fmt, true);
         let _ = tx.send(result);
     }).map_err(|e| format!("调度到主线程失败: {}", e))?;
 
@@ -391,7 +465,7 @@ fn reset_dock_icon_inner(app: &tauri::AppHandle) -> Result<(), String> {
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     let app = app.clone();
     app.run_on_main_thread(move || {
-        let result = set_macos_dock_icon(&icon_bytes, "png");
+        let result = set_macos_dock_icon(&icon_bytes, "png", false);
         let _ = tx.send(result);
     }).map_err(|e| format!("调度到主线程失败: {}", e))?;
 
@@ -555,29 +629,30 @@ fn extract_html_title(html: &str) -> Option<String> {
 // ── macOS Dock 图标 ──
 
 #[cfg(target_os = "macos")]
-fn set_macos_dock_icon(data: &[u8], fmt: &str) -> Result<(), String> {
+fn set_macos_dock_icon(data: &[u8], fmt: &str, add_padding: bool) -> Result<(), String> {
     use objc2::AnyThread;
     use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::{NSData, MainThreadMarker, NSSize, NSString as NSNSString};
 
     let mtm = MainThreadMarker::new().ok_or("不在主线程")?;
     let app = NSApplication::sharedApplication(mtm);
-
     let dock_points: f64 = 256.0;
 
-    if fmt == "svg" {
+    // SVG: 先通过 NSImage 光栅化为 TIFF，再统一加 padding
+    let png_data = if fmt == "svg" {
         let tmp_path = std::env::temp_dir().join("qqr-dock-icon.svg");
         std::fs::write(&tmp_path, data).map_err(|e| format!("写入临时文件失败: {}", e))?;
         let ns_path = NSNSString::from_str(tmp_path.to_str().unwrap_or(""));
         let ns_image = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path)
             .ok_or("NSImage 无法加载 SVG 文件")?;
-        ns_image.setSize(NSSize { width: dock_points, height: dock_points });
-        unsafe { app.setApplicationIconImage(Some(&ns_image)) };
-        return Ok(());
-    }
+        let tiff = ns_image.TIFFRepresentation()
+            .ok_or("无法获取 TIFF 数据")?;
+        resize_for_dock(&tiff.to_vec(), true)?
+    } else {
+        resize_for_dock(data, add_padding)?
+    };
 
-    let resized = resize_for_dock(data)?;
-    let ns_data = NSData::with_bytes(&resized);
+    let ns_data = NSData::with_bytes(&png_data);
     let ns_image = NSImage::initWithData(NSImage::alloc(), &ns_data)
         .ok_or("NSImage 无法创建图片")?;
     ns_image.setSize(NSSize { width: dock_points, height: dock_points });
@@ -585,20 +660,28 @@ fn set_macos_dock_icon(data: &[u8], fmt: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn resize_for_dock(data: &[u8]) -> Result<Vec<u8>, String> {
+/// 将图片缩放并居中到 512x512 画布。add_padding=true 时图标只占 80%。
+fn resize_for_dock(data: &[u8], add_padding: bool) -> Result<Vec<u8>, String> {
     let img = image::load_from_memory(data)
         .map_err(|e| format!("解码图片失败: {}", e))?;
 
-    let size: u32 = 512;
+    let canvas_size: u32 = 512;
+    let icon_max = if add_padding {
+        (canvas_size as f64 * 0.8).round() as u32 // 410px, ~51px padding each side
+    } else {
+        canvas_size
+    };
+    let padding = (canvas_size - icon_max) / 2;
+
     let (w, h) = (img.width(), img.height());
-    let scale = size as f32 / w.max(h) as f32;
+    let scale = icon_max as f32 / w.max(h) as f32;
     let new_w = (w as f32 * scale).round() as u32;
     let new_h = (h as f32 * scale).round() as u32;
     let resized = img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3);
 
-    let mut canvas = image::RgbaImage::new(size, size);
-    let x = ((size - new_w) / 2) as i64;
-    let y = ((size - new_h) / 2) as i64;
+    let mut canvas = image::RgbaImage::new(canvas_size, canvas_size);
+    let x = (padding + (icon_max - new_w) / 2) as i64;
+    let y = (padding + (icon_max - new_h) / 2) as i64;
     image::imageops::overlay(&mut canvas, &resized, x, y);
 
     let mut buf = Vec::new();

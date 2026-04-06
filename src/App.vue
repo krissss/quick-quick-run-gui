@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { Button } from '@/components/ui/button'
@@ -71,8 +71,8 @@ function closeDialog() {
 }
 
 async function saveApp() {
-  if (!editForm.value.name.trim() || !editForm.value.command.trim() || !editForm.value.url.trim()) {
-    showMessage('请填写应用名称、启动命令和目标 URL', 'error')
+  if (!editForm.value.name.trim() || !editForm.value.url.trim()) {
+    showMessage('请填写应用名称和目标 URL', 'error')
     return
   }
   if (isEditing.value) {
@@ -200,6 +200,41 @@ const messageClass = computed(() => {
   if (m === 'error') return 'bg-red-50 text-red-700 border-red-200'
   return 'bg-blue-50 text-blue-700 border-blue-200'
 })
+
+// ── 日志查看器 ──
+const showLogDialog = ref(false)
+const logAppId = ref('')
+const logAppName = ref('')
+const logLines = ref<string[]>([])
+const logContainer = ref<HTMLElement | null>(null)
+let logUnlisten: (() => void) | null = null
+
+async function openLogDialog(app: AppItem) {
+  logAppId.value = app.id
+  logAppName.value = app.name
+  logLines.value = await invoke<string[]>('get_app_logs', { appId: app.id })
+  showLogDialog.value = true
+
+  // 实时监听新日志
+  logUnlisten = await listen<{ app_id: string; line: string }>('app-log', (e) => {
+    if (e.payload.app_id === logAppId.value) {
+      logLines.value.push(e.payload.line)
+      nextTick(() => {
+        if (logContainer.value) {
+          logContainer.value.scrollTop = logContainer.value.scrollHeight
+        }
+      })
+    }
+  })
+}
+
+function closeLogDialog() {
+  showLogDialog.value = false
+  if (logUnlisten) {
+    logUnlisten()
+    logUnlisten = null
+  }
+}
 </script>
 
 <template>
@@ -251,6 +286,14 @@ const messageClass = computed(() => {
           <!-- 悬浮操作 -->
           <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
             <button
+              v-if="runningAppIds.has(app.id) && app.command"
+              class="w-6 h-6 rounded-md bg-secondary/80 text-muted-foreground hover:text-foreground flex items-center justify-center text-xs"
+              title="查看日志"
+              @click.stop="openLogDialog(app)"
+            >
+              ☰
+            </button>
+            <button
               class="w-6 h-6 rounded-md bg-secondary/80 text-muted-foreground hover:text-foreground flex items-center justify-center text-xs"
               @click.stop="openEditDialog(app)"
             >
@@ -300,7 +343,7 @@ const messageClass = computed(() => {
               <Input v-model="editForm.name" placeholder="例如：我的博客" />
             </div>
             <div class="space-y-1">
-              <label class="text-xs font-medium text-muted-foreground">启动命令</label>
+              <label class="text-xs font-medium text-muted-foreground">启动命令 <span class="text-muted-foreground/40 font-normal">(可选)</span></label>
               <Input v-model="editForm.command" placeholder="cd ~/my-app && npm run dev" />
               <p class="text-[11px] text-muted-foreground/60">支持 cd、&&、管道等完整 shell 语法</p>
             </div>
@@ -325,6 +368,29 @@ const messageClass = computed(() => {
             <div class="flex-1" />
             <Button variant="secondary" size="sm" @click="closeDialog">取消</Button>
             <Button size="sm" @click="saveApp">{{ isEditing ? '保存' : '添加' }}</Button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- ═══ 日志查看器 ═══ -->
+    <Teleport to="body">
+      <div
+        v-if="showLogDialog"
+        class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+        @click.self="closeLogDialog"
+      >
+        <div class="bg-card rounded-xl border border-border p-6 w-full max-w-2xl max-h-[80vh] flex flex-col">
+          <h2 class="text-base font-semibold mb-3">{{ logAppName }} — 日志</h2>
+          <div
+            ref="logContainer"
+            class="flex-1 overflow-y-auto bg-background rounded-lg border border-border p-3 font-mono text-xs min-h-0"
+          >
+            <div v-for="(line, i) in logLines" :key="i" class="whitespace-pre-wrap break-all text-foreground/80 hover:text-foreground">{{ line }}</div>
+            <div v-if="logLines.length === 0" class="text-muted-foreground text-center py-8">暂无日志</div>
+          </div>
+          <div class="flex justify-end mt-3">
+            <Button variant="secondary" size="sm" @click="closeLogDialog">关闭</Button>
           </div>
         </div>
       </div>
