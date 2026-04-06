@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
@@ -13,6 +14,7 @@ interface AppItem {
   width: number
   height: number
   iconUrl?: string // base64 data URL
+  standaloneWindow?: boolean // 独立窗口模式
 }
 
 // ── 视图状态 ──
@@ -22,6 +24,9 @@ const checkingReady = ref(false)
 const message = ref('')
 const message_type = ref<'success' | 'error' | 'info'>('info')
 const currentApp = ref<AppItem | null>(null)
+
+// ── 运行中的应用（独立窗口模式）──
+const runningAppIds = ref<Set<string>>(new Set())
 
 // ── 应用列表 ──
 const apps = ref<AppItem[]>([])
@@ -33,7 +38,7 @@ const isEditing = ref(false)
 const editForm = ref<AppItem>(emptyApp())
 
 function emptyApp(): AppItem {
-  return { id: '', name: '', command: '', url: '', width: 1200, height: 800 }
+  return { id: '', name: '', command: '', url: '', width: 1200, height: 800, standaloneWindow: false }
 }
 
 // ── localStorage ──
@@ -45,7 +50,6 @@ function loadApps() {
       return
     }
   } catch { /* ignore */ }
-  // 首次使用：迁移旧数据
   migrateOldFormat()
 }
 
@@ -71,7 +75,24 @@ function migrateOldFormat() {
   }
 }
 
-onMounted(loadApps)
+// ── 初始化 ──
+onMounted(async () => {
+  loadApps()
+  refreshRunningApps()
+  await listen<string>('app-launched', (e) => {
+    runningAppIds.value.add(e.payload)
+  })
+  await listen<string>('app-stopped', (e) => {
+    runningAppIds.value.delete(e.payload)
+  })
+})
+
+async function refreshRunningApps() {
+  try {
+    const ids = await invoke<string[]>('get_running_apps')
+    runningAppIds.value = new Set(ids)
+  } catch { /* ignore */ }
+}
 
 // ── 弹窗操作 ──
 function openAddDialog() {
@@ -130,13 +151,37 @@ function iconGradient(name: string) {
 
 // ── 启动 ──
 async function launchApp(app: AppItem) {
+  // 独立窗口模式
+  if (app.standaloneWindow) {
+    loading.value = true
+    currentApp.value = app
+    try {
+      const result = await invoke<string>('launch_app_window', {
+        appId: app.id,
+        command: app.command,
+        url: app.url,
+        width: app.width,
+        height: app.height,
+        appName: app.name,
+      })
+      showMessage(result, 'success')
+      // 自动获取 favicon
+      if (!app.iconUrl) {
+        fetchAndSaveIcon(app)
+      }
+    } catch (e: any) {
+      showMessage(`启动失败: ${e}`, 'error')
+    }
+    loading.value = false
+    return
+  }
+
+  // 主窗口模式（原有逻辑）
   loading.value = true
   currentApp.value = app
   try {
     const result = await invoke<string>('launch_command', { command: app.command })
     showMessage(result, 'success')
-
-    await invoke('resize_window', { width: app.width, height: app.height }).catch(() => {})
 
     checkingReady.value = true
     const reachable = await invoke<boolean>('check_url_reachable', {
@@ -149,11 +194,11 @@ async function launchApp(app: AppItem) {
       showMessage('15秒内未检测到服务就绪，仍尝试加载...', 'error')
     }
 
-    // 导航前尝试获取 favicon
     if (!app.iconUrl) {
       fetchAndSaveIcon(app)
     }
 
+    await invoke('resize_window', { width: app.width, height: app.height }).catch(() => {})
     await invoke('navigate_to_url', { url: app.url })
     view.value = 'running'
 
@@ -169,42 +214,15 @@ async function launchApp(app: AppItem) {
 // ── Favicon 自动提取 ──
 async function fetchAndSaveIcon(app: AppItem) {
   try {
-    const origin = new URL(app.url).origin
-    const candidates = ['/apple-touch-icon.png', '/favicon.ico', '/favicon-32x32.png']
-    for (const path of candidates) {
-      try {
-        const resp = await fetch(origin + path, { mode: 'no-cors' })
-        if (!resp.ok && resp.type !== 'opaque') continue
-        const blob = await resp.blob()
-        if (blob.size < 100) continue
-        const dataUrl = await resizeBlob(blob, 64)
-        if (dataUrl) {
-          const idx = apps.value.findIndex(a => a.id === app.id)
-          if (idx !== -1) {
-            apps.value[idx].iconUrl = dataUrl
-            saveApps()
-          }
-          return
-        }
-      } catch { /* next */ }
+    const dataUrl = await invoke<string>('fetch_favicon_data_url', { url: app.url })
+    if (dataUrl) {
+      const idx = apps.value.findIndex(a => a.id === app.id)
+      if (idx !== -1) {
+        apps.value[idx].iconUrl = dataUrl
+        saveApps()
+      }
     }
   } catch { /* ignore */ }
-}
-
-function resizeBlob(blob: Blob, size: number): Promise<string | null> {
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = size
-      canvas.height = size
-      const ctx = canvas.getContext('2d')!
-      ctx.drawImage(img, 0, 0, size, size)
-      resolve(canvas.toDataURL('image/png'))
-    }
-    img.onerror = () => resolve(null)
-    img.src = URL.createObjectURL(blob)
-  })
 }
 
 // ── 停止 / 返回 ──
@@ -268,6 +286,13 @@ const messageClass = computed(() => {
           class="group relative rounded-xl border border-border bg-card/60 p-4 cursor-pointer hover:bg-accent/30 hover:border-accent/50 transition-all"
           @click="launchApp(app)"
         >
+          <!-- 运行指示器 -->
+          <div
+            v-if="runningAppIds.has(app.id)"
+            class="absolute top-2 left-2 w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]"
+            title="运行中"
+          />
+
           <!-- 图标 -->
           <div class="w-12 h-12 rounded-xl mb-3 flex items-center justify-center overflow-hidden"
                :class="app.iconUrl ? '' : `bg-gradient-to-br ${iconGradient(app.name)}`">
@@ -276,6 +301,13 @@ const messageClass = computed(() => {
           </div>
           <h3 class="text-sm font-medium truncate">{{ app.name }}</h3>
           <p class="text-[11px] text-muted-foreground truncate mt-0.5">{{ app.url }}</p>
+
+          <!-- 独立窗口标记 -->
+          <span
+            v-if="app.standaloneWindow"
+            class="absolute bottom-2 right-2 text-[10px] text-muted-foreground/50"
+            title="独立窗口模式"
+          >⧉</span>
 
           <!-- 悬浮操作 -->
           <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
@@ -313,7 +345,7 @@ const messageClass = computed(() => {
       </div>
     </div>
 
-    <!-- ═══ 运行中工具栏 ═══ -->
+    <!-- ═══ 运行中工具栏（主窗口模式） ═══ -->
     <div v-if="view === 'running'" class="fixed top-0 inset-x-0 h-10 flex items-center gap-2.5 px-3 bg-background/95 backdrop-blur-sm border-b border-border z-[9999]">
       <Button variant="secondary" size="sm" @click="goBackToSettings">返回</Button>
       <span class="flex-1 text-[11px] text-muted-foreground truncate">{{ currentApp?.url }}</span>
@@ -354,6 +386,18 @@ const messageClass = computed(() => {
                 <Input v-model.number="editForm.height" type="number" />
               </div>
             </div>
+            <!-- 独立窗口开关 -->
+            <label class="flex items-center gap-2.5 cursor-pointer select-none pt-1">
+              <input
+                type="checkbox"
+                v-model="editForm.standaloneWindow"
+                class="w-4 h-4 rounded border-border bg-transparent accent-cyan-500 cursor-pointer"
+              />
+              <div>
+                <span class="text-xs font-medium">独立窗口运行</span>
+                <p class="text-[11px] text-muted-foreground/60">在单独窗口中启动，可同时运行多个应用</p>
+              </div>
+            </label>
           </div>
 
           <div class="flex gap-2 justify-end pt-2">
