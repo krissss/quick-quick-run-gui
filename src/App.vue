@@ -4,33 +4,14 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { loadApps, saveApps, exportData, importData, type AppItem } from '@/lib/store'
 
-// ── 类型 ──
-interface AppItem {
-  id: string
-  name: string
-  command: string
-  url: string
-  width: number
-  height: number
-  iconUrl?: string // base64 data URL
-  standaloneWindow?: boolean // 独立窗口模式
-}
-
-// ── 视图状态 ──
-const view = ref<'home' | 'running'>('home')
+// ── 状态 ──
 const loading = ref(false)
-const checkingReady = ref(false)
 const message = ref('')
 const message_type = ref<'success' | 'error' | 'info'>('info')
-const currentApp = ref<AppItem | null>(null)
-
-// ── 运行中的应用（独立窗口模式）──
 const runningAppIds = ref<Set<string>>(new Set())
-
-// ── 应用列表 ──
 const apps = ref<AppItem[]>([])
-const LS_KEY_APPS = 'qqr-apps'
 
 // ── 弹窗 ──
 const showDialog = ref(false)
@@ -38,46 +19,21 @@ const isEditing = ref(false)
 const editForm = ref<AppItem>(emptyApp())
 
 function emptyApp(): AppItem {
-  return { id: '', name: '', command: '', url: '', width: 1200, height: 800, standaloneWindow: false }
+  return { id: '', name: '', command: '', url: '', width: 1200, height: 800 }
 }
 
-// ── localStorage ──
-function loadApps() {
-  try {
-    const raw = localStorage.getItem(LS_KEY_APPS)
-    if (raw) {
-      apps.value = JSON.parse(raw)
-      return
-    }
-  } catch { /* ignore */ }
-  migrateOldFormat()
+// ── 数据持久化 ──
+async function refreshApps() {
+  apps.value = await loadApps()
 }
 
-function saveApps() {
-  localStorage.setItem(LS_KEY_APPS, JSON.stringify(apps.value))
-}
-
-function migrateOldFormat() {
-  const cmd = localStorage.getItem('qqr-command')
-  const url = localStorage.getItem('qqr-url')
-  const w = Number(localStorage.getItem('qqr-win-w')) || 1200
-  const h = Number(localStorage.getItem('qqr-win-h')) || 800
-  if (cmd && url) {
-    apps.value.push({
-      id: crypto.randomUUID(),
-      name: new URL(url).host,
-      command: cmd,
-      url,
-      width: w,
-      height: h,
-    })
-    saveApps()
-  }
+async function persistApps() {
+  await saveApps(apps.value)
 }
 
 // ── 初始化 ──
 onMounted(async () => {
-  loadApps()
+  await refreshApps()
   refreshRunningApps()
   await listen<string>('app-launched', (e) => {
     runningAppIds.value.add(e.payload)
@@ -111,7 +67,7 @@ function closeDialog() {
   showDialog.value = false
 }
 
-function saveApp() {
+async function saveApp() {
   if (!editForm.value.name.trim() || !editForm.value.command.trim() || !editForm.value.url.trim()) {
     showMessage('请填写应用名称、启动命令和目标 URL', 'error')
     return
@@ -123,13 +79,13 @@ function saveApp() {
     editForm.value.id = crypto.randomUUID()
     apps.value.push({ ...editForm.value })
   }
-  saveApps()
+  await persistApps()
   closeDialog()
 }
 
-function deleteApp() {
+async function deleteApp() {
   apps.value = apps.value.filter(a => a.id !== editForm.value.id)
-  saveApps()
+  await persistApps()
   closeDialog()
 }
 
@@ -151,64 +107,24 @@ function iconGradient(name: string) {
 
 // ── 启动 ──
 async function launchApp(app: AppItem) {
-  // 独立窗口模式
-  if (app.standaloneWindow) {
-    loading.value = true
-    currentApp.value = app
-    try {
-      const result = await invoke<string>('launch_app_window', {
-        appId: app.id,
-        command: app.command,
-        url: app.url,
-        width: app.width,
-        height: app.height,
-        appName: app.name,
-      })
-      showMessage(result, 'success')
-      // 自动获取 favicon
-      if (!app.iconUrl) {
-        fetchAndSaveIcon(app)
-      }
-    } catch (e: any) {
-      showMessage(`启动失败: ${e}`, 'error')
-    }
-    loading.value = false
-    return
-  }
-
-  // 主窗口模式（原有逻辑）
   loading.value = true
-  currentApp.value = app
   try {
-    const result = await invoke<string>('launch_command', { command: app.command })
-    showMessage(result, 'success')
-
-    checkingReady.value = true
-    const reachable = await invoke<boolean>('check_url_reachable', {
+    const result = await invoke<string>('launch_app_window', {
+      appId: app.id,
+      command: app.command,
       url: app.url,
-      timeoutSecs: 15,
+      width: app.width,
+      height: app.height,
+      appName: app.name,
     })
-    checkingReady.value = false
-
-    if (!reachable) {
-      showMessage('15秒内未检测到服务就绪，仍尝试加载...', 'error')
-    }
-
+    showMessage(result, 'success')
     if (!app.iconUrl) {
       fetchAndSaveIcon(app)
     }
-
-    await invoke('resize_window', { width: app.width, height: app.height }).catch(() => {})
-    await invoke('navigate_to_url', { url: app.url })
-    view.value = 'running'
-
-    invoke('set_dock_icon_from_url', { url: app.url }).catch(() => {})
-    invoke('set_window_title_from_url', { url: app.url }).catch(() => {})
   } catch (e: any) {
     showMessage(`启动失败: ${e}`, 'error')
-    loading.value = false
-    checkingReady.value = false
   }
+  loading.value = false
 }
 
 // ── Favicon 自动提取 ──
@@ -219,28 +135,46 @@ async function fetchAndSaveIcon(app: AppItem) {
       const idx = apps.value.findIndex(a => a.id === app.id)
       if (idx !== -1) {
         apps.value[idx].iconUrl = dataUrl
-        saveApps()
+        await persistApps()
       }
     }
   } catch { /* ignore */ }
 }
 
-// ── 停止 / 返回 ──
-async function handleStop() {
+// ── 导入/导出 ──
+async function handleExport() {
   try {
-    const result = await invoke<string>('kill_process')
-    showMessage(result, 'success')
+    const json = await exportData()
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'qqr-apps-export.json'
+    a.click()
+    URL.revokeObjectURL(url)
+    showMessage('已导出', 'success')
   } catch (e: any) {
-    showMessage(e, 'error')
+    showMessage(`导出失败: ${e}`, 'error')
   }
 }
 
-async function goBackToSettings() {
-  await handleStop()
-  invoke('reset_dock_icon').catch(() => {})
-  await invoke('navigate_to_settings', { devUrl: window.location.origin })
-  view.value = 'home'
-  loading.value = false
+async function handleImport() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.json'
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    try {
+      const json = await file.text()
+      const imported = await importData(json)
+      apps.value = imported
+      showMessage(`已导入 ${imported.length} 个应用`, 'success')
+    } catch (e: any) {
+      showMessage(`导入失败: ${e}`, 'error')
+    }
+  }
+  input.click()
 }
 
 // ── 消息 ──
@@ -260,8 +194,7 @@ const messageClass = computed(() => {
 
 <template>
   <div class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-foreground">
-    <!-- ═══ 首页：应用列表 ═══ -->
-    <div v-if="view === 'home'" class="p-6 max-w-4xl mx-auto">
+    <div class="p-6 max-w-4xl mx-auto">
       <!-- 标题 -->
       <div class="flex items-center justify-between mb-6">
         <div>
@@ -269,6 +202,10 @@ const messageClass = computed(() => {
             Quick Quick Run GUI
           </h1>
           <p class="text-xs text-muted-foreground mt-0.5">点击启动应用，或添加新配置</p>
+        </div>
+        <div class="flex gap-1.5">
+          <Button variant="ghost" size="sm" @click="handleImport" class="text-xs">导入</Button>
+          <Button variant="ghost" size="sm" @click="handleExport" class="text-xs">导出</Button>
         </div>
       </div>
 
@@ -279,7 +216,6 @@ const messageClass = computed(() => {
 
       <!-- 应用卡片网格 -->
       <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-        <!-- 应用卡片 -->
         <div
           v-for="app in apps"
           :key="app.id"
@@ -302,13 +238,6 @@ const messageClass = computed(() => {
           <h3 class="text-sm font-medium truncate">{{ app.name }}</h3>
           <p class="text-[11px] text-muted-foreground truncate mt-0.5">{{ app.url }}</p>
 
-          <!-- 独立窗口标记 -->
-          <span
-            v-if="app.standaloneWindow"
-            class="absolute bottom-2 right-2 text-[10px] text-muted-foreground/50"
-            title="独立窗口模式"
-          >⧉</span>
-
           <!-- 悬浮操作 -->
           <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
             <button
@@ -321,7 +250,7 @@ const messageClass = computed(() => {
 
           <!-- 加载中遮罩 -->
           <div
-            v-if="loading && currentApp?.id === app.id"
+            v-if="loading && runningAppIds.size === 0 && apps.findIndex(a => a.id === app.id) >= 0"
             class="absolute inset-0 rounded-xl bg-background/80 flex items-center justify-center"
           >
             <span class="inline-block w-5 h-5 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" />
@@ -343,13 +272,6 @@ const messageClass = computed(() => {
         <p class="text-sm">还没有应用配置</p>
         <p class="text-xs mt-1">点击上方 "+" 添加你的第一个应用</p>
       </div>
-    </div>
-
-    <!-- ═══ 运行中工具栏（主窗口模式） ═══ -->
-    <div v-if="view === 'running'" class="fixed top-0 inset-x-0 h-10 flex items-center gap-2.5 px-3 bg-background/95 backdrop-blur-sm border-b border-border z-[9999]">
-      <Button variant="secondary" size="sm" @click="goBackToSettings">返回</Button>
-      <span class="flex-1 text-[11px] text-muted-foreground truncate">{{ currentApp?.url }}</span>
-      <Button variant="destructive" size="sm" @click="handleStop">停止</Button>
     </div>
 
     <!-- ═══ 添加/编辑弹窗 ═══ -->
@@ -386,18 +308,6 @@ const messageClass = computed(() => {
                 <Input v-model.number="editForm.height" type="number" />
               </div>
             </div>
-            <!-- 独立窗口开关 -->
-            <label class="flex items-center gap-2.5 cursor-pointer select-none pt-1">
-              <input
-                type="checkbox"
-                v-model="editForm.standaloneWindow"
-                class="w-4 h-4 rounded border-border bg-transparent accent-cyan-500 cursor-pointer"
-              />
-              <div>
-                <span class="text-xs font-medium">独立窗口运行</span>
-                <p class="text-[11px] text-muted-foreground/60">在单独窗口中启动，可同时运行多个应用</p>
-              </div>
-            </label>
           </div>
 
           <div class="flex gap-2 justify-end pt-2">

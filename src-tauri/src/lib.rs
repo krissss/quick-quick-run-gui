@@ -19,31 +19,23 @@ pub struct ProcessInfo {
 }
 
 /// 全局进程状态，支持多个应用同时运行
-/// key: app_id（主窗口模式用 "_main"）
 pub struct AppState {
     pub processes: Mutex<HashMap<String, ProcessInfo>>,
 }
-
-/// 主窗口模式的特殊 key
-const MAIN_KEY: &str = "_main";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
         .manage(AppState {
             processes: Mutex::new(HashMap::new()),
         })
         .invoke_handler(tauri::generate_handler![
-            launch_command,
-            kill_process,
             launch_app_window,
             stop_app_window,
             get_running_apps,
-            navigate_to_url,
-            navigate_to_settings,
             check_url_reachable,
-            resize_window,
             set_dock_icon_from_url,
             reset_dock_icon,
             set_window_title_from_url,
@@ -105,9 +97,7 @@ fn force_kill_all(handle: &tauri::AppHandle) {
         }
         let _ = info.child.kill();
     }
-    // 等 SIGTERM 生效再 SIGKILL
     std::thread::sleep(std::time::Duration::from_millis(200));
-    // （child.kill 已发送，此处只需等待）
 }
 
 /// 启动 shell 进程，返回 (Child, pid)
@@ -152,57 +142,7 @@ fn window_label_for(app_id: &str) -> String {
 
 // ── IPC 命令 ──
 
-/// 主窗口模式：启动命令（杀掉之前的主窗口进程）
-#[tauri::command]
-fn launch_command(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    command: String,
-) -> Result<String, String> {
-    kill_app_process(&app, MAIN_KEY);
-
-    let (child, pid) = spawn_shell_command(&command)?;
-
-    #[cfg(not(target_os = "windows"))]
-    let pgid = pid; // setsid 后 PID == PGID
-
-    state.processes.lock().unwrap().insert(
-        MAIN_KEY.to_string(),
-        ProcessInfo {
-            child,
-            #[cfg(not(target_os = "windows"))]
-            pgid,
-        },
-    );
-
-    let _ = app.emit("process-started", pid);
-    Ok(format!("进程已启动, PID: {}", pid))
-}
-
-/// 杀掉主窗口模式的进程
-#[tauri::command]
-fn kill_process(
-    _app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> Result<String, String> {
-    let info = state.processes.lock().unwrap().remove(MAIN_KEY);
-
-    if let Some(mut info) = info {
-        #[cfg(not(target_os = "windows"))]
-        {
-            unsafe { libc::killpg(info.pgid as i32, libc::SIGTERM); }
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            unsafe { libc::killpg(info.pgid as i32, libc::SIGKILL); }
-        }
-        let pid = info.child.id();
-        let _ = info.child.kill();
-        return Ok(format!("进程组 {} 已终止", pid));
-    }
-
-    Err("没有正在运行的进程".to_string())
-}
-
-/// 独立窗口模式：启动应用并在新窗口中运行
+/// 启动应用并在新窗口中运行
 #[tauri::command]
 async fn launch_app_window(
     app: tauri::AppHandle,
@@ -232,10 +172,7 @@ async fn launch_app_window(
     let pgid = pid;
 
     // 等待 URL 可达
-    let reachable = check_url_inner(&url, 15).await;
-    if !reachable {
-        // 继续创建窗口，但可能会显示错误
-    }
+    let _reachable = check_url_inner(&url, 15).await;
 
     // 构建独立窗口的 URL
     let window_url = build_app_window_url(&url, &app_id);
@@ -274,10 +211,26 @@ async fn launch_app_window(
     );
 
     let _ = app.emit("app-launched", app_id.clone());
+
+    // 异步设置 dock 图标和窗口标题（不阻塞返回）
+    let app_for_icon = app.clone();
+    let url_for_icon = url.clone();
+    let app_id_for_title = app_id.clone();
+    tokio::spawn(async move {
+        // 设置 dock 图标
+        let _ = set_dock_icon_from_url_inner(&app_for_icon, &url_for_icon).await;
+
+        // 设置窗口标题（从页面 <title> 获取）
+        let label = window_label_for(&app_id_for_title);
+        if let Some(win) = app_for_icon.get_webview_window(&label) {
+            let _ = set_window_title_inner(&win, &url_for_icon).await;
+        }
+    });
+
     Ok(format!("进程已启动, PID: {}", pid))
 }
 
-/// 停止独立窗口应用并关闭窗口
+/// 停止应用并关闭窗口
 #[tauri::command]
 fn stop_app_window(
     app: tauri::AppHandle,
@@ -290,80 +243,31 @@ fn stop_app_window(
         let _ = window.close();
     }
 
+    // 如果没有其他应用运行，恢复默认 dock 图标
+    let should_reset = if let Some(state) = app.try_state::<AppState>() {
+        state.processes.lock().unwrap().is_empty()
+    } else {
+        true
+    };
+    if should_reset {
+        let _ = reset_dock_icon_inner(&app);
+    }
+
     Ok("已停止并关闭".to_string())
 }
 
-/// 获取当前运行的 app ID 列表（排除 _main）
+/// 获取当前运行的 app ID 列表
 #[tauri::command]
 fn get_running_apps(state: tauri::State<'_, AppState>) -> Vec<String> {
-    state
-        .processes
-        .lock()
-        .unwrap()
-        .keys()
-        .filter(|k| *k != MAIN_KEY)
-        .cloned()
-        .collect()
+    state.processes.lock().unwrap().keys().cloned().collect()
 }
 
-/// 导航 WebView 到指定 URL
-#[tauri::command]
-fn navigate_to_url(window: tauri::WebviewWindow, url: String) -> Result<(), String> {
-    let parsed = url.parse::<url::Url>().map_err(|e| format!("无效的 URL: {}", e))?;
-    window.navigate(parsed).map_err(|e| format!("导航失败: {}", e))
-}
-
-/// 导航回设置页面（dev 模式用 Vite 地址，生产用 index.html）
-#[tauri::command]
-fn navigate_to_settings(app: tauri::AppHandle, window: tauri::WebviewWindow, dev_url: Option<String>) -> Result<(), String> {
-    // 杀掉主窗口进程
-    kill_app_process(&app, MAIN_KEY);
-
-    window.set_title("Quick Quick Run GUI").map_err(|e| format!("设置标题失败: {}", e))?;
-
-    #[cfg(debug_assertions)]
-    {
-        let url_str = dev_url.unwrap_or_else(|| "http://localhost:5173".to_string());
-        let parsed = url_str.parse::<url::Url>().map_err(|e| format!("无效的 URL: {}", e))?;
-        window.navigate(parsed).map_err(|e| format!("导航失败: {}", e))?;
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        window.navigate(WebviewUrl::App("index.html".into())).map_err(|e| format!("导航失败: {}", e))?;
-    }
-    Ok(())
-}
-
-/// 从目标 URL 获取页面标题并设置为窗口标题
-#[tauri::command]
-async fn set_window_title_from_url(window: tauri::WebviewWindow, url: String) -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
-
-    let resp = client.get(&url).send().await.map_err(|e| format!("请求失败: {}", e))?;
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-
-    let html = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
-    let title = extract_html_title(&html);
-
-    if let Some(title) = title {
-        window.set_title(&title).map_err(|e| format!("设置标题失败: {}", e))?;
-    }
-
-    Ok(())
-}
-
-/// 检测目标 URL 是否可达（用于等待服务就绪）
+/// 检测目标 URL 是否可达
 #[tauri::command]
 async fn check_url_reachable(url: String, timeout_secs: u64) -> Result<bool, String> {
     Ok(check_url_inner(&url, timeout_secs).await)
 }
 
-/// 内部 URL 可达检测（可在其他命令中复用）
 async fn check_url_inner(url: &str, timeout_secs: u64) -> bool {
     use std::time::Duration;
 
@@ -404,14 +308,6 @@ async fn check_url_inner(url: &str, timeout_secs: u64) -> bool {
 
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
-}
-
-/// 调整窗口大小
-#[tauri::command]
-fn resize_window(window: tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
-    window
-        .set_size(tauri::LogicalSize { width, height })
-        .map_err(|e| format!("调整窗口失败: {}", e))
 }
 
 /// 构建独立窗口加载的 URL
@@ -461,12 +357,17 @@ async fn fetch_favicon_data_url(url: String) -> Result<String, String> {
 /// 从目标 URL 获取 favicon 并设置为 macOS Dock 图标
 #[tauri::command]
 async fn set_dock_icon_from_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    set_dock_icon_from_url_inner(&app, &url).await
+}
+
+async fn set_dock_icon_from_url_inner(app: &tauri::AppHandle, url: &str) -> Result<(), String> {
     let parsed = url.parse::<url::Url>().map_err(|e| format!("无效的 URL: {}", e))?;
     let origin = parsed.origin().ascii_serialization();
 
     let (icon_bytes, fmt) = fetch_favicon(&origin).await?;
 
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    let app = app.clone();
     app.run_on_main_thread(move || {
         let result = set_macos_dock_icon(&icon_bytes, &fmt);
         let _ = tx.send(result);
@@ -478,8 +379,13 @@ async fn set_dock_icon_from_url(app: tauri::AppHandle, url: String) -> Result<()
 /// 恢复默认 Dock 图标
 #[tauri::command]
 fn reset_dock_icon(app: tauri::AppHandle) -> Result<(), String> {
+    reset_dock_icon_inner(&app)
+}
+
+fn reset_dock_icon_inner(app: &tauri::AppHandle) -> Result<(), String> {
     let icon_bytes = DEFAULT_ICON_BYTES.to_vec();
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    let app = app.clone();
     app.run_on_main_thread(move || {
         let result = set_macos_dock_icon(&icon_bytes, "png");
         let _ = tx.send(result);
@@ -488,7 +394,33 @@ fn reset_dock_icon(app: tauri::AppHandle) -> Result<(), String> {
     rx.recv().map_err(|e| format!("等待主线程执行失败: {}", e))?
 }
 
-/// 检测字节数据是否为有效图片格式
+/// 从目标 URL 获取页面标题并设置为窗口标题
+#[tauri::command]
+async fn set_window_title_from_url(window: tauri::WebviewWindow, url: String) -> Result<(), String> {
+    set_window_title_inner(&window, &url).await
+}
+
+async fn set_window_title_inner(window: &tauri::WebviewWindow, url: &str) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    let resp = client.get(url).send().await.map_err(|e| format!("请求失败: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+
+    let html = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+    let title = extract_html_title(&html);
+
+    if let Some(title) = title {
+        window.set_title(&title).map_err(|e| format!("设置标题失败: {}", e))?;
+    }
+
+    Ok(())
+}
+
 fn detect_image_format(data: &[u8]) -> Option<String> {
     if data.len() < 4 { return None; }
     if data[0..4] == [0x89, 0x50, 0x4E, 0x47] { return Some("png".to_string()); }
@@ -501,7 +433,6 @@ fn detect_image_format(data: &[u8]) -> Option<String> {
     None
 }
 
-/// 尝试获取 favicon 字节数据和格式
 async fn fetch_favicon(origin: &str) -> Result<(Vec<u8>, String), String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -559,7 +490,6 @@ async fn fetch_icon_url(client: &reqwest::Client, origin: &str, path: &str) -> O
     Some(bytes.to_vec())
 }
 
-/// 从 HTML 中提取所有 icon 链接及其格式 (href, format)
 fn extract_icons_from_html(html: &str) -> Vec<(String, String)> {
     let mut results = Vec::new();
     let lower = html.to_lowercase();
