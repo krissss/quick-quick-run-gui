@@ -47,6 +47,16 @@ pub fn run() {
             fetch_favicon_data_url,
         ])
         .setup(|app| {
+            // 启动时设置带 padding 的默认 Dock 图标（和 favicon 统一大小）
+            #[cfg(target_os = "macos")]
+            {
+                let handle = app.handle().clone();
+                let icon_bytes = DEFAULT_ICON_BYTES.to_vec();
+                let _ = handle.run_on_main_thread(move || {
+                    let _ = set_macos_dock_icon(&icon_bytes, "png", 0.8);
+                });
+            }
+
             // 主窗口关闭时清理所有子进程
             let handle = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
@@ -447,7 +457,7 @@ async fn set_dock_icon_from_url_inner(app: &tauri::AppHandle, url: &str) -> Resu
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     let app = app.clone();
     app.run_on_main_thread(move || {
-        let result = set_macos_dock_icon(&icon_bytes, &fmt, true);
+        let result = set_macos_dock_icon(&icon_bytes, &fmt, 0.8);
         let _ = tx.send(result);
     }).map_err(|e| format!("调度到主线程失败: {}", e))?;
 
@@ -465,7 +475,7 @@ fn reset_dock_icon_inner(app: &tauri::AppHandle) -> Result<(), String> {
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     let app = app.clone();
     app.run_on_main_thread(move || {
-        let result = set_macos_dock_icon(&icon_bytes, "png", false);
+        let result = set_macos_dock_icon(&icon_bytes, "png", 0.8);
         let _ = tx.send(result);
     }).map_err(|e| format!("调度到主线程失败: {}", e))?;
 
@@ -629,7 +639,7 @@ fn extract_html_title(html: &str) -> Option<String> {
 // ── macOS Dock 图标 ──
 
 #[cfg(target_os = "macos")]
-fn set_macos_dock_icon(data: &[u8], fmt: &str, add_padding: bool) -> Result<(), String> {
+fn set_macos_dock_icon(data: &[u8], fmt: &str, fill_ratio: f64) -> Result<(), String> {
     use objc2::AnyThread;
     use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::{NSData, MainThreadMarker, NSSize, NSString as NSNSString};
@@ -647,9 +657,9 @@ fn set_macos_dock_icon(data: &[u8], fmt: &str, add_padding: bool) -> Result<(), 
             .ok_or("NSImage 无法加载 SVG 文件")?;
         let tiff = ns_image.TIFFRepresentation()
             .ok_or("无法获取 TIFF 数据")?;
-        resize_for_dock(&tiff.to_vec(), true)?
+        resize_for_dock(&tiff.to_vec(), fill_ratio)?
     } else {
-        resize_for_dock(data, add_padding)?
+        resize_for_dock(data, fill_ratio)?
     };
 
     let ns_data = NSData::with_bytes(&png_data);
@@ -660,14 +670,14 @@ fn set_macos_dock_icon(data: &[u8], fmt: &str, add_padding: bool) -> Result<(), 
     Ok(())
 }
 
-/// 将图片缩放并居中到 512x512 画布。add_padding=true 时图标只占 80%。
-fn resize_for_dock(data: &[u8], add_padding: bool) -> Result<Vec<u8>, String> {
+/// 将图片缩放并居中到 512x512 画布。fill_ratio 控制图标占画布比例（1.0=填满，0.80=80%）。
+fn resize_for_dock(data: &[u8], fill_ratio: f64) -> Result<Vec<u8>, String> {
     let img = image::load_from_memory(data)
         .map_err(|e| format!("解码图片失败: {}", e))?;
 
     let canvas_size: u32 = 512;
-    let icon_max = if add_padding {
-        (canvas_size as f64 * 0.8).round() as u32 // 410px, ~51px padding each side
+    let icon_max = if fill_ratio < 1.0 {
+        (canvas_size as f64 * fill_ratio).round() as u32
     } else {
         canvas_size
     };
