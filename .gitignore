@@ -28,11 +28,7 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/data/
 
-# Dev helper (not for distribution)
-start-dev.sh
-gen_icon.py
-app-icon.png
-
 # Environment
 .env
 .env.*
+.gitnexus
