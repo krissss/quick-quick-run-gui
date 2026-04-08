@@ -1,3 +1,4 @@
+#[cfg(target_os = "macos")]
 mod dock;
 mod favicon;
 mod image_util;
@@ -10,6 +11,7 @@ use tauri::{Emitter, Manager};
 #[cfg(not(debug_assertions))]
 use tauri::WebviewUrl;
 
+#[cfg(target_os = "macos")]
 use dock::{reset_dock_icon_inner, set_dock_icon_from_url_inner};
 use favicon::{extract_html_title, fetch_favicon};
 use process::{
@@ -28,17 +30,34 @@ pub fn run() {
         .manage(AppState {
             processes: Mutex::new(std::collections::HashMap::new()),
         })
-        .invoke_handler(tauri::generate_handler![
-            launch_app_window,
-            stop_app_window,
-            get_running_apps,
-            get_app_logs,
-            check_url_reachable,
-            set_dock_icon_from_url,
-            reset_dock_icon,
-            set_window_title_from_url,
-            fetch_favicon_data_url,
-        ])
+        .invoke_handler({
+            #[cfg(target_os = "macos")]
+            {
+                tauri::generate_handler![
+                    launch_app_window,
+                    stop_app_window,
+                    get_running_apps,
+                    get_app_logs,
+                    check_url_reachable,
+                    set_dock_icon_from_url,
+                    reset_dock_icon,
+                    set_window_title_from_url,
+                    fetch_favicon_data_url,
+                ]
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                tauri::generate_handler![
+                    launch_app_window,
+                    stop_app_window,
+                    get_running_apps,
+                    get_app_logs,
+                    check_url_reachable,
+                    set_window_title_from_url,
+                    fetch_favicon_data_url,
+                ]
+            }
+        })
         .setup(|app| {
             // 启动时设置带 padding 的默认 Dock 图标（和 favicon 统一大小）
             #[cfg(target_os = "macos")]
@@ -168,6 +187,7 @@ async fn launch_app_window(
         let url_for_icon = url.clone();
         let app_id_for_title = app_id.clone();
         tokio::spawn(async move {
+            #[cfg(target_os = "macos")]
             let _ = set_dock_icon_from_url_inner(&app_for_icon, &url_for_icon).await;
             let label = window_label_for(&app_id_for_title);
             if let Some(win) = app_for_icon.get_webview_window(&label) {
@@ -200,6 +220,7 @@ fn stop_app_window(
         true
     };
     if should_reset {
+        #[cfg(target_os = "macos")]
         let _ = reset_dock_icon_inner(&app);
     }
 
@@ -250,12 +271,14 @@ async fn fetch_favicon_data_url(url: String) -> Result<String, String> {
 }
 
 /// 从目标 URL 获取 favicon 并设置为 macOS Dock 图标
+#[cfg(target_os = "macos")]
 #[tauri::command]
 async fn set_dock_icon_from_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     set_dock_icon_from_url_inner(&app, &url).await
 }
 
 /// 恢复默认 Dock 图标
+#[cfg(target_os = "macos")]
 #[tauri::command]
 fn reset_dock_icon(app: tauri::AppHandle) -> Result<(), String> {
     reset_dock_icon_inner(&app)
