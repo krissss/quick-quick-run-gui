@@ -11,16 +11,16 @@ Quick Quick Run GUI 是一个 Tauri v2 桌面应用，用于将 Web 应用包装
 - **前端：** Vue 3（Composition API + `<script setup>`）、TypeScript、Vite、Tailwind CSS v4、shadcn-vue
 - **后端：** Rust、Tauri v2、tokio（异步）、serde
 - **数据存储：** tauri-plugin-store（JSON 文件）
-- **包管理器：** Bun
+- **包管理器：** pnpm
 
 ## 常用命令
 
 ```bash
-bun run dev          # 仅启动 Vite 开发服务器（前端）
-bun run build        # 类型检查（vue-tsc）+ Vite 构建
-bun run tauri:dev    # Tauri 完整开发模式（Rust + 前端）
-bun run tauri:build  # Tauri 生产构建
-bun run preview      # 预览 Vite 生产构建
+pnpm dev          # 仅启动 Vite 开发服务器（前端）
+pnpm run build    # 类型检查（vue-tsc）+ Vite 构建
+pnpm tauri:dev    # Tauri 完整开发模式（Rust + 前端）
+pnpm tauri:build  # Tauri 生产构建
+pnpm preview      # 预览 Vite 生产构建
 ```
 
 当前未配置测试运行器和代码检查工具。
@@ -95,7 +95,7 @@ Vue 前端通过 `@tauri-apps/api/core` 的 `invoke()` 与 Rust 后端通信：
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **quick-quick-run-gui** (174 symbols, 298 relationships, 14 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **quick-quick-run-gui** (196 symbols, 321 relationships, 14 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

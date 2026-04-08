@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.quick-quick-run.gui",
   "build": {
-    "beforeDevCommand": "bun dev",
+    "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "pnpm run build",
     "frontendDist": "../dist"
   },
   "app": {
