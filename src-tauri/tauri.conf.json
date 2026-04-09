@@ -10,6 +10,10 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "csp": "default-src * 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; frame-src * 'self' http: https:"
+    },
     "windows": [
       {
         "title": "Quick Quick Run GUI",
@@ -20,12 +24,11 @@
         "center": true,
         "backgroundColor": "#ffffff"
       }
-    ],
-    "security": {
-      "csp": "default-src * 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; frame-src * 'self' http://localhost:* https://localhost:*"
-    }
+    ]
   },
   "bundle": {
+    "active": true,
+    "targets": "all",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

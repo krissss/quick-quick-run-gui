@@ -8,11 +8,10 @@ pub static DEFAULT_ICON_BYTES: &[u8] = include_bytes!("../icons/icon.png");
 pub fn set_macos_dock_icon(data: &[u8], fmt: &str, fill_ratio: f64) -> Result<(), String> {
     use objc2::AnyThread;
     use objc2_app_kit::{NSApplication, NSImage};
-    use objc2_foundation::{NSData, MainThreadMarker, NSSize, NSString as NSNSString};
+    use objc2_foundation::{NSData, MainThreadMarker, NSString as NSNSString};
 
     let mtm = MainThreadMarker::new().ok_or("不在主线程")?;
     let app = NSApplication::sharedApplication(mtm);
-    let dock_points: f64 = 256.0;
 
     let png_data = if fmt == "svg" {
         let tmp_path = std::env::temp_dir().join("qqr-dock-icon.svg");
@@ -30,7 +29,6 @@ pub fn set_macos_dock_icon(data: &[u8], fmt: &str, fill_ratio: f64) -> Result<()
     let ns_data = NSData::with_bytes(&png_data);
     let ns_image = NSImage::initWithData(NSImage::alloc(), &ns_data)
         .ok_or("NSImage 无法创建图片")?;
-    ns_image.setSize(NSSize { width: dock_points, height: dock_points });
     unsafe { app.setApplicationIconImage(Some(&ns_image)) };
     Ok(())
 }
@@ -58,7 +56,7 @@ pub fn reset_dock_icon_inner(app: &tauri::AppHandle) -> Result<(), String> {
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     let app = app.clone();
     app.run_on_main_thread(move || {
-        let result = set_macos_dock_icon(&icon_bytes, "png", 0.8);
+        let result = set_macos_dock_icon(&icon_bytes, "png", 1.0);
         let _ = tx.send(result);
     }).map_err(|e| format!("调度到主线程失败: {}", e))?;
 

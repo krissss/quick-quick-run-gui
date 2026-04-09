@@ -8,8 +8,6 @@ mod url_check;
 use std::sync::{Arc, Mutex};
 
 use tauri::{Emitter, Manager};
-#[cfg(not(debug_assertions))]
-use tauri::WebviewUrl;
 
 #[cfg(target_os = "macos")]
 use dock::{reset_dock_icon_inner, set_dock_icon_from_url_inner};
@@ -59,13 +57,13 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // 启动时设置带 padding 的默认 Dock 图标（和 favicon 统一大小）
+            // 启动时设置默认 Dock 图标
             #[cfg(target_os = "macos")]
             {
                 let handle = app.handle().clone();
                 let icon_bytes = dock::DEFAULT_ICON_BYTES.to_vec();
                 let _ = handle.run_on_main_thread(move || {
-                    let _ = dock::set_macos_dock_icon(&icon_bytes, "png", 0.8);
+                    let _ = dock::set_macos_dock_icon(&icon_bytes, "png", 1.0);
                 });
             }
 

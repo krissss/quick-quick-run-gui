@@ -66,12 +66,17 @@ pub fn spawn_shell_command(command: &str) -> Result<(command_group::GroupChild, 
         .map_err(|e| format!("启动命令失败: {}", e))?;
 
     #[cfg(target_os = "windows")]
-    let child = Command::new("cmd")
-        .args(["/C", command])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .group_spawn()
-        .map_err(|e| format!("启动命令失败: {}", e))?;
+    let child = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        Command::new("cmd")
+            .args(["/C", command])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .creation_flags(CREATE_NO_WINDOW)
+            .group_spawn()
+            .map_err(|e| format!("启动命令失败: {}", e))?
+    };
 
     let pid = child.id();
     Ok((child, pid))
