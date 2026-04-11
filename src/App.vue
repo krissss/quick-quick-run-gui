@@ -32,6 +32,8 @@ async function refreshApps() {
 
 async function persistApps() {
   await saveApps(apps.value)
+  // 通知 Rust 重建托盘菜单
+  try { await invoke('notify_apps_updated') } catch { /* ignore */ }
 }
 
 // ── 初始化 ──
@@ -43,6 +45,12 @@ onMounted(async () => {
   })
   await listen<string>('app-stopped', (e) => {
     runningAppIds.value.delete(e.payload)
+  })
+
+  // 托盘菜单点击启动应用
+  await listen<string>('tray-launch-app', async (e) => {
+    const app = apps.value.find(a => a.id === e.payload)
+    if (app) await launchApp(app)
   })
 })
 
@@ -182,6 +190,7 @@ async function handleImport() {
     const imported = await importData(json)
     apps.value = imported
     showMessage(`已导入 ${imported.length} 个应用`, 'success')
+    try { await invoke('notify_apps_updated') } catch { /* ignore */ }
   } catch (e: any) {
     showMessage(`导入失败: ${e}`, 'error')
   }

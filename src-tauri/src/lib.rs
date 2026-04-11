@@ -3,17 +3,18 @@ mod dock;
 mod favicon;
 mod image_util;
 mod process;
+mod tray;
 mod url_check;
 
 use std::sync::{Arc, Mutex};
 
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Listener, Manager};
 
 #[cfg(target_os = "macos")]
 use dock::{reset_dock_icon_inner, set_dock_icon_from_url_inner};
 use favicon::{extract_html_title, fetch_favicon};
 use process::{
-    AppState, ProcessInfo, force_kill_all, kill_app_process, spawn_log_reader,
+    AppState, ProcessInfo, kill_app_process, spawn_log_reader,
     spawn_shell_command, window_label_for,
 };
 use url_check::check_url_inner;
@@ -41,6 +42,9 @@ pub fn run() {
                     reset_dock_icon,
                     set_window_title_from_url,
                     fetch_favicon_data_url,
+                    notify_apps_updated,
+                    hide_dock_icon_cmd,
+                    show_dock_icon_cmd,
                 ]
             }
             #[cfg(not(target_os = "macos"))]
@@ -53,6 +57,7 @@ pub fn run() {
                     check_url_reachable,
                     set_window_title_from_url,
                     fetch_favicon_data_url,
+                    notify_apps_updated,
                 ]
             }
         })
@@ -74,16 +79,39 @@ pub fn run() {
                 });
             }
 
-            // 主窗口关闭时清理所有子进程
-            let handle = app.handle().clone();
+            // 主窗口关闭时隐藏而非退出（通过托盘菜单"退出"才真正退出）
             if let Some(window) = app.get_webview_window("main") {
-                let h = handle.clone();
+                let handle = app.handle().clone();
                 window.on_window_event(move |event| {
-                    if matches!(event, tauri::WindowEvent::Destroyed) {
-                        force_kill_all(&h);
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        if let Some(win) = handle.get_webview_window("main") {
+                            let _ = win.hide();
+                        }
                     }
                 });
             }
+
+            // 设置系统托盘（macOS 菜单栏图标）
+            #[cfg(target_os = "macos")]
+            {
+                tray::setup_tray(&app.handle());
+
+                // 监听事件以刷新托盘菜单
+                let h1 = app.handle().clone();
+                let h2 = app.handle().clone();
+                let h3 = app.handle().clone();
+                let _ = app.listen("apps-updated", move |_| {
+                    tray::rebuild_tray_menu(&h1);
+                });
+                let _ = app.listen("app-launched", move |_| {
+                    tray::rebuild_tray_menu(&h2);
+                });
+                let _ = app.listen("app-stopped", move |_| {
+                    tray::rebuild_tray_menu(&h3);
+                });
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -293,6 +321,35 @@ fn reset_dock_icon(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn set_window_title_from_url(window: tauri::WebviewWindow, url: String) -> Result<(), String> {
     set_window_title_inner(&window, &url).await
+}
+
+/// 前端通知应用列表已更新，重建托盘菜单
+#[tauri::command]
+fn notify_apps_updated(app: tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    tray::rebuild_tray_menu(&app);
+}
+
+/// 隐藏 Dock 图标（仅保留菜单栏）
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn hide_dock_icon_cmd(app: tauri::AppHandle) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(dock::hide_dock_icon());
+    }).map_err(|e| format!("调度失败: {}", e))?;
+    rx.recv().map_err(|e| format!("执行失败: {}", e))?
+}
+
+/// 显示 Dock 图标
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn show_dock_icon_cmd(app: tauri::AppHandle) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(dock::show_dock_icon());
+    }).map_err(|e| format!("调度失败: {}", e))?;
+    rx.recv().map_err(|e| format!("执行失败: {}", e))?
 }
 
 // ── 内部辅助 ──
