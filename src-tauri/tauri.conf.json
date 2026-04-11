@@ -12,7 +12,7 @@
   "app": {
     "withGlobalTauri": false,
     "security": {
-      "csp": "default-src * 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; frame-src * 'self' http: https:"
+      "csp": "default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; script-src * 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src * data: blob:; img-src * data: blob:; style-src * 'unsafe-inline' data: blob:; font-src * data: blob:; frame-src * data: blob:; frame-ancestors *; media-src * data: blob:; object-src * data: blob:; worker-src * data: blob:;"
     },
     "windows": [
       {

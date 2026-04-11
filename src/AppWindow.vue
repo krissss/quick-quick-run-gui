@@ -56,7 +56,7 @@ function retry() {
       v-show="!iframeLoading && !iframeError"
       :src="targetUrl"
       class="flex-1 w-full border-0"
-      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-presentation allow-top-navigation"
       allowfullscreen
       @load="onIframeLoad"
       @error="onIframeError"

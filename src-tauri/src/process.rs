@@ -50,6 +50,12 @@ pub fn force_kill_all(handle: &tauri::AppHandle) {
     }
 }
 
+/// 获取当前用户的 shell 路径（Unix）
+#[cfg(not(target_os = "windows"))]
+fn get_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
+}
+
 /// 启动 shell 进程（在独立进程组中），返回 (GroupChild, pid)
 pub fn spawn_shell_command(command: &str) -> Result<(command_group::GroupChild, u32), String> {
     if command.trim().is_empty() {
@@ -57,7 +63,7 @@ pub fn spawn_shell_command(command: &str) -> Result<(command_group::GroupChild, 
     }
 
     #[cfg(not(target_os = "windows"))]
-    let child = Command::new("sh")
+    let child = Command::new(get_shell())
         .arg("-c")
         .arg(command)
         .stdout(Stdio::piped())
@@ -88,7 +94,7 @@ pub fn window_label_for(app_id: &str) -> String {
     format!("app-{}", short)
 }
 
-/// 启动后台线程读取进程 stdout/stderr 并转发事件
+/// 启动异步任务读取进程 stdout/stderr 并转发事件
 pub fn spawn_log_reader(
     app: &tauri::AppHandle,
     app_id: &str,
@@ -97,7 +103,7 @@ pub fn spawn_log_reader(
 ) {
     let app_handle = app.clone();
     let app_id = app_id.to_string();
-    std::thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         let reader = std::io::BufReader::new(output);
         for line in reader.lines().flatten() {
             let _ = app_handle.emit("app-log", serde_json::json!({

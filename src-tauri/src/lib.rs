@@ -57,6 +57,13 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // 修复 macOS app bundle 环境变量缺失问题
+            // 从 Finder/Spotlight 启动时不会继承 shell 的环境（缺少 Homebrew/nvm/pnpm 等路径和变量）
+            // fix_all_vars() 通过 interactive login shell 获取完整环境并注入当前进程
+            if let Err(e) = fix_path_env::fix_all_vars() {
+                eprintln!("fix_path_env failed: {e}");
+            }
+
             // 启动时设置默认 Dock 图标
             #[cfg(target_os = "macos")]
             {
