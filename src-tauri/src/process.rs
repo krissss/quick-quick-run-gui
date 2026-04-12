@@ -120,6 +120,48 @@ pub fn spawn_log_reader(
     });
 }
 
+/// 监控进程退出：定期 try_wait，进程自然退出时 emit app-stopped + app-launch-failed
+pub fn spawn_process_monitor(app: &tauri::AppHandle, app_id: &str) {
+    let app = app.clone();
+    let app_id = app_id.to_string();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            let exited = {
+                let state = match app.try_state::<AppState>() {
+                    Some(s) => s,
+                    None => return,
+                };
+                let mut processes = state.processes.lock().unwrap();
+                match processes.get_mut(&app_id) {
+                    Some(info) => {
+                        if let Some(ref mut child) = info.child {
+                            match child.try_wait() {
+                                Ok(Some(_)) => true,
+                                Ok(None) => false,
+                                Err(_) => true,
+                            }
+                        } else {
+                            false
+                        }
+                    }
+                    None => return, // 已被 kill_app_process 移除，停止监控
+                }
+            };
+            if exited {
+                let state = app.state::<AppState>();
+                state.processes.lock().unwrap().remove(&app_id);
+                let _ = app.emit("app-stopped", app_id.clone());
+                let _ = app.emit("app-launch-failed", serde_json::json!({
+                    "app_id": app_id,
+                    "reason": "process_exited",
+                }));
+                return;
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

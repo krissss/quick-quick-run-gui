@@ -143,6 +143,10 @@ async function launchApp(app: AppItem) {
     if (!app.iconUrl) {
       fetchAndSaveIcon(app)
     }
+    // 有命令时自动打开日志弹窗
+    if (app.command.trim()) {
+      openLogDialog(app)
+    }
   } catch (e: any) {
     showMessage(`启动失败: ${e}`, 'error')
   }
@@ -216,11 +220,16 @@ const logAppId = ref('')
 const logAppName = ref('')
 const logLines = ref<string[]>([])
 const logContainer = ref<HTMLElement | null>(null)
+const logLaunchFailed = ref(false)
+const logLaunchFailedReason = ref('')
 let logUnlisten: (() => void) | null = null
+let logFailedUnlisten: (() => void) | null = null
 
 async function openLogDialog(app: AppItem) {
   logAppId.value = app.id
   logAppName.value = app.name
+  logLaunchFailed.value = false
+  logLaunchFailedReason.value = ''
   logLines.value = await invoke<string[]>('get_app_logs', { appId: app.id })
   showLogDialog.value = true
 
@@ -235,6 +244,14 @@ async function openLogDialog(app: AppItem) {
       })
     }
   })
+
+  // 监听启动失败
+  logFailedUnlisten = await listen<{ app_id: string; reason: string }>('app-launch-failed', (e) => {
+    if (e.payload.app_id === logAppId.value) {
+      logLaunchFailed.value = true
+      logLaunchFailedReason.value = e.payload.reason
+    }
+  })
 }
 
 function closeLogDialog() {
@@ -242,6 +259,10 @@ function closeLogDialog() {
   if (logUnlisten) {
     logUnlisten()
     logUnlisten = null
+  }
+  if (logFailedUnlisten) {
+    logFailedUnlisten()
+    logFailedUnlisten = null
   }
 }
 </script>
@@ -390,7 +411,16 @@ function closeLogDialog() {
         @click.self="closeLogDialog"
       >
         <div class="bg-card rounded-xl border border-border p-6 w-full max-w-2xl max-h-[80vh] flex flex-col">
-          <h2 class="text-base font-semibold mb-3">{{ logAppName }} — 日志</h2>
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-base font-semibold">{{ logAppName }} — 日志</h2>
+            <div v-if="!logLaunchFailed && runningAppIds.has(logAppId)" class="flex items-center gap-1.5">
+              <span class="inline-block w-3 h-3 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" />
+              <span class="text-xs text-muted-foreground">启动中</span>
+            </div>
+            <span v-if="logLaunchFailed" class="text-xs text-red-500 font-medium">
+              {{ logLaunchFailedReason === 'process_exited' ? '进程已退出' : '启动超时' }}
+            </span>
+          </div>
           <div
             ref="logContainer"
             class="flex-1 overflow-y-auto bg-background rounded-lg border border-border p-3 font-mono text-xs min-h-0"
@@ -398,7 +428,8 @@ function closeLogDialog() {
             <div v-for="(line, i) in logLines" :key="i" class="whitespace-pre-wrap break-all text-foreground/80 hover:text-foreground">{{ line }}</div>
             <div v-if="logLines.length === 0" class="text-muted-foreground text-center py-8">暂无日志</div>
           </div>
-          <div class="flex justify-end mt-3">
+          <div class="flex justify-end gap-2 mt-3">
+            <Button v-if="logLaunchFailed" variant="destructive" size="sm" @click="() => { const app = apps.find(a => a.id === logAppId); if (app) launchApp(app) }">重新启动</Button>
             <Button variant="secondary" size="sm" @click="closeLogDialog">关闭</Button>
           </div>
         </div>
