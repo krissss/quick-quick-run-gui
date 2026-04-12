@@ -10,8 +10,6 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{Emitter, Listener, Manager};
 
-#[cfg(target_os = "macos")]
-use dock::{reset_dock_icon_inner, set_dock_icon_from_url_inner};
 use favicon::{extract_html_title, fetch_favicon};
 use process::{
     AppState, ProcessInfo, kill_app_process, spawn_log_reader,
@@ -38,8 +36,6 @@ pub fn run() {
                     get_running_apps,
                     get_app_logs,
                     check_url_reachable,
-                    set_dock_icon_from_url,
-                    reset_dock_icon,
                     set_window_title_from_url,
                     fetch_favicon_data_url,
                     notify_apps_updated,
@@ -67,16 +63,6 @@ pub fn run() {
             // fix_all_vars() 通过 interactive login shell 获取完整环境并注入当前进程
             if let Err(e) = fix_path_env::fix_all_vars() {
                 eprintln!("fix_path_env failed: {e}");
-            }
-
-            // 启动时设置默认 Dock 图标
-            #[cfg(target_os = "macos")]
-            {
-                let handle = app.handle().clone();
-                let icon_bytes = dock::DEFAULT_ICON_BYTES.to_vec();
-                let _ = handle.run_on_main_thread(move || {
-                    let _ = dock::set_macos_dock_icon(&icon_bytes, "png", 1.0);
-                });
             }
 
             // 主窗口关闭时隐藏而非退出（通过托盘菜单"退出"才真正退出）
@@ -214,17 +200,15 @@ async fn launch_app_window(
 
     let _ = app.emit("app-launched", app_id.clone());
 
-    // 异步设置 dock 图标和窗口标题（不阻塞返回）
+    // 异步设置窗口标题（不阻塞返回）
     if has_command {
-        let app_for_icon = app.clone();
-        let url_for_icon = url.clone();
+        let app_for_title = app.clone();
+        let url_for_title = url.clone();
         let app_id_for_title = app_id.clone();
         tokio::spawn(async move {
-            #[cfg(target_os = "macos")]
-            let _ = set_dock_icon_from_url_inner(&app_for_icon, &url_for_icon).await;
             let label = window_label_for(&app_id_for_title);
-            if let Some(win) = app_for_icon.get_webview_window(&label) {
-                let _ = set_window_title_inner(&win, &url_for_icon).await;
+            if let Some(win) = app_for_title.get_webview_window(&label) {
+                let _ = set_window_title_inner(&win, &url_for_title).await;
             }
         });
         Ok(format!("进程已启动, PID: {}", result_pid.unwrap()))
@@ -244,17 +228,6 @@ fn stop_app_window(
     let window_label = window_label_for(&app_id);
     if let Some(window) = app.get_webview_window(&window_label) {
         let _ = window.close();
-    }
-
-    // 如果没有其他应用运行，恢复默认 dock 图标
-    let should_reset = if let Some(state) = app.try_state::<AppState>() {
-        state.processes.lock().unwrap().is_empty()
-    } else {
-        true
-    };
-    if should_reset {
-        #[cfg(target_os = "macos")]
-        let _ = reset_dock_icon_inner(&app);
     }
 
     Ok("已停止并关闭".to_string())
@@ -301,20 +274,6 @@ async fn fetch_favicon_data_url(url: String) -> Result<String, String> {
 
     let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &buf);
     Ok(format!("data:image/png;base64,{}", b64))
-}
-
-/// 从目标 URL 获取 favicon 并设置为 macOS Dock 图标
-#[cfg(target_os = "macos")]
-#[tauri::command]
-async fn set_dock_icon_from_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
-    set_dock_icon_from_url_inner(&app, &url).await
-}
-
-/// 恢复默认 Dock 图标
-#[cfg(target_os = "macos")]
-#[tauri::command]
-fn reset_dock_icon(app: tauri::AppHandle) -> Result<(), String> {
-    reset_dock_icon_inner(&app)
 }
 
 /// 从目标 URL 获取页面标题并设置为窗口标题
