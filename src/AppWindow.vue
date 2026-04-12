@@ -33,7 +33,7 @@ function retry() {
     <!-- Loading 遮罩 -->
     <div v-if="iframeLoading" class="flex-1 flex items-center justify-center bg-background">
       <div class="flex flex-col items-center gap-3">
-        <span class="inline-block w-6 h-6 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" />
+        <span class="inline-block w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
         <span class="text-xs text-muted-foreground">加载中...</span>
       </div>
     </div>

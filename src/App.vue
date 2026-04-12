@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { loadApps, saveApps, exportData, importData, type AppItem } from '@/lib/store'
+import { getTheme, setTheme, type Theme } from '@/lib/theme'
 import { save } from '@tauri-apps/plugin-dialog'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import { writeFile, readTextFile } from '@tauri-apps/plugin-fs'
@@ -15,6 +16,24 @@ const message = ref('')
 const message_type = ref<'success' | 'error' | 'info'>('info')
 const runningAppIds = ref<Set<string>>(new Set())
 const apps = ref<AppItem[]>([])
+
+// ── 主题 ──
+const currentTheme = ref<Theme>(getTheme())
+function toggleTheme() {
+  const next: Record<Theme, Theme> = { light: 'dark', dark: 'system', system: 'light' }
+  currentTheme.value = next[currentTheme.value]
+  setTheme(currentTheme.value)
+}
+const themeIcon = computed(() => {
+  if (currentTheme.value === 'light') return '☀️'
+  if (currentTheme.value === 'dark') return '🌙'
+  return '💻'
+})
+const themeLabel = computed(() => {
+  if (currentTheme.value === 'light') return '亮色'
+  if (currentTheme.value === 'dark') return '暗色'
+  return '跟随系统'
+})
 
 // ── 弹窗 ──
 const showDialog = ref(false)
@@ -209,9 +228,9 @@ function showMessage(msg: string, type: 'success' | 'error' | 'info' = 'info') {
 
 const messageClass = computed(() => {
   const m = message_type.value
-  if (m === 'success') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
-  if (m === 'error') return 'bg-red-50 text-red-700 border-red-200'
-  return 'bg-blue-50 text-blue-700 border-blue-200'
+  if (m === 'success') return 'bg-primary/10 text-primary border-primary/20'
+  if (m === 'error') return 'bg-destructive/10 text-destructive border-destructive/20'
+  return 'bg-secondary text-secondary-foreground border-border'
 })
 
 // ── 日志查看器 ──
@@ -273,14 +292,15 @@ function closeLogDialog() {
       <!-- 标题 -->
       <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-xl font-bold bg-gradient-to-r from-cyan-600 to-violet-600 bg-clip-text text-transparent">
+          <h1 class="text-xl font-bold bg-gradient-to-r from-[oklch(0.55_0.12_40)] to-[oklch(0.50_0.10_30)] bg-clip-text text-transparent">
             Quick Quick Run GUI
           </h1>
           <p class="text-xs text-muted-foreground mt-0.5">点击启动应用，或添加新配置</p>
         </div>
-        <div class="flex gap-1.5">
+        <div class="flex gap-1.5 items-center">
           <Button variant="ghost" size="sm" @click="handleImport" class="text-xs">导入</Button>
           <Button variant="ghost" size="sm" @click="handleExport" class="text-xs">导出</Button>
+          <Button variant="ghost" size="sm" @click="toggleTheme" class="text-xs px-2" :title="themeLabel">{{ themeIcon }}</Button>
         </div>
       </div>
 
@@ -336,7 +356,7 @@ function closeLogDialog() {
             v-if="loading && runningAppIds.size === 0 && apps.findIndex(a => a.id === app.id) >= 0"
             class="absolute inset-0 rounded-xl bg-background/80 flex items-center justify-center"
           >
-            <span class="inline-block w-5 h-5 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" />
+            <span class="inline-block w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
           </div>
         </div>
 
@@ -414,7 +434,7 @@ function closeLogDialog() {
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-base font-semibold">{{ logAppName }} — 日志</h2>
             <div v-if="!logLaunchFailed && runningAppIds.has(logAppId)" class="flex items-center gap-1.5">
-              <span class="inline-block w-3 h-3 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" />
+              <span class="inline-block w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
               <span class="text-xs text-muted-foreground">启动中</span>
             </div>
             <span v-if="logLaunchFailed" class="text-xs text-red-500 font-medium">

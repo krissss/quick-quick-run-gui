@@ -150,6 +150,8 @@ pub fn setup_tray(app: &AppHandle) {
                     app.exit(0);
                 }
                 "show-main" => {
+                    #[cfg(target_os = "macos")]
+                    { let _ = crate::dock::show_dock_icon(); }
                     if let Some(win) = app.get_webview_window("main") {
                         let _ = win.show();
                         let _ = win.set_focus();

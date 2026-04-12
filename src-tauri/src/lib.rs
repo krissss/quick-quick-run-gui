@@ -74,6 +74,8 @@ pub fn run() {
                         if let Some(win) = handle.get_webview_window("main") {
                             let _ = win.hide();
                         }
+                        #[cfg(target_os = "macos")]
+                        { let _ = dock::hide_dock_icon(); }
                     }
                 });
             }
