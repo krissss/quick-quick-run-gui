@@ -1,7 +1,6 @@
 #[cfg(target_os = "macos")]
 mod dock;
 mod favicon;
-mod image_util;
 mod process;
 mod tray;
 mod url_check;
@@ -10,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{Emitter, Listener, Manager};
 
-use favicon::{extract_html_title, fetch_favicon};
+use favicon::extract_html_title;
 use process::{
     AppState, ProcessInfo, kill_app_process, spawn_log_reader,
     spawn_process_monitor, spawn_shell_command, window_label_for,
@@ -32,27 +31,17 @@ pub fn run() {
             {
                 tauri::generate_handler![
                     launch_app_window,
-                    stop_app_window,
                     get_running_apps,
                     get_app_logs,
-                    check_url_reachable,
-                    set_window_title_from_url,
-                    fetch_favicon_data_url,
                     notify_apps_updated,
-                    hide_dock_icon_cmd,
-                    show_dock_icon_cmd,
                 ]
             }
             #[cfg(not(target_os = "macos"))]
             {
                 tauri::generate_handler![
                     launch_app_window,
-                    stop_app_window,
                     get_running_apps,
                     get_app_logs,
-                    check_url_reachable,
-                    set_window_title_from_url,
-                    fetch_favicon_data_url,
                     notify_apps_updated,
                 ]
             }
@@ -139,7 +128,7 @@ async fn launch_app_window(
     if !has_command {
         // 无命令：直接创建窗口
         let logs = Arc::new(Mutex::new(Vec::new()));
-        let window_url = build_app_window_url(&url, &app_id);
+        let window_url = build_app_window_url(&url);
         let webview_window = tauri::WebviewWindowBuilder::new(
             &app, &window_label, window_url,
         )
@@ -219,7 +208,7 @@ async fn launch_app_window(
 
         // 创建窗口
         let label = window_label_for(&app_id_bg);
-        let window_url = build_app_window_url(&url_bg, &app_id_bg);
+        let window_url = build_app_window_url(&url_bg);
         let webview_window = match tauri::WebviewWindowBuilder::new(
             &app_bg, &label, window_url,
         )
@@ -260,22 +249,6 @@ async fn launch_app_window(
     Ok(format!("进程已启动, PID: {}", pid))
 }
 
-/// 停止应用并关闭窗口
-#[tauri::command]
-fn stop_app_window(
-    app: tauri::AppHandle,
-    app_id: String,
-) -> Result<String, String> {
-    kill_app_process(&app, &app_id);
-
-    let window_label = window_label_for(&app_id);
-    if let Some(window) = app.get_webview_window(&window_label) {
-        let _ = window.close();
-    }
-
-    Ok("已停止并关闭".to_string())
-}
-
 /// 获取当前运行的 app ID 列表
 #[tauri::command]
 fn get_running_apps(state: tauri::State<'_, AppState>) -> Vec<String> {
@@ -293,65 +266,11 @@ fn get_app_logs(state: tauri::State<'_, AppState>, app_id: String) -> Vec<String
     }
 }
 
-/// 检测目标 URL 是否可达
-#[tauri::command]
-async fn check_url_reachable(url: String, timeout_secs: u64) -> Result<bool, String> {
-    Ok(check_url_inner(&url, timeout_secs).await)
-}
-
-/// 获取 favicon 并返回 base64 data URL（供前端卡片图标使用）
-#[tauri::command]
-async fn fetch_favicon_data_url(url: String) -> Result<String, String> {
-    let parsed = url.parse::<url::Url>().map_err(|e| format!("无效的 URL: {}", e))?;
-    let origin = parsed.origin().ascii_serialization();
-
-    let (icon_bytes, _fmt) = fetch_favicon(&origin).await?;
-
-    let img = image::load_from_memory(&icon_bytes)
-        .map_err(|e| format!("解码图片失败: {}", e))?;
-    let resized = img.resize(64, 64, image::imageops::FilterType::Lanczos3);
-
-    let mut buf = Vec::new();
-    resized.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
-        .map_err(|e| format!("编码 PNG 失败: {}", e))?;
-
-    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &buf);
-    Ok(format!("data:image/png;base64,{}", b64))
-}
-
-/// 从目标 URL 获取页面标题并设置为窗口标题
-#[tauri::command]
-async fn set_window_title_from_url(window: tauri::WebviewWindow, url: String) -> Result<(), String> {
-    set_window_title_inner(&window, &url).await
-}
-
 /// 前端通知应用列表已更新，重建托盘菜单
 #[tauri::command]
 fn notify_apps_updated(app: tauri::AppHandle) {
     #[cfg(target_os = "macos")]
     tray::rebuild_tray_menu(&app);
-}
-
-/// 隐藏 Dock 图标（仅保留菜单栏）
-#[cfg(target_os = "macos")]
-#[tauri::command]
-async fn hide_dock_icon_cmd(app: tauri::AppHandle) -> Result<(), String> {
-    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
-    app.run_on_main_thread(move || {
-        let _ = tx.send(dock::hide_dock_icon());
-    }).map_err(|e| format!("调度失败: {}", e))?;
-    rx.recv().map_err(|e| format!("执行失败: {}", e))?
-}
-
-/// 显示 Dock 图标
-#[cfg(target_os = "macos")]
-#[tauri::command]
-async fn show_dock_icon_cmd(app: tauri::AppHandle) -> Result<(), String> {
-    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
-    app.run_on_main_thread(move || {
-        let _ = tx.send(dock::show_dock_icon());
-    }).map_err(|e| format!("调度失败: {}", e))?;
-    rx.recv().map_err(|e| format!("执行失败: {}", e))?
 }
 
 // ── 内部辅助 ──
@@ -378,22 +297,20 @@ async fn set_window_title_inner(window: &tauri::WebviewWindow, url: &str) -> Res
 }
 
 /// 构建独立窗口加载的 URL
-fn build_app_window_url(target_url: &str, app_id: &str) -> tauri::WebviewUrl {
+fn build_app_window_url(target_url: &str) -> tauri::WebviewUrl {
     #[cfg(debug_assertions)]
     {
         let url = format!(
-            "http://localhost:5173/app-window.html?url={}&app_id={}",
+            "http://localhost:5173/app-window.html?url={}",
             urlencoding::encode(target_url),
-            urlencoding::encode(app_id),
         );
         tauri::WebviewUrl::External(url.parse().unwrap())
     }
     #[cfg(not(debug_assertions))]
     {
         let path = format!(
-            "app-window.html?url={}&app_id={}",
+            "app-window.html?url={}",
             urlencoding::encode(target_url),
-            urlencoding::encode(app_id),
         );
         tauri::WebviewUrl::App(path.into())
     }

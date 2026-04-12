@@ -11,7 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 初始化 quick-quick-run-gui — 通用 Web App GUI 包装器
 - 放开 CSP 限制，允许 WebView 加载外部 CDN 资源
-- 动态 Dock 图标 — 运行时替换为服务 favicon
 - 窗口标题同步为 web 页面标题 & 修复 kill_process 死锁
 - 迁移 UI 到 shadcn-vue + Tailwind CSS v4
 - 重新设计 UI 为应用卡片式布局

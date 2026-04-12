@@ -159,9 +159,6 @@ async function launchApp(app: AppItem) {
       bgB,
     })
     showMessage(result, 'success')
-    if (!app.iconUrl) {
-      fetchAndSaveIcon(app)
-    }
     // 有命令时自动打开日志弹窗
     if (app.command.trim()) {
       openLogDialog(app)
@@ -170,20 +167,6 @@ async function launchApp(app: AppItem) {
     showMessage(`启动失败: ${e}`, 'error')
   }
   loading.value = false
-}
-
-// ── Favicon 自动提取 ──
-async function fetchAndSaveIcon(app: AppItem) {
-  try {
-    const dataUrl = await invoke<string>('fetch_favicon_data_url', { url: app.url })
-    if (dataUrl) {
-      const idx = apps.value.findIndex(a => a.id === app.id)
-      if (idx !== -1) {
-        apps.value[idx].iconUrl = dataUrl
-        await persistApps()
-      }
-    }
-  } catch { /* ignore */ }
 }
 
 // ── 导入/导出 ──
@@ -325,10 +308,9 @@ function closeLogDialog() {
           />
 
           <!-- 图标 -->
-          <div class="w-12 h-12 rounded-xl mb-3 flex items-center justify-center overflow-hidden"
-               :class="app.iconUrl ? '' : `bg-gradient-to-br ${iconGradient(app.name)}`">
-            <img v-if="app.iconUrl" :src="app.iconUrl" class="w-full h-full object-cover rounded-xl" />
-            <span v-else class="text-lg font-bold text-white">{{ app.name.charAt(0).toUpperCase() }}</span>
+          <div class="w-12 h-12 rounded-xl mb-3 flex items-center justify-center bg-gradient-to-br"
+               :class="iconGradient(app.name)">
+            <span class="text-lg font-bold text-white">{{ app.name.charAt(0).toUpperCase() }}</span>
           </div>
           <h3 class="text-sm font-medium truncate">{{ app.name }}</h3>
           <p class="text-[11px] text-muted-foreground truncate mt-0.5">{{ app.url }}</p>

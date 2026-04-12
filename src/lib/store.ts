@@ -20,7 +20,6 @@ export interface AppItem {
   url: string
   width: number
   height: number
-  iconUrl?: string
 }
 
 export async function loadApps(): Promise<AppItem[]> {
