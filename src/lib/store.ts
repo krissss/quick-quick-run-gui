@@ -20,6 +20,7 @@ export interface AppItem {
   url: string
   width: number
   height: number
+  order?: number
 }
 
 export async function loadApps(): Promise<AppItem[]> {

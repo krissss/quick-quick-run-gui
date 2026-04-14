@@ -3,48 +3,96 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Geist Sans font */
+@font-face {
+  font-family: 'Geist';
+  src: url('@/assets/fonts/Geist-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist';
+  src: url('@/assets/fonts/Geist-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist';
+  src: url('@/assets/fonts/Geist-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+/* Geist Mono font */
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('@/assets/fonts/GeistMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('@/assets/fonts/GeistMono-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  --radius: 0.75rem;
-  --background: oklch(0.98 0.005 75);
-  --foreground: oklch(0.18 0.02 60);
-  --card: oklch(0.995 0.003 75);
-  --card-foreground: oklch(0.18 0.02 60);
-  --popover: oklch(0.995 0.003 75);
-  --popover-foreground: oklch(0.18 0.02 60);
-  --primary: oklch(0.55 0.12 40);
-  --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.95 0.008 75);
-  --secondary-foreground: oklch(0.22 0.015 60);
-  --muted: oklch(0.94 0.008 75);
-  --muted-foreground: oklch(0.50 0.015 60);
-  --accent: oklch(0.93 0.015 60);
-  --accent-foreground: oklch(0.22 0.015 60);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.91 0.008 75);
-  --input: oklch(0.91 0.008 75);
-  --ring: oklch(0.55 0.12 40);
+  --radius: 0.5rem;
+  /* Vercel-inspired palette */
+  --background: #ffffff;
+  --foreground: #171717;
+  --card: #ffffff;
+  --card-foreground: #171717;
+  --popover: #ffffff;
+  --popover-foreground: #171717;
+  --primary: #171717;
+  --primary-foreground: #ffffff;
+  --secondary: #fafafa;
+  --secondary-foreground: #171717;
+  --muted: #fafafa;
+  --muted-foreground: #666666;
+  --accent: #fafafa;
+  --accent-foreground: #171717;
+  --destructive: #ff5b4f;
+  --destructive-foreground: #ffffff;
+  --border: #ebebeb;
+  --input: #ebebeb;
+  --ring: #0072f5;
+  /* Shadow-as-border system */
+  --shadow-border: 0px 0px 0px 1px rgba(0, 0, 0, 0.08);
+  --shadow-card: 0px 0px 0px 1px rgba(0, 0, 0, 0.08), 0px 2px 2px rgba(0, 0, 0, 0.04), #fafafa 0px 0px 0px 1px;
+  --shadow-card-hover: 0px 0px 0px 1px rgba(0, 0, 0, 0.08), 0px 2px 2px rgba(0, 0, 0, 0.04), 0px 8px 8px rgba(0, 0, 0, 0.04), #fafafa 0px 0px 0px 1px;
+  --focus-ring: 0 0 0 2px hsla(212, 100%, 48%, 1);
 }
 .dark {
-  --background: oklch(0.15 0.01 60);
-  --foreground: oklch(0.93 0.005 75);
-  --card: oklch(0.18 0.01 60);
-  --card-foreground: oklch(0.93 0.005 75);
-  --popover: oklch(0.18 0.01 60);
-  --popover-foreground: oklch(0.93 0.005 75);
-  --primary: oklch(0.65 0.12 40);
-  --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.22 0.01 60);
-  --secondary-foreground: oklch(0.90 0.005 75);
-  --muted: oklch(0.22 0.01 60);
-  --muted-foreground: oklch(0.60 0.01 75);
-  --accent: oklch(0.25 0.015 60);
-  --accent-foreground: oklch(0.90 0.005 75);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.98 0 0);
-  --border: oklch(0.25 0.01 60);
-  --input: oklch(0.25 0.01 60);
-  --ring: oklch(0.65 0.12 40);
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --card: #111111;
+  --card-foreground: #ededed;
+  --popover: #111111;
+  --popover-foreground: #ededed;
+  --primary: #ededed;
+  --primary-foreground: #0a0a0a;
+  --secondary: #1a1a1a;
+  --secondary-foreground: #ededed;
+  --muted: #1a1a1a;
+  --muted-foreground: #888888;
+  --accent: #1a1a1a;
+  --accent-foreground: #ededed;
+  --destructive: #ff5b4f;
+  --destructive-foreground: #ffffff;
+  --border: #262626;
+  --input: #262626;
+  --ring: #0072f5;
+  --shadow-border: 0px 0px 0px 1px rgba(255, 255, 255, 0.08);
+  --shadow-card: 0px 0px 0px 1px rgba(255, 255, 255, 0.08), 0px 2px 2px rgba(0, 0, 0, 0.2), #1a1a1a 0px 0px 0px 1px;
+  --shadow-card-hover: 0px 0px 0px 1px rgba(255, 255, 255, 0.08), 0px 2px 2px rgba(0, 0, 0, 0.2), 0px 8px 8px rgba(0, 0, 0, 0.2), #1a1a1a 0px 0px 0px 1px;
+  --focus-ring: 0 0 0 2px hsla(212, 100%, 48%, 0.8);
 }
 
 @theme inline {
@@ -67,20 +115,30 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
   --radius-xl: calc(var(--radius) + 4px);
+  --shadow-border: var(--shadow-border);
+  --shadow-card: var(--shadow-card);
+  --shadow-card-hover: var(--shadow-card-hover);
+  --font-sans: 'Geist', 'Arial', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', 'Roboto Mono', 'Menlo', 'Monaco', 'Liberation Mono', 'DejaVu Sans Mono', 'Courier New', monospace;
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
   }
   body {
     @apply bg-background text-foreground;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-feature-settings: "liga" 1;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+  /* Focus ring system */
+  :focus-visible {
+    box-shadow: var(--focus-ring);
+    outline: none;
   }
 }

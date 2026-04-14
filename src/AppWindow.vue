@@ -29,12 +29,12 @@ function retry() {
 </script>
 
 <template>
-  <div class="h-screen flex flex-col bg-background">
+  <div class="h-screen flex flex-col bg-background font-sans">
     <!-- Loading 遮罩 -->
     <div v-if="iframeLoading" class="flex-1 flex items-center justify-center bg-background">
       <div class="flex flex-col items-center gap-3">
         <span class="inline-block w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-        <span class="text-xs text-muted-foreground">加载中...</span>
+        <span class="text-sm text-muted-foreground">加载中...</span>
       </div>
     </div>
 
@@ -43,7 +43,7 @@ function retry() {
       <div class="flex flex-col items-center gap-3">
         <span class="text-sm text-muted-foreground">页面加载失败</span>
         <button
-          class="h-8 px-4 rounded-md text-xs font-medium bg-secondary text-secondary-foreground border border-border hover:bg-secondary/80 transition-colors cursor-pointer"
+          class="h-8 px-4 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity cursor-pointer"
           @click="retry"
         >
           重试

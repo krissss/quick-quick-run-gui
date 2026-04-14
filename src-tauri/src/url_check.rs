@@ -1,4 +1,4 @@
-/// 检测目标 URL 是否可达（TCP 轮询）
+/// 检测目标 URL 是否可达（TCP 轮询，指数退避）
 pub async fn check_url_inner(url: &str, timeout_secs: u64) -> bool {
     use std::time::Duration;
 
@@ -14,6 +14,10 @@ pub async fn check_url_inner(url: &str, timeout_secs: u64) -> bool {
 
     let start = std::time::Instant::now();
     let timeout = Duration::from_secs(timeout_secs);
+
+    // 指数退避：1s → 2s → 4s → 8s → 15s（最大）
+    let mut delay = Duration::from_secs(1);
+    let max_delay = Duration::from_secs(15);
 
     loop {
         let addr = format!("{}:{}", host, port);
@@ -37,6 +41,8 @@ pub async fn check_url_inner(url: &str, timeout_secs: u64) -> bool {
             return false;
         }
 
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // 使用指数退避，但不超过最大延迟
+        tokio::time::sleep(delay).await;
+        delay = std::cmp::min(delay * 2, max_delay);
     }
 }

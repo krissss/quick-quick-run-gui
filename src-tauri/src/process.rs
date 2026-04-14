@@ -94,7 +94,8 @@ pub fn window_label_for(app_id: &str) -> String {
     format!("app-{}", short)
 }
 
-/// 启动异步任务读取进程 stdout/stderr 并转发事件
+/// 启动异步任务读取进程 stdout/stderr 并批量转发事件
+/// 每 100ms 或积累 50 行时批量发送，避免频繁 IPC
 pub fn spawn_log_reader(
     app: &tauri::AppHandle,
     app_id: &str,
@@ -105,18 +106,46 @@ pub fn spawn_log_reader(
     let app_id = app_id.to_string();
     tokio::task::spawn_blocking(move || {
         let reader = std::io::BufReader::new(output);
-        for line in reader.lines().flatten() {
-            let _ = app_handle.emit("app-log", serde_json::json!({
+        let mut pending_lines = Vec::with_capacity(50);
+        let mut last_emit = std::time::Instant::now();
+        const BATCH_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
+        const MAX_BATCH_SIZE: usize = 50;
+
+        // 定义刷新函数
+        let flush = |lines: &mut Vec<String>| {
+            if lines.is_empty() {
+                return;
+            }
+            let payload = serde_json::json!({
                 "app_id": app_id,
-                "line": line,
-            }));
-            let mut buf = logs.lock().unwrap();
-            buf.push(line);
-            if buf.len() > 2000 {
-                let remove_count = buf.len() - 2000;
-                buf.drain(0..remove_count);
+                "lines": std::mem::take(lines),
+            });
+            let _ = app_handle.emit("app-log-batch", payload);
+        };
+
+        for line in reader.lines().flatten() {
+            pending_lines.push(line.clone());
+
+            // 添加到日志缓冲
+            {
+                let mut buf = logs.lock().unwrap();
+                buf.push(line);
+                if buf.len() > 2000 {
+                    let remove_count = buf.len() - 2000;
+                    buf.drain(0..remove_count);
+                }
+            }
+
+            // 达到批量大小或延迟时间时发送
+            let now = std::time::Instant::now();
+            if pending_lines.len() >= MAX_BATCH_SIZE || now.duration_since(last_emit) >= BATCH_DELAY {
+                flush(&mut pending_lines);
+                last_emit = now;
             }
         }
+
+        // 发送剩余的行
+        flush(&mut pending_lines);
     });
 }
 
