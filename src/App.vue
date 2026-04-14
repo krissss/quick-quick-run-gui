@@ -9,6 +9,8 @@ import { getTheme, setTheme, type Theme } from '@/lib/theme'
 import { save } from '@tauri-apps/plugin-dialog'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import { writeFile, readTextFile } from '@tauri-apps/plugin-fs'
+import { enable as autostartEnable, disable as autostartDisable, isEnabled as autostartIsEnabled } from '@tauri-apps/plugin-autostart'
+import { Switch } from '@/components/ui/switch'
 
 // ── 状态 ──
 const loading = ref(false)
@@ -16,6 +18,115 @@ const message = ref('')
 const message_type = ref<'success' | 'error' | 'info'>('info')
 const runningAppIds = ref<Set<string>>(new Set())
 const apps = ref<AppItem[]>([])
+
+// ── 拖拽排序 ──
+const draggedId = ref<string | null>(null)
+const draggedOverId = ref<string | null>(null)
+const dragOffset = ref({ x: 0, y: 0 })
+const isDragging = ref(false)
+const dragEl = ref<HTMLElement | null>(null)
+
+function onMouseDown(appId: string, event: MouseEvent) {
+  // 只在左侧区域按下才能拖拽（避免误触）
+  const target = event.target as HTMLElement
+  const card = target.closest('.app-card') as HTMLElement
+
+  // 计算鼠标相对于卡片的位置
+  const rect = card!.getBoundingClientRect()
+  dragOffset.value = {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top
+  }
+
+  draggedId.value = appId
+  isDragging.value = false
+  dragEl.value = card
+
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
+
+  event.preventDefault()
+}
+
+function onMouseMove(event: MouseEvent) {
+  if (!dragEl.value || !draggedId.value) return
+
+  isDragging.value = true
+
+  // 移动拖拽中的元素
+  const card = dragEl.value
+  card.style.position = 'fixed'
+  card.style.zIndex = '1000'
+  card.style.pointerEvents = 'none'
+  card.style.opacity = '0.8'
+  card.style.left = (event.clientX - dragOffset.value.x) + 'px'
+  card.style.top = (event.clientY - dragOffset.value.y) + 'px'
+
+  // 检测下方的卡片
+  const target = document.elementFromPoint(event.clientX, event.clientY)
+  const dropTarget = target?.closest('.app-card') as HTMLElement
+
+  // 清除之前的高亮
+  document.querySelectorAll('.app-card').forEach(el => {
+    if (el !== card) {
+      el.classList.remove('border-primary/50')
+    }
+  })
+
+  if (dropTarget && dropTarget !== card) {
+    const appId = dropTarget.dataset.appId
+    if (appId && appId !== draggedId.value) {
+      draggedOverId.value = appId
+      dropTarget.classList.add('border-primary/50')
+    }
+  } else {
+    draggedOverId.value = null
+  }
+}
+
+function onMouseUp() {
+  document.removeEventListener('mousemove', onMouseMove)
+  document.removeEventListener('mouseup', onMouseUp)
+
+  if (!dragEl.value || !draggedId.value) {
+    draggedId.value = null
+    dragEl.value = null
+    return
+  }
+
+  const card = dragEl.value
+
+  // 恢复样式
+  card.style.position = ''
+  card.style.zIndex = ''
+  card.style.pointerEvents = ''
+  card.style.opacity = ''
+  card.style.left = ''
+  card.style.top = ''
+
+  // 清除高亮
+  document.querySelectorAll('.app-card').forEach(el => {
+    el.classList.remove('border-primary/50')
+  })
+
+  // 如果发生了拖拽且有目标，执行排序
+  if (isDragging.value && draggedOverId.value && draggedOverId.value !== draggedId.value) {
+    const fromIndex = apps.value.findIndex(a => a.id === draggedId.value)
+    const toIndex = apps.value.findIndex(a => a.id === draggedOverId.value)
+
+    if (fromIndex !== -1 && toIndex !== -1 && fromIndex !== toIndex) {
+      const [moved] = apps.value.splice(fromIndex, 1)
+      apps.value.splice(toIndex, 0, moved)
+      persistApps()
+      console.log('排序完成', { fromIndex, toIndex })
+    }
+  }
+
+  draggedId.value = null
+  draggedOverId.value = null
+  isDragging.value = false
+  dragEl.value = null
+}
 
 // ── 主题 ──
 const currentTheme = ref<Theme>(getTheme())
@@ -236,9 +347,9 @@ async function openLogDialog(app: AppItem) {
   showLogDialog.value = true
 
   // 实时监听新日志
-  logUnlisten = await listen<{ app_id: string; line: string }>('app-log', (e) => {
+  logUnlisten = await listen<{ app_id: string; lines: string[] }>('app-log-batch', (e) => {
     if (e.payload.app_id === logAppId.value) {
-      logLines.value.push(e.payload.line)
+      logLines.value.push(...e.payload.lines)
       nextTick(() => {
         if (logContainer.value) {
           logContainer.value.scrollTop = logContainer.value.scrollHeight
@@ -267,6 +378,37 @@ function closeLogDialog() {
     logFailedUnlisten = null
   }
 }
+
+// ── 设置 ──
+const showSettingsDialog = ref(false)
+const autostartEnabled = ref(false)
+
+async function openSettingsDialog() {
+  showSettingsDialog.value = true
+  try {
+    autostartEnabled.value = await autostartIsEnabled()
+  } catch {
+    autostartEnabled.value = false
+  }
+}
+
+async function toggleAutostart(value: boolean) {
+  try {
+    if (value) {
+      await autostartEnable()
+      autostartEnabled.value = true
+    } else {
+      await autostartDisable()
+      autostartEnabled.value = false
+    }
+  } catch (e: any) {
+    showMessage(`设置自启动失败: ${e}`, 'error')
+  }
+}
+
+function closeSettingsDialog() {
+  showSettingsDialog.value = false
+}
 </script>
 
 <template>
@@ -281,9 +423,9 @@ function closeLogDialog() {
           <p class="text-xs text-muted-foreground mt-0.5">点击启动应用，或添加新配置</p>
         </div>
         <div class="flex gap-1.5 items-center">
-          <Button variant="ghost" size="sm" @click="handleImport" class="text-xs">导入</Button>
-          <Button variant="ghost" size="sm" @click="handleExport" class="text-xs">导出</Button>
-          <Button variant="ghost" size="sm" @click="toggleTheme" class="text-xs px-2" :title="themeLabel">{{ themeIcon }}</Button>
+          <Button variant="ghost" size="sm" @click="openSettingsDialog" class="text-xs px-2" title="设置">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          </Button>
         </div>
       </div>
 
@@ -297,41 +439,64 @@ function closeLogDialog() {
         <div
           v-for="app in apps"
           :key="app.id"
-          class="group relative rounded-xl border border-border bg-card/60 p-4 cursor-pointer hover:bg-accent/30 hover:border-accent/50 transition-all"
-          @click="launchApp(app)"
+          class="app-card group relative rounded-2xl border-0 bg-gradient-to-br from-card to-card/80 backdrop-blur-sm p-4 cursor-pointer hover:shadow-lg hover:shadow-primary/10 hover:-translate-y-1 transition-all duration-200"
+          :class="{
+            'opacity-50': draggedId === app.id,
+            'ring-2 ring-primary/50': draggedOverId === app.id && draggedId !== app.id
+          }"
+          :data-app-id="app.id"
+          @click="openEditDialog(app)"
         >
-          <!-- 运行指示器 -->
+          <!-- 拖拽手柄区域（左侧） -->
           <div
-            v-if="runningAppIds.has(app.id)"
-            class="absolute top-2 left-2 w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]"
-            title="运行中"
-          />
-
-          <!-- 图标 -->
-          <div class="w-12 h-12 rounded-xl mb-3 flex items-center justify-center bg-gradient-to-br"
-               :class="iconGradient(app.name)">
-            <span class="text-lg font-bold text-white">{{ app.name.charAt(0).toUpperCase() }}</span>
+            class="absolute top-0 left-0 w-8 h-full rounded-l-2xl cursor-grab active:cursor-grabbing hover:bg-accent/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-start justify-center pt-2"
+            @mousedown.stop="onMouseDown(app.id, $event)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
+              <circle cx="9" cy="12" r="1"/>
+              <circle cx="9" cy="5" r="1"/>
+              <circle cx="9" cy="19" r="1"/>
+              <circle cx="15" cy="12" r="1"/>
+              <circle cx="15" cy="5" r="1"/>
+              <circle cx="15" cy="19" r="1"/>
+            </svg>
           </div>
-          <h3 class="text-sm font-medium truncate">{{ app.name }}</h3>
-          <p class="text-[11px] text-muted-foreground truncate mt-0.5">{{ app.url }}</p>
 
-          <!-- 悬浮操作 -->
-          <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+          <!-- 运行指示器 + 日志按钮 -->
+          <div class="absolute top-2 left-2 flex items-center gap-2">
+            <div
+              v-if="runningAppIds.has(app.id)"
+              class="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"
+              title="运行中"
+            />
             <button
               v-if="runningAppIds.has(app.id) && app.command"
-              class="w-6 h-6 rounded-md bg-secondary/80 text-muted-foreground hover:text-foreground flex items-center justify-center text-xs"
+              class="w-6 h-6 rounded-full bg-background/80 hover:bg-background text-muted-foreground hover:text-foreground flex items-center justify-center text-xs transition-colors"
               title="查看日志"
               @click.stop="openLogDialog(app)"
             >
               ☰
             </button>
-            <button
-              class="w-6 h-6 rounded-md bg-secondary/80 text-muted-foreground hover:text-foreground flex items-center justify-center text-xs"
-              @click.stop="openEditDialog(app)"
-            >
-              ✎
-            </button>
           </div>
+
+          <!-- 右上角启动按钮 -->
+          <button
+            class="absolute top-[22px] right-4 w-8 h-8 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground flex items-center justify-center shadow-md hover:shadow-lg transition-all"
+            title="启动应用"
+            @click.stop="launchApp(app)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+
+          <!-- 图标 -->
+          <div class="w-14 h-14 rounded-2xl mb-3 flex items-center justify-center bg-gradient-to-br shadow-inner"
+               :class="iconGradient(app.name)">
+            <span class="text-xl font-bold text-white">{{ app.name.charAt(0).toUpperCase() }}</span>
+          </div>
+          <h3 class="text-sm font-semibold truncate">{{ app.name }}</h3>
+          <p class="text-[11px] text-muted-foreground truncate mt-0.5">{{ app.url }}</p>
 
           <!-- 加载中遮罩 -->
           <div
@@ -433,6 +598,59 @@ function closeLogDialog() {
           <div class="flex justify-end gap-2 mt-3">
             <Button v-if="logLaunchFailed" variant="destructive" size="sm" @click="() => { const app = apps.find(a => a.id === logAppId); if (app) launchApp(app) }">重新启动</Button>
             <Button variant="secondary" size="sm" @click="closeLogDialog">关闭</Button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- ═══ 设置弹窗 ═══ -->
+    <Teleport to="body">
+      <div
+        v-if="showSettingsDialog"
+        class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+        @click.self="closeSettingsDialog"
+      >
+        <div class="bg-card rounded-xl border border-border p-6 w-full max-w-sm space-y-4">
+          <h2 class="text-base font-semibold">设置</h2>
+
+          <div class="space-y-1">
+            <!-- 开机自启动 -->
+            <div class="flex items-center justify-between py-2">
+              <div>
+                <div class="text-sm font-medium">开机自启动</div>
+                <div class="text-xs text-muted-foreground">登录时自动启动应用</div>
+              </div>
+              <Switch :model-value="autostartEnabled" @update:model-value="toggleAutostart" />
+            </div>
+
+            <div class="border-t border-border" />
+
+            <!-- 外观主题 -->
+            <div class="flex items-center justify-between py-2">
+              <div>
+                <div class="text-sm font-medium">外观主题</div>
+                <div class="text-xs text-muted-foreground">{{ themeLabel }}</div>
+              </div>
+              <Button variant="ghost" size="sm" @click="toggleTheme" class="text-xs px-2">{{ themeIcon }}</Button>
+            </div>
+
+            <div class="border-t border-border" />
+
+            <!-- 数据导入导出 -->
+            <div class="flex items-center justify-between py-2">
+              <div>
+                <div class="text-sm font-medium">数据管理</div>
+                <div class="text-xs text-muted-foreground">导入或导出应用配置</div>
+              </div>
+              <div class="flex gap-1.5">
+                <Button variant="ghost" size="sm" @click="handleImport" class="text-xs">导入</Button>
+                <Button variant="ghost" size="sm" @click="handleExport" class="text-xs">导出</Button>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex justify-end pt-2">
+            <Button variant="secondary" size="sm" @click="closeSettingsDialog">关闭</Button>
           </div>
         </div>
       </div>

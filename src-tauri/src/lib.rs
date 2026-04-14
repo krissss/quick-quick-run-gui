@@ -8,6 +8,7 @@ mod url_check;
 use std::sync::{Arc, Mutex};
 
 use tauri::{Emitter, Listener, Manager};
+use tauri_plugin_store::StoreExt;
 
 use favicon::extract_html_title;
 use process::{
@@ -23,6 +24,10 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![]),
+        ))
         .manage(AppState {
             processes: Mutex::new(std::collections::HashMap::new()),
         })
@@ -54,11 +59,15 @@ pub fn run() {
                 eprintln!("fix_path_env failed: {e}");
             }
 
-            // 主窗口关闭时隐藏而非退出（通过托盘菜单"退出"才真正退出）
+            // 主窗口关闭时保存位置并隐藏
             if let Some(window) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
-                window.on_window_event(move |event| {
+                let window_clone = window.clone();
+                window_clone.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        // 保存窗口位置和大小
+                        save_window_state(&handle, "main", &window);
+
                         api.prevent_close();
                         if let Some(win) = handle.get_webview_window("main") {
                             let _ = win.hide();
@@ -67,6 +76,17 @@ pub fn run() {
                         { let _ = dock::hide_dock_icon(); }
                     }
                 });
+            }
+
+            // 恢复主窗口保存的位置
+            if let Some(window) = app.get_webview_window("main") {
+                if let Some(state) = load_window_state(&app.handle(), "main") {
+                    use tauri::{LogicalPosition, PhysicalSize};
+                    let size = tauri::Size::Physical(PhysicalSize::new(state.width as u32, state.height as u32));
+                    let pos = LogicalPosition::new(state.x, state.y);
+                    let _ = window.set_size(size);
+                    let _ = window.set_position(pos);
+                }
             }
 
             // 设置系统托盘（macOS 菜单栏图标）
@@ -129,22 +149,40 @@ async fn launch_app_window(
         // 无命令：直接创建窗口
         let logs = Arc::new(Mutex::new(Vec::new()));
         let window_url = build_app_window_url(&url);
-        let webview_window = tauri::WebviewWindowBuilder::new(
+        let saved_state = load_window_state(&app, &app_id);
+
+        let mut builder = tauri::WebviewWindowBuilder::new(
             &app, &window_label, window_url,
         )
         .title(&app_name)
-        .inner_size(width, height)
-        .background_color(tauri::utils::config::Color(bg_r, bg_g, bg_b, 255))
-        .center()
-        .build()
-        .map_err(|e| format!("创建窗口失败: {}", e))?;
+        .background_color(tauri::utils::config::Color(bg_r, bg_g, bg_b, 255));
+
+        // 恢复保存的位置和大小
+        if let Some(state) = saved_state {
+            builder = builder
+                .inner_size(state.width, state.height)
+                .position(state.x, state.y);
+        } else {
+            builder = builder
+                .inner_size(width, height)
+                .center();
+        }
+
+        let webview_window = builder
+            .build()
+            .map_err(|e| format!("创建窗口失败: {}", e))?;
 
         let app_handle_close = app.clone();
         let app_id_close = app_id.clone();
+        let app_save = app.clone();
+        let app_id_save = app_id.clone();
         webview_window.on_window_event(move |event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. })
                 || matches!(event, tauri::WindowEvent::Destroyed)
             {
+                if let Some(win) = app_save.get_webview_window(&window_label_for(&app_id_save)) {
+                    save_window_state(&app_save, &app_id_save, &win);
+                }
                 kill_app_process(&app_handle_close, &app_id_close);
             }
         });
@@ -209,14 +247,26 @@ async fn launch_app_window(
         // 创建窗口
         let label = window_label_for(&app_id_bg);
         let window_url = build_app_window_url(&url_bg);
-        let webview_window = match tauri::WebviewWindowBuilder::new(
+        let saved_state = load_window_state(&app_bg, &app_id_bg);
+
+        let mut builder = tauri::WebviewWindowBuilder::new(
             &app_bg, &label, window_url,
         )
         .title(&app_name_bg)
-        .inner_size(width, height)
-        .background_color(tauri::utils::config::Color(bg_r, bg_g, bg_b, 255))
-        .center()
-        .build()
+        .background_color(tauri::utils::config::Color(bg_r, bg_g, bg_b, 255));
+
+        // 恢复保存的位置和大小
+        if let Some(state) = saved_state {
+            builder = builder
+                .inner_size(state.width, state.height)
+                .position(state.x, state.y);
+        } else {
+            builder = builder
+                .inner_size(width, height)
+                .center();
+        }
+
+        let webview_window = match builder.build()
         {
             Ok(w) => w,
             Err(e) => {
@@ -231,10 +281,16 @@ async fn launch_app_window(
 
         let app_h = app_bg.clone();
         let app_id_c = app_id_bg.clone();
+        let app_s = app_bg.clone();
+        let app_id_s = app_id_bg.clone();
+        let label_s = label.clone();
         webview_window.on_window_event(move |event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. })
                 || matches!(event, tauri::WindowEvent::Destroyed)
             {
+                if let Some(win) = app_s.get_webview_window(&label_s) {
+                    save_window_state(&app_s, &app_id_s, &win);
+                }
                 kill_app_process(&app_h, &app_id_c);
             }
         });
@@ -294,6 +350,45 @@ async fn set_window_title_inner(window: &tauri::WebviewWindow, url: &str) -> Res
     }
 
     Ok(())
+}
+
+/// 窗口位置和大小
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct WindowState {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+/// 保存窗口位置和大小
+fn save_window_state(app: &tauri::AppHandle, app_id: &str, window: &tauri::WebviewWindow) {
+    let key = format!("window_pos:{}", app_id);
+    if let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) {
+        let state = WindowState {
+            x: pos.x as f64,
+            y: pos.y as f64,
+            width: size.width as f64,
+            height: size.height as f64,
+        };
+        if let Ok(store) = app.store("qqr-store.json") {
+            let _ = store.set(&key, serde_json::to_value(state).unwrap());
+            let _ = store.save();
+        }
+    }
+}
+
+/// 获取保存的窗口状态
+fn load_window_state(app: &tauri::AppHandle, app_id: &str) -> Option<WindowState> {
+    let key = format!("window_pos:{}", app_id);
+    if let Ok(store) = app.store("qqr-store.json") {
+        if let Some(value) = store.get(&key) {
+            if let Ok(state) = serde_json::from_value::<WindowState>(value) {
+                return Some(state);
+            }
+        }
+    }
+    None
 }
 
 /// 构建独立窗口加载的 URL
