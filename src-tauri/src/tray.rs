@@ -100,35 +100,10 @@ pub fn rebuild_tray_menu(app: &AppHandle) {
     let _ = tray.set_menu(Some(menu));
 }
 
-/// 生成菜单栏模板图标（从 logo 提取火箭轮廓，紫色背景变透明）
+/// 加载菜单栏模板图标（黑色双箭头 » 轮廓）
 fn create_template_icon() -> Image<'static> {
-    let img = image::load_from_memory(include_bytes!("../icons/icon.png"))
-        .expect("加载图标失败");
-    let resized = img.resize(44, 44, image::imageops::FilterType::Lanczos3);
-    let rgba_img = resized.to_rgba8();
-
-    let mut result = Vec::new();
-    for pixel in rgba_img.pixels() {
-        let [r, g, b, a] = pixel.0;
-
-        let (r, g, b, a) = (r as u32, g as u32, b as u32, a as u32);
-
-        // 背景是蓝紫色 (B > 200 且 B 远大于 R/G)，反之为火箭/前景
-        let is_bg = b > 200 && b > r * 2 && b > g * 2;
-
-        // 亮色（白色/浅色细节如火箭身体）→ 黑色前景
-        let is_bright = r > 180 && g > 180;
-
-        if a < 128 || (is_bg && !is_bright) {
-            // 背景或已透明 → 透明
-            result.extend_from_slice(&[0u8, 0, 0, 0]);
-        } else {
-            // 火箭和细节 → 黑色
-            result.extend_from_slice(&[0u8, 0, 0, 255]);
-        }
-    }
-
-    Image::new_owned(result, 44, 44)
+    let bytes = include_bytes!("../icons/tray-icon.png");
+    Image::from_bytes(bytes).expect("加载托盘图标失败")
 }
 
 /// 初始化系统托盘图标
