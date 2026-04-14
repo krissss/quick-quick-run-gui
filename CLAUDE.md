@@ -118,6 +118,21 @@ input: {
 pnpm dlx shadcn-vue@latest add [组件名]
 ```
 
+## UI 设计规范
+
+**必须严格遵循 `DESIGN.md` 中的 Vercel 设计系统进行所有 UI 相关开发。** 主要原则：
+
+- **字体：** Geist Sans（主字体）+ Geist Mono（等宽），启用 OpenType `"liga"`
+- **配色：** 黑白灰为主调（`#171717` / `#ffffff`），禁止引入暖色调装饰色
+- **边框：** 使用 shadow-as-border（`box-shadow: 0px 0px 0px 1px rgba(0,0,0,0.08)`）替代传统 CSS border
+- **字重：** 仅用 400（正文）、500（交互）、600（标题），不用 700
+- **字间距：** 大标题使用负 letter-spacing（48px → -2.4px），随字号递减
+- **圆角：** 按钮 6px、卡片 8px、徽章 9999px（pill）
+- **阴影层级：** 多层 shadow stack（border + elevation + ambient + inner highlight）
+- **focus ring：** `hsla(212, 100%, 48%, 1)` 蓝色聚焦环
+
+修改任何前端组件、样式、布局前，先查阅 `DESIGN.md` 对应章节（配色、排版、组件、深度）。
+
 ## 调试
 
 - 前端日志：浏览器 DevTools
