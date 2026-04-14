@@ -78,12 +78,11 @@ pub fn run() {
                 });
             }
 
-            // 恢复主窗口保存的位置
+            // 恢复主窗口保存的位置（逻辑坐标）
             if let Some(window) = app.get_webview_window("main") {
                 if let Some(state) = load_window_state(&app.handle(), "main") {
-                    use tauri::{LogicalPosition, PhysicalSize};
-                    let size = tauri::Size::Physical(PhysicalSize::new(state.width as u32, state.height as u32));
-                    let pos = LogicalPosition::new(state.x, state.y);
+                    let pos = tauri::Position::Logical(tauri::LogicalPosition::new(state.x, state.y));
+                    let size = tauri::Size::Logical(tauri::LogicalSize::new(state.width, state.height));
                     let _ = window.set_size(size);
                     let _ = window.set_position(pos);
                 }
@@ -361,15 +360,16 @@ struct WindowState {
     height: f64,
 }
 
-/// 保存窗口位置和大小
+/// 保存窗口位置和大小（逻辑坐标，与 builder/restore 一致）
 fn save_window_state(app: &tauri::AppHandle, app_id: &str, window: &tauri::WebviewWindow) {
     let key = format!("window_pos:{}", app_id);
-    if let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    if let (Ok(pos), Ok(size)) = (window.outer_position(), window.inner_size()) {
         let state = WindowState {
-            x: pos.x as f64,
-            y: pos.y as f64,
-            width: size.width as f64,
-            height: size.height as f64,
+            x: pos.x as f64 / scale,
+            y: pos.y as f64 / scale,
+            width: size.width as f64 / scale,
+            height: size.height as f64 / scale,
         };
         if let Ok(store) = app.store("qqr-store.json") {
             let _ = store.set(&key, serde_json::to_value(state).unwrap());
