@@ -1,132 +1,28 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { onMounted } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { loadApps, saveApps, exportData, importData, type AppItem } from '@/lib/store'
-import { getTheme, setTheme, type Theme } from '@/lib/theme'
-import { save } from '@tauri-apps/plugin-dialog'
-import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
-import { writeFile, readTextFile } from '@tauri-apps/plugin-fs'
-import { enable as autostartEnable, disable as autostartDisable, isEnabled as autostartIsEnabled } from '@tauri-apps/plugin-autostart'
 import { Switch } from '@/components/ui/switch'
+import { useMessage } from '@/composables/useMessage'
+import { useApps } from '@/composables/useApps'
+import { useLauncher } from '@/composables/useLauncher'
+import { useLogs } from '@/composables/useLogs'
+import { useSettings } from '@/composables/useSettings'
 
-// ── 状态 ──
-const loading = ref(false)
-const message = ref('')
-const message_type = ref<'success' | 'error' | 'info'>('info')
-const runningAppIds = ref<Set<string>>(new Set())
-const apps = ref<AppItem[]>([])
+// ── 消息 ──
+const { message, messageClass, showMessage } = useMessage()
 
-// ── 主题 ──
-const currentTheme = ref<Theme>(getTheme())
-function toggleTheme() {
-  const next: Record<Theme, Theme> = { light: 'dark', dark: 'system', system: 'light' }
-  currentTheme.value = next[currentTheme.value]
-  setTheme(currentTheme.value)
-}
-const themeIcon = computed(() => {
-  if (currentTheme.value === 'light') return '☀️'
-  if (currentTheme.value === 'dark') return '🌙'
-  return '💻'
-})
-const themeLabel = computed(() => {
-  if (currentTheme.value === 'light') return '亮色'
-  if (currentTheme.value === 'dark') return '暗色'
-  return '跟随系统'
-})
+// ── 日志（需要在 launcher 之前初始化，因为 launcher 依赖它） ──
+const { showLogDialog, logAppId, logAppName, logLines, logLaunchFailed, logLaunchFailedReason, openLogDialog, closeLogDialog } = useLogs()
 
-// ── 右侧面板：编辑表单 ──
-const editForm = ref<AppItem>(emptyApp())
-const isNew = ref(true) // true=添加模式, false=编辑模式
+// ── 应用管理 ──
+const { apps, editForm, isNew, selectApp, openAddForm, refreshApps, saveApp, deleteApp } = useApps(showMessage)
 
-function emptyApp(): AppItem {
-  return { id: '', name: '', command: '', url: '', width: 1200, height: 800 }
-}
+// ── 启动器 ──
+const { runningAppIds, refreshRunningApps, launchApp, stopApp, showAppWindow } = useLauncher(apps, showMessage, openLogDialog)
 
-function selectApp(app: AppItem) {
-  isNew.value = false
-  editForm.value = { ...app }
-}
-
-function openAddForm() {
-  isNew.value = true
-  editForm.value = emptyApp()
-}
-
-// 当 apps 列表变化时同步表单（比如删除后）
-watch(apps, () => {
-  if (!isNew.value && editForm.value.id) {
-    const still = apps.value.find(a => a.id === editForm.value.id)
-    if (still) {
-      editForm.value = { ...still }
-    } else {
-      isNew.value = true
-      editForm.value = emptyApp()
-    }
-  }
-})
-
-// ── 数据持久化 ──
-async function refreshApps() {
-  apps.value = await loadApps()
-}
-
-async function persistApps() {
-  await saveApps(apps.value)
-  try { await invoke('notify_apps_updated') } catch { /* ignore */ }
-}
-
-// ── 初始化 ──
-onMounted(async () => {
-  await refreshApps()
-  refreshRunningApps()
-  await listen<string>('app-launched', (e) => {
-    runningAppIds.value.add(e.payload)
-  })
-  await listen<string>('app-stopped', (e) => {
-    runningAppIds.value.delete(e.payload)
-  })
-  await listen<string>('tray-launch-app', async (e) => {
-    const app = apps.value.find(a => a.id === e.payload)
-    if (app) await launchApp(app)
-  })
-})
-
-async function refreshRunningApps() {
-  try {
-    const ids = await invoke<string[]>('get_running_apps')
-    runningAppIds.value = new Set(ids)
-  } catch { /* ignore */ }
-}
-
-// ── 表单操作 ──
-async function saveApp() {
-  if (!editForm.value.name.trim() || !editForm.value.url.trim()) {
-    showMessage('请填写应用名称和目标 URL', 'error')
-    return
-  }
-  if (!isNew.value) {
-    const idx = apps.value.findIndex(a => a.id === editForm.value.id)
-    if (idx !== -1) apps.value[idx] = { ...editForm.value }
-  } else {
-    editForm.value.id = crypto.randomUUID()
-    apps.value.push({ ...editForm.value })
-    isNew.value = false // 切换到编辑模式
-  }
-  await persistApps()
-  showMessage(isNew.value ? '已保存' : '已保存', 'success')
-}
-
-async function deleteApp() {
-  if (!editForm.value.id) return
-  apps.value = apps.value.filter(a => a.id !== editForm.value.id)
-  await persistApps()
-  editForm.value = emptyApp()
-  isNew.value = true
-  showMessage('已删除', 'success')
-}
+// ── 设置 ──
+const { showSettingsDialog, autostartEnabled, themeIcon, themeLabel, toggleTheme, openSettingsDialog, toggleAutostart, closeSettingsDialog, handleExport, handleImport } = useSettings(apps, showMessage)
 
 // ── 图标颜色（单色灰调） ──
 const ICON_COLORS = [
@@ -141,155 +37,11 @@ function iconGradient(name: string) {
   return ICON_COLORS[Math.abs(hash) % ICON_COLORS.length]
 }
 
-// ── 启动 ──
-function getBackgroundRGB(): [number, number, number] {
-  const rgb = getComputedStyle(document.body).backgroundColor
-  const m = rgb.match(/\d+/g)
-  if (m && m.length >= 3) return [+m[0], +m[1], +m[2]]
-  return [255, 255, 255]
-}
-
-async function launchApp(app: AppItem) {
-  loading.value = true
-  try {
-    const [bgR, bgG, bgB] = getBackgroundRGB()
-    const result = await invoke<string>('launch_app_window', {
-      appId: app.id,
-      command: app.command,
-      url: app.url,
-      width: app.width,
-      height: app.height,
-      appName: app.name,
-      bgR,
-      bgG,
-      bgB,
-    })
-    showMessage(result, 'success')
-    if (app.command.trim()) {
-      openLogDialog(app)
-    }
-  } catch (e: any) {
-    showMessage(`启动失败: ${e}`, 'error')
-  }
-  loading.value = false
-}
-
-// ── 导入/导出 ──
-async function handleExport() {
-  try {
-    const json = await exportData()
-    const filePath = await save({
-      defaultPath: 'qqr-apps-export.json',
-      filters: [{ name: 'JSON', extensions: ['json'] }],
-    })
-    if (!filePath) return
-    await writeFile(filePath, new TextEncoder().encode(json))
-    showMessage(`已导出到 ${filePath}`, 'success')
-  } catch (e: any) {
-    showMessage(`导出失败: ${e}`, 'error')
-  }
-}
-
-async function handleImport() {
-  try {
-    const filePath = await dialogOpen({
-      filters: [{ name: 'JSON', extensions: ['json'] }],
-      multiple: false,
-    })
-    if (!filePath) return
-    const json = await readTextFile(filePath)
-    const imported = await importData(json)
-    apps.value = imported
-    showMessage(`已导入 ${imported.length} 个应用`, 'success')
-    try { await invoke('notify_apps_updated') } catch { /* ignore */ }
-  } catch (e: any) {
-    showMessage(`导入失败: ${e}`, 'error')
-  }
-}
-
-// ── 消息 ──
-function showMessage(msg: string, type: 'success' | 'error' | 'info' = 'info') {
-  message.value = msg
-  message_type.value = type
-  setTimeout(() => { message.value = '' }, 5000)
-}
-
-const messageClass = computed(() => {
-  const m = message_type.value
-  if (m === 'success') return 'bg-primary/10 text-primary'
-  if (m === 'error') return 'bg-destructive/10 text-destructive'
-  return 'bg-secondary text-secondary-foreground'
+// ── 初始化 ──
+onMounted(async () => {
+  await refreshApps()
+  refreshRunningApps()
 })
-
-// ── 日志查看器 ──
-const showLogDialog = ref(false)
-const logAppId = ref('')
-const logAppName = ref('')
-const logLines = ref<string[]>([])
-const logContainer = ref<HTMLElement | null>(null)
-const logLaunchFailed = ref(false)
-const logLaunchFailedReason = ref('')
-let logUnlisten: (() => void) | null = null
-let logFailedUnlisten: (() => void) | null = null
-
-async function openLogDialog(app: AppItem) {
-  logAppId.value = app.id
-  logAppName.value = app.name
-  logLaunchFailed.value = false
-  logLaunchFailedReason.value = ''
-  logLines.value = await invoke<string[]>('get_app_logs', { appId: app.id })
-  showLogDialog.value = true
-
-  logUnlisten = await listen<{ app_id: string; lines: string[] }>('app-log-batch', (e) => {
-    if (e.payload.app_id === logAppId.value) {
-      logLines.value.push(...e.payload.lines)
-      nextTick(() => {
-        if (logContainer.value) {
-          logContainer.value.scrollTop = logContainer.value.scrollHeight
-        }
-      })
-    }
-  })
-
-  logFailedUnlisten = await listen<{ app_id: string; reason: string }>('app-launch-failed', (e) => {
-    if (e.payload.app_id === logAppId.value) {
-      logLaunchFailed.value = true
-      logLaunchFailedReason.value = e.payload.reason
-    }
-  })
-}
-
-function closeLogDialog() {
-  showLogDialog.value = false
-  if (logUnlisten) { logUnlisten(); logUnlisten = null }
-  if (logFailedUnlisten) { logFailedUnlisten(); logFailedUnlisten = null }
-}
-
-// ── 设置 ──
-const showSettingsDialog = ref(false)
-const autostartEnabled = ref(false)
-
-async function openSettingsDialog() {
-  showSettingsDialog.value = true
-  try {
-    autostartEnabled.value = await autostartIsEnabled()
-  } catch {
-    autostartEnabled.value = false
-  }
-}
-
-async function toggleAutostart(value: boolean) {
-  try {
-    if (value) { await autostartEnable(); autostartEnabled.value = true }
-    else { await autostartDisable(); autostartEnabled.value = false }
-  } catch (e: any) {
-    showMessage(`设置自启动失败: ${e}`, 'error')
-  }
-}
-
-function closeSettingsDialog() {
-  showSettingsDialog.value = false
-}
 </script>
 
 <template>
@@ -368,9 +120,23 @@ function closeSettingsDialog() {
             <h2 class="text-base font-semibold tracking-[-0.32px]">
               {{ isNew ? '添加应用' : editForm.name || '未命名' }}
             </h2>
-            <div v-if="!isNew && runningAppIds.has(editForm.id)" class="flex items-center gap-1.5 mt-0.5">
-              <div class="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              <span class="text-xs text-muted-foreground">运行中</span>
+            <div v-if="!isNew && runningAppIds.has(editForm.id)" class="flex items-center gap-2 mt-1">
+              <span class="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 text-[11px] font-medium">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                运行中
+              </span>
+              <button class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-muted-foreground bg-secondary hover:text-foreground transition-colors cursor-pointer" @click="showAppWindow(editForm.id)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+                窗口
+              </button>
+              <button v-if="editForm.command" class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-muted-foreground bg-secondary hover:text-foreground transition-colors cursor-pointer" @click="openLogDialog(editForm)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+                日志
+              </button>
+              <button class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-muted-foreground bg-secondary hover:text-destructive transition-colors cursor-pointer" @click="stopApp(editForm.id)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"/></svg>
+                停止
+              </button>
             </div>
           </div>
         </div>
@@ -412,14 +178,6 @@ function closeSettingsDialog() {
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
             启动
-          </Button>
-          <Button
-            v-if="!isNew && runningAppIds.has(editForm.id) && editForm.command"
-            variant="secondary"
-            size="sm"
-            @click="openLogDialog(editForm)"
-          >
-            日志
           </Button>
           <div class="flex-1" />
           <Button v-if="!isNew" variant="destructive" size="sm" @click="deleteApp">删除</Button>

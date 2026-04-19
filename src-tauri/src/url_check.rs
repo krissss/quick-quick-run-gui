@@ -10,7 +10,9 @@ pub async fn check_url_inner(url: &str, timeout_secs: u64) -> bool {
         Some(h) => h,
         None => return false,
     };
-    let port = parsed.port().unwrap_or(80);
+    let port = parsed.port().unwrap_or_else(|| {
+        if parsed.scheme() == "https" { 443 } else { 80 }
+    });
 
     let start = std::time::Instant::now();
     let timeout = Duration::from_secs(timeout_secs);
@@ -21,20 +23,13 @@ pub async fn check_url_inner(url: &str, timeout_secs: u64) -> bool {
 
     loop {
         let addr = format!("{}:{}", host, port);
-        let socket_addr: std::net::SocketAddr = match addr.parse() {
-            Ok(a) => a,
-            Err(_) => {
-                match std::net::ToSocketAddrs::to_socket_addrs(&((host, port))) {
-                    Ok(mut addrs) => addrs.next().unwrap_or_else(|| {
-                        std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), port)
-                    }),
-                    Err(_) => std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), port),
-                }
-            }
-        };
-        match std::net::TcpStream::connect_timeout(&socket_addr, Duration::from_millis(500)) {
-            Ok(_) => return true,
-            Err(_) => {}
+        let connect_result = tokio::time::timeout(
+            Duration::from_millis(500),
+            tokio::net::TcpStream::connect(&addr),
+        ).await;
+
+        if connect_result.is_ok() {
+            return true;
         }
 
         if start.elapsed() >= timeout {

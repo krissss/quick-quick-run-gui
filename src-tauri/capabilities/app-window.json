@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "app-window",
+  "description": "Minimal capabilities for app runner windows",
+  "windows": ["app-*"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-set-title",
+    "core:window:allow-set-size",
+    "core:window:allow-set-focus",
+    "core:webview:default"
+  ]
+}

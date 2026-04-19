@@ -1,0 +1,97 @@
+import { ref } from 'vue'
+import { getTheme, setTheme, type Theme } from '@/lib/theme'
+import { enable as autostartEnable, disable as autostartDisable, isEnabled as autostartIsEnabled } from '@tauri-apps/plugin-autostart'
+import { save } from '@tauri-apps/plugin-dialog'
+import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
+import { writeFile, readTextFile } from '@tauri-apps/plugin-fs'
+import { invoke } from '@tauri-apps/api/core'
+import { exportData, importData } from '@/lib/store'
+import { getErrorMessage } from './useMessage'
+
+export function useSettings(
+  apps: { value: import('@/lib/store').AppItem[] },
+  showMessage: (msg: string, type?: 'success' | 'error' | 'info') => void,
+) {
+  const showSettingsDialog = ref(false)
+  const autostartEnabled = ref(false)
+
+  // 主题
+  const currentTheme = ref<Theme>(getTheme())
+  function toggleTheme() {
+    const next: Record<Theme, Theme> = { light: 'dark', dark: 'system', system: 'light' }
+    currentTheme.value = next[currentTheme.value]
+    setTheme(currentTheme.value)
+  }
+  const themeIcon = (() => {
+    if (currentTheme.value === 'light') return '☀️'
+    if (currentTheme.value === 'dark') return '🌙'
+    return '💻'
+  })
+  const themeLabel = (() => {
+    if (currentTheme.value === 'light') return '亮色'
+    if (currentTheme.value === 'dark') return '暗色'
+    return '跟随系统'
+  })
+
+  async function openSettingsDialog() {
+    showSettingsDialog.value = true
+    try {
+      autostartEnabled.value = await autostartIsEnabled()
+    } catch {
+      autostartEnabled.value = false
+    }
+  }
+
+  async function toggleAutostart(value: boolean) {
+    try {
+      if (value) { await autostartEnable(); autostartEnabled.value = true }
+      else { await autostartDisable(); autostartEnabled.value = false }
+    } catch (e: unknown) {
+      showMessage(`设置自启动失败: ${getErrorMessage(e)}`, 'error')
+    }
+  }
+
+  function closeSettingsDialog() {
+    showSettingsDialog.value = false
+  }
+
+  // 导入/导出
+  async function handleExport() {
+    try {
+      const json = await exportData()
+      const filePath = await save({
+        defaultPath: 'qqr-apps-export.json',
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      })
+      if (!filePath) return
+      await writeFile(filePath, new TextEncoder().encode(json))
+      showMessage(`已导出到 ${filePath}`, 'success')
+    } catch (e: unknown) {
+      showMessage(`导出失败: ${getErrorMessage(e)}`, 'error')
+    }
+  }
+
+  async function handleImport() {
+    try {
+      const filePath = await dialogOpen({
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+        multiple: false,
+      })
+      if (!filePath) return
+      const json = await readTextFile(filePath)
+      const imported = await importData(json)
+      apps.value = imported
+      showMessage(`已导入 ${imported.length} 个应用`, 'success')
+      try { await invoke('notify_apps_updated') } catch { /* ignore */ }
+    } catch (e: unknown) {
+      showMessage(`导入失败: ${getErrorMessage(e)}`, 'error')
+    }
+  }
+
+  return {
+    showSettingsDialog, autostartEnabled,
+    currentTheme, themeIcon, themeLabel, toggleTheme,
+    openSettingsDialog, toggleAutostart, closeSettingsDialog,
+    handleExport, handleImport,
+  }
+}

@@ -1,11 +1,17 @@
 use serde::Deserialize;
 use std::collections::HashSet;
+use std::sync::MutexGuard;
 use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager,
 };
+
+/// Lock a Mutex, recovering from poison by taking the guard.
+fn recover_lock<T>(mutex: &std::sync::Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// 应用配置（对应前端 AppItem）
 #[derive(Debug, Deserialize)]
@@ -33,7 +39,7 @@ fn read_apps_from_store(app: &AppHandle) -> Vec<AppEntry> {
 fn read_running_ids(app: &AppHandle) -> HashSet<String> {
     use crate::process::AppState;
     if let Some(state) = app.try_state::<AppState>() {
-        state.processes.lock().unwrap().keys().cloned().collect()
+        recover_lock(&state.processes).keys().cloned().collect()
     } else {
         HashSet::new()
     }
@@ -86,7 +92,11 @@ fn build_menu(app: &AppHandle) -> tauri::menu::Menu<tauri::Wry> {
         mb = mb.item(&item);
     }
 
-    mb.build().expect("构建菜单失败")
+    mb.build().unwrap_or_else(|e| {
+        eprintln!("构建托盘菜单失败: {}", e);
+        // 返回空菜单作为 fallback
+        MenuBuilder::new(app).build().expect("构建空菜单失败")
+    })
 }
 
 /// 重建托盘菜单（应用列表变化时调用）
@@ -101,14 +111,20 @@ pub fn rebuild_tray_menu(app: &AppHandle) {
 }
 
 /// 加载菜单栏模板图标（黑色双箭头 » 轮廓）
-fn create_template_icon() -> Image<'static> {
+fn create_template_icon() -> Option<Image<'static>> {
     let bytes = include_bytes!("../icons/tray-icon.png");
-    Image::from_bytes(bytes).expect("加载托盘图标失败")
+    Image::from_bytes(bytes).ok()
 }
 
 /// 初始化系统托盘图标
 pub fn setup_tray(app: &AppHandle) {
-    let icon = create_template_icon();
+    let icon = match create_template_icon() {
+        Some(i) => i,
+        None => {
+            eprintln!("警告: 加载托盘图标失败，跳过托盘设置");
+            return;
+        }
+    };
 
     let menu = build_menu(app);
 
@@ -137,6 +153,7 @@ pub fn setup_tray(app: &AppHandle) {
                     if running.contains(app_id) {
                         let label = crate::process::window_label_for(app_id);
                         if let Some(win) = app.get_webview_window(&label) {
+                            let _ = win.unminimize();
                             let _ = win.show();
                             let _ = win.set_focus();
                         }
@@ -146,6 +163,8 @@ pub fn setup_tray(app: &AppHandle) {
                 }
             }
         })
-        .build(app)
-        .expect("创建托盘图标失败");
+        .build(app);
+    if let Err(e) = &_tray {
+        eprintln!("创建托盘图标失败: {}", e);
+    }
 }

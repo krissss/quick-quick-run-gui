@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { cn } from '@/lib/utils'
-import { buttonVariants, type buttonVariants as _ } from './variants'
+import { buttonVariants } from './variants'
 
 const props = withDefaults(defineProps<{
   variant?: 'default' | 'secondary' | 'destructive' | 'ghost' | 'outline'

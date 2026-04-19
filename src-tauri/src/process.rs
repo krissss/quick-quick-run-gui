@@ -1,10 +1,15 @@
 use std::collections::HashMap;
 use std::io::BufRead;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use command_group::CommandGroup;
 use tauri::{Emitter, Manager};
+
+/// Lock a Mutex, recovering from poison by taking the guard.
+fn recover_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// 每个正在运行的应用进程信息
 pub struct ProcessInfo {
@@ -21,7 +26,7 @@ pub struct AppState {
 pub fn kill_app_process(handle: &tauri::AppHandle, app_id: &str) {
     if let Some(state) = handle.try_state::<AppState>() {
         let info = {
-            let mut processes = state.processes.lock().unwrap();
+            let mut processes = recover_lock(&state.processes);
             processes.remove(app_id)
         };
         if let Some(info) = info {
@@ -37,7 +42,7 @@ pub fn kill_app_process(handle: &tauri::AppHandle, app_id: &str) {
 pub fn force_kill_all(handle: &tauri::AppHandle) {
     let infos: Vec<ProcessInfo> = {
         if let Some(state) = handle.try_state::<AppState>() {
-            let mut processes = state.processes.lock().unwrap();
+            let mut processes = recover_lock(&state.processes);
             processes.drain().map(|(_, v)| v).collect()
         } else {
             return;
@@ -128,7 +133,7 @@ pub fn spawn_log_reader(
 
             // 添加到日志缓冲
             {
-                let mut buf = logs.lock().unwrap();
+                let mut buf = recover_lock(&logs);
                 buf.push(line);
                 if buf.len() > 2000 {
                     let remove_count = buf.len() - 2000;
@@ -161,7 +166,7 @@ pub fn spawn_process_monitor(app: &tauri::AppHandle, app_id: &str) {
                     Some(s) => s,
                     None => return,
                 };
-                let mut processes = state.processes.lock().unwrap();
+                let mut processes = recover_lock(&state.processes);
                 match processes.get_mut(&app_id) {
                     Some(info) => {
                         if let Some(ref mut child) = info.child {
@@ -179,7 +184,7 @@ pub fn spawn_process_monitor(app: &tauri::AppHandle, app_id: &str) {
             };
             if exited {
                 let state = app.state::<AppState>();
-                state.processes.lock().unwrap().remove(&app_id);
+                recover_lock(&state.processes).remove(&app_id);
                 let _ = app.emit("app-stopped", app_id.clone());
                 let _ = app.emit("app-launch-failed", serde_json::json!({
                     "app_id": app_id,

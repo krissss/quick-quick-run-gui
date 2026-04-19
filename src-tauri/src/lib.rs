@@ -1,26 +1,30 @@
 #[cfg(target_os = "macos")]
 mod dock;
-mod favicon;
+mod html_title;
 mod process;
 mod tray;
 mod url_check;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use tauri::{Emitter, Listener, Manager};
 use tauri_plugin_store::StoreExt;
 
-use favicon::extract_html_title;
+use html_title::extract_html_title;
 use process::{
     AppState, ProcessInfo, kill_app_process, spawn_log_reader,
     spawn_process_monitor, spawn_shell_command, window_label_for,
 };
 use url_check::check_url_inner;
 
+/// Lock a Mutex, recovering from poison by taking the guard.
+fn recover_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -31,26 +35,14 @@ pub fn run() {
         .manage(AppState {
             processes: Mutex::new(std::collections::HashMap::new()),
         })
-        .invoke_handler({
-            #[cfg(target_os = "macos")]
-            {
-                tauri::generate_handler![
-                    launch_app_window,
-                    get_running_apps,
-                    get_app_logs,
-                    notify_apps_updated,
-                ]
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                tauri::generate_handler![
-                    launch_app_window,
-                    get_running_apps,
-                    get_app_logs,
-                    notify_apps_updated,
-                ]
-            }
-        })
+        .invoke_handler(tauri::generate_handler![
+            launch_app_window,
+            get_running_apps,
+            get_app_logs,
+            stop_app,
+            show_app_window,
+            notify_apps_updated,
+        ])
         .setup(|app| {
             // 修复 macOS app bundle 环境变量缺失问题
             // 从 Finder/Spotlight 启动时不会继承 shell 的环境（缺少 Homebrew/nvm/pnpm 等路径和变量）
@@ -133,8 +125,9 @@ async fn launch_app_window(
 ) -> Result<String, String> {
     let window_label = window_label_for(&app_id);
 
-    // 如果窗口已存在，聚焦并返回
+    // 如果窗口已存在，取消最小化并聚焦
     if let Some(existing) = app.get_webview_window(&window_label) {
+        let _ = existing.unminimize();
         let _ = existing.set_focus();
         return Ok("窗口已存在，已聚焦".to_string());
     }
@@ -171,22 +164,19 @@ async fn launch_app_window(
             .build()
             .map_err(|e| format!("创建窗口失败: {}", e))?;
 
-        let app_handle_close = app.clone();
-        let app_id_close = app_id.clone();
         let app_save = app.clone();
         let app_id_save = app_id.clone();
         webview_window.on_window_event(move |event| {
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. })
-                || matches!(event, tauri::WindowEvent::Destroyed)
-            {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
                 if let Some(win) = app_save.get_webview_window(&window_label_for(&app_id_save)) {
                     save_window_state(&app_save, &app_id_save, &win);
+                    let _ = win.minimize();
                 }
-                kill_app_process(&app_handle_close, &app_id_close);
             }
         });
 
-        state.processes.lock().unwrap().insert(
+        recover_lock(&state.processes).insert(
             app_id.clone(),
             ProcessInfo { child: None, logs },
         );
@@ -208,7 +198,7 @@ async fn launch_app_window(
     }
 
     // 存入 HashMap + emit，让前端立即看到日志
-    state.processes.lock().unwrap().insert(
+    recover_lock(&state.processes).insert(
         app_id.clone(),
         ProcessInfo { child: Some(child), logs },
     );
@@ -228,7 +218,7 @@ async fn launch_app_window(
         // 检查进程是否还在（可能已退出）
         let still_alive = {
             let s = app_bg.try_state::<AppState>();
-            s.is_some() && s.unwrap().processes.lock().unwrap().contains_key(&app_id_bg)
+            s.is_some() && recover_lock(&s.unwrap().processes).contains_key(&app_id_bg)
         };
         if !still_alive {
             return;
@@ -278,19 +268,16 @@ async fn launch_app_window(
             }
         };
 
-        let app_h = app_bg.clone();
-        let app_id_c = app_id_bg.clone();
         let app_s = app_bg.clone();
         let app_id_s = app_id_bg.clone();
         let label_s = label.clone();
         webview_window.on_window_event(move |event| {
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. })
-                || matches!(event, tauri::WindowEvent::Destroyed)
-            {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
                 if let Some(win) = app_s.get_webview_window(&label_s) {
                     save_window_state(&app_s, &app_id_s, &win);
+                    let _ = win.minimize();
                 }
-                kill_app_process(&app_h, &app_id_c);
             }
         });
 
@@ -306,26 +293,53 @@ async fn launch_app_window(
 
 /// 获取当前运行的 app ID 列表
 #[tauri::command]
-fn get_running_apps(state: tauri::State<'_, AppState>) -> Vec<String> {
-    state.processes.lock().unwrap().keys().cloned().collect()
+fn get_running_apps(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    Ok(recover_lock(&state.processes).keys().cloned().collect())
 }
 
 /// 获取指定应用的日志缓冲
 #[tauri::command]
-fn get_app_logs(state: tauri::State<'_, AppState>, app_id: String) -> Vec<String> {
-    let processes = state.processes.lock().unwrap();
+fn get_app_logs(state: tauri::State<'_, AppState>, app_id: String) -> Result<Vec<String>, String> {
+    let processes = recover_lock(&state.processes);
     if let Some(info) = processes.get(&app_id) {
-        info.logs.lock().unwrap().clone()
+        Ok(recover_lock(&info.logs).clone())
     } else {
-        vec![]
+        Ok(vec![])
     }
+}
+
+/// 停止应用进程（杀掉进程、关闭窗口）
+#[tauri::command]
+fn stop_app(app: tauri::AppHandle, app_id: String) -> Result<(), String> {
+    // 先关闭窗口
+    let label = window_label_for(&app_id);
+    if let Some(win) = app.get_webview_window(&label) {
+        save_window_state(&app, &app_id, &win);
+        // 因为 on_window_event 拦截了 CloseRequested，这里需要 destroy 而非 close
+        let _ = win.destroy();
+    }
+    kill_app_process(&app, &app_id);
+    Ok(())
+}
+
+/// 显示/聚焦已运行应用的窗口（取消最小化）
+#[tauri::command]
+fn show_app_window(app: tauri::AppHandle, app_id: String) -> Result<(), String> {
+    let label = window_label_for(&app_id);
+    if let Some(win) = app.get_webview_window(&label) {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+    Ok(())
 }
 
 /// 前端通知应用列表已更新，重建托盘菜单
 #[tauri::command]
-fn notify_apps_updated(app: tauri::AppHandle) {
+fn notify_apps_updated(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     tray::rebuild_tray_menu(&app);
+    Ok(())
 }
 
 // ── 内部辅助 ──
