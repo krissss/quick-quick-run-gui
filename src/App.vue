@@ -13,13 +13,13 @@ import { useSettings } from '@/composables/useSettings'
 const { message, messageClass, showMessage } = useMessage()
 
 // ── 日志（需要在 launcher 之前初始化，因为 launcher 依赖它） ──
-const { showLogDialog, logAppId, logAppName, logLines, logLaunchFailed, logLaunchFailedReason, openLogDialog, closeLogDialog } = useLogs()
+const { showLogDialog, logAppId, logAppName, logLines, logLaunchFailed, logLaunchFailedReason, logWindowOpened, openLogDialog, closeLogDialog } = useLogs()
 
 // ── 应用管理 ──
 const { apps, editForm, isNew, selectApp, openAddForm, refreshApps, saveApp, deleteApp } = useApps(showMessage)
 
 // ── 启动器 ──
-const { runningAppIds, refreshRunningApps, launchApp, stopApp, showAppWindow } = useLauncher(apps, showMessage, openLogDialog)
+const { runningAppIds, runningPids, refreshRunningApps, launchApp, stopApp, showAppWindow } = useLauncher(apps, showMessage, openLogDialog)
 
 // ── 设置 ──
 const { showSettingsDialog, autostartEnabled, themeIcon, themeLabel, toggleTheme, openSettingsDialog, toggleAutostart, closeSettingsDialog, handleExport, handleImport } = useSettings(apps, showMessage)
@@ -125,11 +125,12 @@ onMounted(async () => {
                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 运行中
               </span>
+              <span v-if="runningPids.has(editForm.id)" class="text-[11px] text-muted-foreground font-mono">PID {{ runningPids.get(editForm.id) }}</span>
               <button class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-muted-foreground bg-secondary hover:text-foreground transition-colors cursor-pointer" @click="showAppWindow(editForm.id)">
                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
                 窗口
               </button>
-              <button v-if="editForm.command" class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-muted-foreground bg-secondary hover:text-foreground transition-colors cursor-pointer" @click="openLogDialog(editForm)">
+              <button v-if="editForm.command" class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-muted-foreground bg-secondary hover:text-foreground transition-colors cursor-pointer" @click="openLogDialog(editForm, true)">
                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
                 日志
               </button>
@@ -195,7 +196,7 @@ onMounted(async () => {
         <div class="bg-card rounded-lg p-6 w-full max-w-2xl max-h-[80vh] flex flex-col" style="box-shadow: var(--shadow-card)">
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-base font-semibold tracking-[-0.32px]">{{ logAppName }} — 日志</h2>
-            <div v-if="!logLaunchFailed && runningAppIds.has(logAppId)" class="flex items-center gap-1.5">
+            <div v-if="!logLaunchFailed && !logWindowOpened && runningAppIds.has(logAppId)" class="flex items-center gap-1.5">
               <span class="inline-block w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
               <span class="text-xs text-muted-foreground">启动中</span>
             </div>

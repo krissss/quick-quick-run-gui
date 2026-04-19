@@ -11,6 +11,7 @@ export function useLauncher(
 ) {
   const loading = ref(false)
   const runningAppIds = ref<Set<string>>(new Set())
+  const runningPids = ref<Map<string, number>>(new Map())
 
   async function refreshRunningApps() {
     try {
@@ -30,7 +31,7 @@ export function useLauncher(
     loading.value = true
     try {
       const [bgR, bgG, bgB] = getBackgroundRGB()
-      const result = await invoke<string>('launch_app_window', {
+      const result = await invoke<{ message: string; pid: number | null }>('launch_app_window', {
         appId: app.id,
         command: app.command,
         url: app.url,
@@ -41,7 +42,13 @@ export function useLauncher(
         bgG,
         bgB,
       })
-      showMessage(result, 'success')
+      if (result.pid != null) {
+        const m = new Map(runningPids.value)
+        m.set(app.id, result.pid)
+        runningPids.value = m
+      } else {
+        showMessage(result.message, 'success')
+      }
       if (app.command.trim()) {
         openLogDialog(app)
       }
@@ -65,6 +72,9 @@ export function useLauncher(
         const s = new Set(runningAppIds.value)
         s.delete(e.payload)
         runningAppIds.value = s
+        const m = new Map(runningPids.value)
+        m.delete(e.payload)
+        runningPids.value = m
       }),
       await listen<string>('tray-launch-app', async (e) => {
         const app = apps.value.find(a => a.id === e.payload)
@@ -91,5 +101,5 @@ export function useLauncher(
     } catch { /* ignore */ }
   }
 
-  return { loading, runningAppIds, refreshRunningApps, launchApp, stopApp, showAppWindow }
+  return { loading, runningAppIds, runningPids, refreshRunningApps, launchApp, stopApp, showAppWindow }
 }

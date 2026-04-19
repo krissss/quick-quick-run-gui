@@ -42,6 +42,7 @@ pub fn run() {
             stop_app,
             show_app_window,
             notify_apps_updated,
+            open_in_browser,
         ])
         .setup(|app| {
             // 修复 macOS app bundle 环境变量缺失问题
@@ -108,6 +109,13 @@ pub fn run() {
 
 // ── IPC 命令 ──
 
+/// launch_app_window 返回值
+#[derive(serde::Serialize)]
+struct LaunchResult {
+    message: String,
+    pid: Option<u32>,
+}
+
 /// 启动应用并在新窗口中运行
 #[tauri::command]
 async fn launch_app_window(
@@ -122,14 +130,14 @@ async fn launch_app_window(
     bg_r: u8,
     bg_g: u8,
     bg_b: u8,
-) -> Result<String, String> {
+) -> Result<LaunchResult, String> {
     let window_label = window_label_for(&app_id);
 
     // 如果窗口已存在，取消最小化并聚焦
     if let Some(existing) = app.get_webview_window(&window_label) {
         let _ = existing.unminimize();
         let _ = existing.set_focus();
-        return Ok("窗口已存在，已聚焦".to_string());
+        return Ok(LaunchResult { message: "窗口已存在，已聚焦".into(), pid: None });
     }
 
     // 先杀掉同 app_id 的旧进程
@@ -180,8 +188,9 @@ async fn launch_app_window(
             app_id.clone(),
             ProcessInfo { child: None, logs },
         );
-        let _ = app.emit("app-launched", app_id);
-        return Ok("窗口已打开".to_string());
+        let _ = app.emit("app-launched", app_id.clone());
+        let _ = app.emit("app-window-opened", app_id);
+        return Ok(LaunchResult { message: "窗口已打开".into(), pid: None });
     }
 
     // 有命令：启动进程，立即返回，后台等待 URL 后创建窗口
@@ -286,9 +295,11 @@ async fn launch_app_window(
         if let Some(win) = app_bg.get_webview_window(&label2) {
             let _ = set_window_title_inner(&win, &url_bg).await;
         }
+
+        let _ = app_bg.emit("app-window-opened", app_id_bg);
     });
 
-    Ok(format!("进程已启动, PID: {}", pid))
+    Ok(LaunchResult { message: "进程已启动".into(), pid: Some(pid) })
 }
 
 /// 获取当前运行的 app ID 列表
@@ -339,6 +350,30 @@ fn show_app_window(app: tauri::AppHandle, app_id: String) -> Result<(), String> 
 fn notify_apps_updated(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     tray::rebuild_tray_menu(&app);
+    Ok(())
+}
+
+/// 在系统默认浏览器中打开 URL
+#[tauri::command]
+fn open_in_browser(url: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg(&url)
+        .spawn()
+        .map_err(|e| format!("打开浏览器失败: {}", e))?;
+
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open")
+        .arg(&url)
+        .spawn()
+        .map_err(|e| format!("打开浏览器失败: {}", e))?;
+
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("cmd")
+        .args(["/C", "start", &url])
+        .spawn()
+        .map_err(|e| format!("打开浏览器失败: {}", e))?;
+
     Ok(())
 }
 
