@@ -7,15 +7,9 @@ const targetUrl = params.get('url') || ''
 
 const iframeLoading = ref(true)
 const iframeError = ref(false)
-const contextMenu = ref(false)
-const menuX = ref(0)
-const menuY = ref(0)
 const retryCount = ref(0)
 const MAX_RETRIES = 5
 const iframeRef = useTemplateRef<HTMLIFrameElement>('iframeRef')
-// menuRef 供模板 ref 绑定
-const menuRef = useTemplateRef<HTMLDivElement>('menuRef')
-void menuRef
 
 function onIframeLoad() {
   retryCount.value = 0
@@ -39,7 +33,6 @@ function onIframeError() {
 }
 
 function reload() {
-  contextMenu.value = false
   iframeError.value = false
   iframeLoading.value = true
   if (iframeRef.value) {
@@ -49,26 +42,14 @@ function reload() {
 }
 
 async function openInBrowser() {
-  contextMenu.value = false
   try {
     await invoke('open_in_browser', { url: targetUrl })
   } catch { /* ignore */ }
 }
-
-function onContextMenu(e: MouseEvent) {
-  e.preventDefault()
-  menuX.value = e.clientX
-  menuY.value = e.clientY
-  contextMenu.value = true
-}
-
-function closeMenu() {
-  contextMenu.value = false
-}
 </script>
 
 <template>
-  <div class="h-screen flex flex-col bg-background font-sans" @click="closeMenu">
+  <div class="h-screen flex flex-col bg-background font-sans">
     <!-- Loading 遮罩 -->
     <div v-if="iframeLoading" class="flex-1 flex items-center justify-center bg-background">
       <div class="flex flex-col items-center gap-3">
@@ -90,15 +71,8 @@ function closeMenu() {
       </div>
     </div>
 
-    <!-- iframe 容器 -->
-    <div class="relative flex-1">
-      <!-- 右键捕获层（仅 loading/error 时由 div 自身处理，正常时需覆盖 iframe） -->
-      <div
-        v-if="!iframeLoading && !iframeError"
-        class="absolute inset-0 z-10"
-        @contextmenu="onContextMenu"
-      />
-
+    <!-- iframe + 工具栏 -->
+    <div class="flex-1 relative">
       <iframe
         ref="iframeRef"
         v-show="!iframeLoading && !iframeError"
@@ -109,32 +83,28 @@ function closeMenu() {
         @load="onIframeLoad"
         @error="onIframeError"
       />
-    </div>
 
-    <!-- 右键菜单 -->
-    <Teleport to="body">
-      <div
-        v-if="contextMenu"
-        ref="menuRef"
-        class="fixed z-50 min-w-[140px] rounded-lg py-1 bg-card text-foreground"
-        :style="{ left: menuX + 'px', top: menuY + 'px', boxShadow: 'var(--shadow-card)' }"
-        @click.stop
-      >
-        <button
-          class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-foreground hover:bg-accent transition-colors cursor-pointer"
-          @click="reload"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
-          刷新页面
-        </button>
-        <button
-          class="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-foreground hover:bg-accent transition-colors cursor-pointer"
-          @click="openInBrowser"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          在浏览器中打开
-        </button>
+      <!-- 悬浮工具栏（鼠标移入顶部区域时显示） -->
+      <div v-if="!iframeLoading && !iframeError" class="group absolute top-0 inset-x-0 z-10">
+        <div class="flex items-center justify-center h-6 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div class="flex items-center gap-0.5 rounded-b-md bg-card/90 backdrop-blur-sm px-1 py-0.5" style="box-shadow: var(--shadow-card)">
+            <button
+              class="h-6 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+              title="刷新页面"
+              @click="reload"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+            </button>
+            <button
+              class="h-6 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+              title="在浏览器中打开"
+              @click="openInBrowser"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </button>
+          </div>
+        </div>
       </div>
-    </Teleport>
+    </div>
   </div>
 </template>

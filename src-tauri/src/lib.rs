@@ -155,7 +155,11 @@ async fn launch_app_window(
             &app, &window_label, window_url,
         )
         .title(&app_name)
-        .background_color(tauri::utils::config::Color(bg_r, bg_g, bg_b, 255));
+        .background_color(tauri::utils::config::Color(bg_r, bg_g, bg_b, 255))
+        .on_new_window(move |url, _features| {
+            open_url_in_browser(url.as_str());
+            tauri::webview::NewWindowResponse::Deny
+        });
 
         // 恢复保存的位置和大小
         if let Some(state) = saved_state {
@@ -251,7 +255,11 @@ async fn launch_app_window(
             &app_bg, &label, window_url,
         )
         .title(&app_name_bg)
-        .background_color(tauri::utils::config::Color(bg_r, bg_g, bg_b, 255));
+        .background_color(tauri::utils::config::Color(bg_r, bg_g, bg_b, 255))
+        .on_new_window(move |url, _features| {
+            open_url_in_browser(url.as_str());
+            tauri::webview::NewWindowResponse::Deny
+        });
 
         // 恢复保存的位置和大小
         if let Some(state) = saved_state {
@@ -353,27 +361,22 @@ fn notify_apps_updated(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// 在系统默认浏览器中打开 URL
-#[tauri::command]
-fn open_in_browser(url: String) -> Result<(), String> {
+/// 在系统默认浏览器中打开 URL（内部辅助）
+fn open_url_in_browser(url: &str) {
     #[cfg(target_os = "macos")]
-    std::process::Command::new("open")
-        .arg(&url)
-        .spawn()
-        .map_err(|e| format!("打开浏览器失败: {}", e))?;
+    let _ = std::process::Command::new("open").arg(url).spawn();
 
     #[cfg(target_os = "linux")]
-    std::process::Command::new("xdg-open")
-        .arg(&url)
-        .spawn()
-        .map_err(|e| format!("打开浏览器失败: {}", e))?;
+    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
 
     #[cfg(target_os = "windows")]
-    std::process::Command::new("cmd")
-        .args(["/C", "start", &url])
-        .spawn()
-        .map_err(|e| format!("打开浏览器失败: {}", e))?;
+    let _ = std::process::Command::new("cmd").args(["/C", "start", url]).spawn();
+}
 
+/// 在系统默认浏览器中打开 URL（IPC 命令）
+#[tauri::command]
+fn open_in_browser(url: String) -> Result<(), String> {
+    open_url_in_browser(&url);
     Ok(())
 }
 
