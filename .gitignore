@@ -32,5 +32,4 @@ src-tauri/data/
 .env
 .env.*
 .gitnexus
-.claude
 /memory
