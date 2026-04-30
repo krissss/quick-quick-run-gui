@@ -4,12 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-Tauri v2 桌面应用，将 Web 应用包装为原生窗口。用户配置应用列表（名称、shell 命令、目标 URL），点击卡片在独立窗口中启动。
+Tauri v2 桌面运行器，用于管理三类条目：
+- **网页（web）：** 可选 shell 启动命令 + 目标 URL，点击后在独立 WebView 窗口中打开。
+- **服务（service）：** 长时间运行的 shell 命令，不创建应用窗口，支持运行态、日志和停止。
+- **任务（task）：** 一次性 shell 命令，支持手动运行、cron 定时运行、错过执行策略和运行历史。
 
 ## 技术栈
 
 - **前端：** Vue 3（Composition API + `<script setup>`）、TypeScript、Vite、Tailwind CSS v4、shadcn-vue
 - **后端：** Rust、Tauri v2、tokio（异步）、serde
+- **调度：** cron 解析、`chrono`、`chrono-tz`
 - **数据存储：** tauri-plugin-store（JSON 文件：`qqr-store.json`）
 - **包管理器：** pnpm
 
@@ -29,10 +33,14 @@ pnpm tauri:build  # Tauri 生产构建
 **命令（前端 → 后端）：**
 | 命令 | 参数 | 返回 | 平台 |
 |---|---|---|---|
-| `launch_app_window` | `appId`, `command`, `url`, `width`, `height`, `appName`, `bgR/G/B` | `string` | - |
-| `get_running_apps` | - | `string[]` | - |
+| `launch_app_window` | `appId`, `command`, `url`, `width`, `height`, `appName`, `itemType`, `bgR/G/B` | `{ message, pid, run_id }` | - |
+| `get_running_apps` | - | `{ app_id, pid, item_type }[]` | - |
 | `get_app_logs` | `appId` | `string[]` | - |
+| `get_recent_runs` | - | `RunRecord[]` | - |
+| `stop_app` | `appId` | - | - |
+| `show_app_window` | `appId` | - | - |
 | `notify_apps_updated` | - | - | - |
+| `open_in_browser` | `url` | - | - |
 | `hide_dock_icon_cmd` | - | - | macOS |
 | `show_dock_icon_cmd` | - | - | macOS |
 
@@ -41,6 +49,9 @@ pnpm tauri:build  # Tauri 生产构建
 |---|---|
 | `app-launched` | `string` (app_id) |
 | `app-stopped` | `string` (app_id) |
+| `app-process-stopped` | `string` (app_id，web 后台进程退出但窗口仍可保留) |
+| `app-run-updated` | `{ app_id, run_id, status }` |
+| `app-window-opened` | `string` (app_id) |
 | `app-log` | `{app_id: string, line: string}` |
 | `app-launch-failed` | `{app_id: string, reason: string}` |
 | `tray-launch-app` | `string` (app_id) |
@@ -48,10 +59,33 @@ pnpm tauri:build  # Tauri 生产构建
 ### 进程管理（`src-tauri/src/process.rs`）
 
 - `AppState`：`HashMap<String, ProcessInfo>` 管理所有运行进程
-- 窗口关闭时 `on_window_event(CloseRequested)` 自动杀掉关联进程
+- `ItemType`：`Web`、`Service`、`Task`
+- `RunRecord`：记录每次运行的状态、PID、退出码、日志路径、触发方式（manual/schedule/startup-recover）
+- 窗口关闭时 `on_window_event(CloseRequested)` 自动杀掉关联 web 进程
+- web 进程自然退出时保留窗口运行态；service/task 退出后从运行态移除
+- 退出应用（托盘 Quit）不主动停止托管进程；托盘 `stop-all` 才会强制停止全部进程
 - 使用 `command_group` crate 创建独立进程组：
   - Unix：`group_spawn()` 底层使用 `setsid()` 创建新会话
   - Windows：`CREATE_NO_WINDOW` + `group_spawn()`
+
+### 定时任务
+
+- 调度器在启动后延迟 3 秒开始，每 60 秒检查一次启用的 task。
+- 仅 `type === "task"` 且 `schedule.enabled === true` 的条目参与调度。
+- cron 使用 5 段格式：分钟、小时、日期、月份、星期；星期 `0` 和 `7` 都表示周日。
+- `schedule.timezone` 通过 `chrono-tz` 解析；无效值回退到 `Asia/Shanghai`。
+- `missedPolicy`：
+  - `skip`：只在当前分钟匹配时运行，不补跑错过的时间。
+  - `run-once`：最多回溯 32 天，补跑最近一次错过的 due。
+- `schedule_state` 只在任务真实启动成功并返回 `run_id` 后推进；启动失败或任务已在运行时不推进。
+
+### 数据存储
+
+`qqr-store.json` 主要 key：
+- `apps`：用户配置的 web/service/task 条目。
+- `running_sessions`：重启恢复用的运行中进程快照。
+- `run_records`：最多保留 500 条运行历史。
+- `schedule_state`：调度器按 app id 保存的最近成功触发 due 时间。
 
 ### 窗口管理
 
@@ -74,12 +108,14 @@ input: {
 **前端：**
 - `src/App.vue` — 主界面，卡片列表、CRUD、主题、日志
 - `src/AppWindow.vue` — 应用窗口，工具栏 + iframe
+- `src/components/CronSchedulePicker.vue` — 人性化 cron 编辑组件
 - `src/lib/store.ts` — 数据持久化封装
+- `src/lib/cron.ts` — 前端 cron 表达式校验
 - `src/lib/theme.ts` — 主题切换（light/dark/system）
 - `src/components/ui/` — shadcn-vue 组件
 
 **后端：**
-- `src-tauri/src/lib.rs` — IPC 命令入口
+- `src-tauri/src/lib.rs` — IPC 命令入口、窗口管理、任务调度
 - `src-tauri/src/process.rs` — 进程生命周期
 - `src-tauri/src/tray.rs` — 系统托盘（macOS only）
 - `src-tauri/src/dock.rs` — Dock 图标控制（macOS only）
@@ -103,12 +139,29 @@ input: {
 ### 数据流
 
 ```
-用户点击卡片
-  → launch_app_window
-  → 启动 shell 进程（command 可选）
-  → 轮询 check_url_reachable
-  → 创建 WebviewWindow
-  → 设置窗口标题（从目标页面 <title>）
+web 条目：
+  用户点击卡片
+    → launch_app_window(itemType=web)
+    → 启动 shell 进程（command 可选）
+    → 轮询 check_url_reachable
+    → 创建 WebviewWindow
+    → 设置窗口标题（从目标页面 <title>）
+
+service 条目：
+  用户点击卡片
+    → launch_app_window(itemType=service)
+    → 杀掉旧实例
+    → 启动 shell 进程
+    → 写入 running_sessions + run_records
+    → 进程退出后更新运行记录并移除运行态
+
+task 条目：
+  用户点击运行或调度器命中 cron
+    → launch_app_window(itemType=task) 或 run_scheduler_tick
+    → 若任务已运行则不重复启动
+    → 启动 shell 进程
+    → 写入 run_records
+    → 进程退出后更新状态
 ```
 
 ### shadcn-vue 组件

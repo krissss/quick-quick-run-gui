@@ -14,7 +14,9 @@ use tauri_plugin_store::StoreExt;
 
 const STORE_FILE: &str = "qqr-store.json";
 const SESSIONS_KEY: &str = "running_sessions";
+const RUN_RECORDS_KEY: &str = "run_records";
 const LOG_TAIL_BYTES: u64 = 1024 * 1024;
+const MAX_RUN_RECORDS: usize = 500;
 
 /// Lock a Mutex, recovering from poison by taking the guard.
 fn recover_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -32,15 +34,70 @@ pub struct AppWindowInfo {
     pub bg_b: u8,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ItemType {
+    Web,
+    Service,
+    Task,
+}
+
+impl Default for ItemType {
+    fn default() -> Self {
+        Self::Web
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RunStatus {
+    Running,
+    Success,
+    Failed,
+    Killed,
+    Lost,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RunTrigger {
+    Manual,
+    Schedule,
+    StartupRecover,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct RunRecord {
+    pub id: String,
+    pub app_id: String,
+    pub app_name: String,
+    pub item_type: ItemType,
+    pub status: RunStatus,
+    pub pid: Option<u32>,
+    pub exit_code: Option<i32>,
+    pub started_at: u64,
+    pub finished_at: Option<u64>,
+    pub log_path: String,
+    pub trigger: RunTrigger,
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct PersistedSession {
     pub app_id: String,
+    #[serde(default)]
+    pub app_name: String,
+    #[serde(default)]
+    pub item_type: ItemType,
     pub command: String,
+    #[serde(default)]
     pub url: String,
     pub pid: u32,
     pub log_path: String,
     pub started_at: u64,
-    pub window: AppWindowInfo,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub window: Option<AppWindowInfo>,
 }
 
 /// 每个正在运行的应用进程信息
@@ -49,7 +106,9 @@ pub struct ProcessInfo {
     pub pid: Option<u32>,
     pub log_path: Option<PathBuf>,
     pub logs: Arc<Mutex<Vec<String>>>,
-    pub window: AppWindowInfo,
+    pub item_type: ItemType,
+    pub run_id: Option<String>,
+    pub window: Option<AppWindowInfo>,
 }
 
 /// 全局进程状态，支持多个应用同时运行
@@ -65,6 +124,7 @@ pub fn kill_app_process(handle: &tauri::AppHandle, app_id: &str) {
             processes.remove(app_id)
         };
         if let Some(info) = info {
+            finish_process_run(handle, &info, RunStatus::Killed, None);
             kill_process_info(info);
         }
     }
@@ -90,11 +150,19 @@ pub fn force_kill_all(handle: &tauri::AppHandle) {
         }
     };
     let mut app_ids = app_ids;
-    for session in read_persisted_sessions(handle) {
-        app_ids.insert(session.app_id);
-    }
+    let killed_ids = app_ids.clone();
     for info in infos {
+        finish_process_run(handle, &info, RunStatus::Killed, None);
         kill_process_info(info);
+    }
+    for session in read_persisted_sessions(handle) {
+        if !killed_ids.contains(&session.app_id) {
+            let _ = kill_process_group(session.pid);
+            if let Some(run_id) = session.run_id {
+                finish_run_record(handle, &run_id, RunStatus::Killed, None);
+            }
+        }
+        app_ids.insert(session.app_id);
     }
     save_persisted_sessions(handle, &[]);
     for app_id in app_ids {
@@ -169,14 +237,14 @@ pub fn window_label_for(app_id: &str) -> String {
     format!("app-{}", short)
 }
 
-/// 监控进程退出：定期 try_wait，进程自然退出时只清理 PID，保留窗口运行态
+/// 监控进程退出：web 保留窗口运行态，service/task 退出后清掉运行态
 pub fn spawn_process_monitor(app: &tauri::AppHandle, app_id: &str) {
     let app = app.clone();
     let app_id = app_id.to_string();
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            let exited = {
+            let exit_status = {
                 let state = match app.try_state::<AppState>() {
                     Some(s) => s,
                     None => return,
@@ -186,26 +254,49 @@ pub fn spawn_process_monitor(app: &tauri::AppHandle, app_id: &str) {
                     Some(info) => {
                         if let Some(ref mut child) = info.child {
                             match child.try_wait() {
-                                Ok(Some(_)) => true,
-                                Ok(None) => false,
-                                Err(_) => true,
+                                Ok(Some(status)) => Some(Some(status)),
+                                Ok(None) => None,
+                                Err(_) => Some(None),
                             }
                         } else {
-                            false
+                            None
                         }
                     }
                     None => return, // 已被 kill_app_process 移除，停止监控
                 }
             };
-            if exited {
+            if let Some(status) = exit_status {
                 let state = app.state::<AppState>();
                 let mut processes = recover_lock(&state.processes);
-                if let Some(info) = processes.get_mut(&app_id) {
-                    info.child = None;
-                    info.pid = None;
+                let info = match processes.get_mut(&app_id) {
+                    Some(info) => {
+                        info.child = None;
+                        info.pid = None;
+                        ProcessSnapshot {
+                            item_type: info.item_type,
+                            run_id: info.run_id.clone(),
+                        }
+                    }
+                    None => return,
+                };
+                if info.item_type != ItemType::Web {
+                    processes.remove(&app_id);
                 }
+                drop(processes);
+
                 remove_persisted_session(&app, &app_id);
-                let _ = app.emit("app-process-stopped", app_id.clone());
+                if let Some(run_id) = info.run_id {
+                    let (status, exit_code) = status
+                        .as_ref()
+                        .map(|status| (run_status_from_exit(status), status.code()))
+                        .unwrap_or((RunStatus::Lost, None));
+                    finish_run_record(&app, &run_id, status, exit_code);
+                }
+                if info.item_type == ItemType::Web {
+                    let _ = app.emit("app-process-stopped", app_id.clone());
+                } else {
+                    let _ = app.emit("app-stopped", app_id.clone());
+                }
                 return;
             }
         }
@@ -222,9 +313,16 @@ pub fn spawn_recovered_process_monitor(app: &tauri::AppHandle, app_id: &str, pid
                 continue;
             }
 
+            let run_id = if let Some(state) = app.try_state::<AppState>() {
+                recover_lock(&state.processes)
+                    .remove(&app_id)
+                    .and_then(|info| info.run_id)
+            } else {
+                None
+            };
             remove_persisted_session(&app, &app_id);
-            if let Some(state) = app.try_state::<AppState>() {
-                recover_lock(&state.processes).remove(&app_id);
+            if let Some(run_id) = run_id {
+                finish_run_record(&app, &run_id, RunStatus::Lost, None);
             }
             let _ = app.emit("app-stopped", app_id.clone());
             return;
@@ -238,6 +336,9 @@ pub fn restore_persisted_sessions(handle: &tauri::AppHandle) {
 
     for session in sessions {
         if !is_process_alive(session.pid) {
+            if let Some(run_id) = &session.run_id {
+                finish_run_record(handle, run_id, RunStatus::Lost, None);
+            }
             continue;
         }
 
@@ -247,6 +348,8 @@ pub fn restore_persisted_sessions(handle: &tauri::AppHandle) {
             pid: Some(session.pid),
             log_path: Some(PathBuf::from(&session.log_path)),
             logs,
+            item_type: session.item_type,
+            run_id: session.run_id.clone(),
             window: session.window.clone(),
         };
 
@@ -298,6 +401,66 @@ pub fn create_log_path(app: &tauri::AppHandle, app_id: &str) -> Result<PathBuf, 
     Ok(dir.join(format!("{}.log", now_millis())))
 }
 
+pub fn create_run_id(app_id: &str) -> String {
+    format!("{}-{}", sanitize_path_segment(app_id), now_millis())
+}
+
+pub fn append_run_record(handle: &tauri::AppHandle, record: RunRecord) {
+    let mut records = read_run_records(handle);
+    records.push(record.clone());
+    records.sort_by_key(|record| record.started_at);
+    if records.len() > MAX_RUN_RECORDS {
+        records.drain(0..records.len() - MAX_RUN_RECORDS);
+    }
+    save_run_records(handle, &records);
+    emit_run_updated(handle, &record.app_id, &record.id, record.status);
+}
+
+pub fn finish_run_record(
+    handle: &tauri::AppHandle,
+    run_id: &str,
+    status: RunStatus,
+    exit_code: Option<i32>,
+) {
+    let mut records = read_run_records(handle);
+    let mut updated = None;
+    for record in &mut records {
+        if record.id == run_id {
+            record.status = status;
+            record.exit_code = exit_code;
+            record.finished_at = Some(now_millis());
+            updated = Some((record.app_id.clone(), record.id.clone()));
+            break;
+        }
+    }
+    if let Some((app_id, run_id)) = updated {
+        save_run_records(handle, &records);
+        emit_run_updated(handle, &app_id, &run_id, status);
+    }
+}
+
+pub fn get_run_records(
+    handle: &tauri::AppHandle,
+    app_id: Option<&str>,
+    limit: usize,
+) -> Vec<RunRecord> {
+    let mut records: Vec<RunRecord> = read_run_records(handle)
+        .into_iter()
+        .filter(|record| app_id.map(|id| record.app_id == id).unwrap_or(true))
+        .collect();
+    records.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    if records.len() > limit {
+        records.truncate(limit);
+    }
+    records
+}
+
+pub fn latest_log_path_for_app(handle: &tauri::AppHandle, app_id: &str) -> Option<PathBuf> {
+    get_run_records(handle, Some(app_id), 1)
+        .first()
+        .map(|record| PathBuf::from(&record.log_path))
+}
+
 pub fn persist_session(handle: &tauri::AppHandle, session: PersistedSession) {
     let mut sessions = read_persisted_sessions(handle);
     sessions.retain(|item| item.app_id != session.app_id);
@@ -331,6 +494,61 @@ fn save_persisted_sessions(handle: &tauri::AppHandle, sessions: &[PersistedSessi
             serde_json::to_value(sessions).unwrap_or_default(),
         );
         let _ = store.save();
+    }
+}
+
+fn read_run_records(handle: &tauri::AppHandle) -> Vec<RunRecord> {
+    let Ok(store) = handle.store(STORE_FILE) else {
+        return Vec::new();
+    };
+    store
+        .get(RUN_RECORDS_KEY)
+        .and_then(|value| serde_json::from_value::<Vec<RunRecord>>(value).ok())
+        .unwrap_or_default()
+}
+
+fn save_run_records(handle: &tauri::AppHandle, records: &[RunRecord]) {
+    if let Ok(store) = handle.store(STORE_FILE) {
+        let _ = store.set(
+            RUN_RECORDS_KEY,
+            serde_json::to_value(records).unwrap_or_default(),
+        );
+        let _ = store.save();
+    }
+}
+
+fn emit_run_updated(handle: &tauri::AppHandle, app_id: &str, run_id: &str, status: RunStatus) {
+    let _ = handle.emit(
+        "app-run-updated",
+        serde_json::json!({
+            "app_id": app_id,
+            "run_id": run_id,
+            "status": status,
+        }),
+    );
+}
+
+struct ProcessSnapshot {
+    item_type: ItemType,
+    run_id: Option<String>,
+}
+
+fn finish_process_run(
+    handle: &tauri::AppHandle,
+    info: &ProcessInfo,
+    status: RunStatus,
+    exit_code: Option<i32>,
+) {
+    if let Some(run_id) = &info.run_id {
+        finish_run_record(handle, run_id, status, exit_code);
+    }
+}
+
+fn run_status_from_exit(status: &ExitStatus) -> RunStatus {
+    if status.success() {
+        RunStatus::Success
+    } else {
+        RunStatus::Failed
     }
 }
 

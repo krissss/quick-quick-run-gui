@@ -1,12 +1,27 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { AppItem } from '@/lib/store'
+import type { AppItem, AppType } from '@/lib/store'
 import { getErrorMessage } from './useMessage'
 
 interface RunningAppInfo {
   app_id: string
   pid: number | null
+  item_type: AppType
+}
+
+export interface RunRecord {
+  id: string
+  app_id: string
+  app_name: string
+  item_type: AppType
+  status: 'running' | 'success' | 'failed' | 'killed' | 'lost'
+  pid: number | null
+  exit_code: number | null
+  started_at: number
+  finished_at: number | null
+  log_path: string
+  trigger: 'manual' | 'schedule' | 'startup-recover'
 }
 
 export function useLauncher(
@@ -17,16 +32,23 @@ export function useLauncher(
   const loading = ref(false)
   const runningAppIds = ref<Set<string>>(new Set())
   const runningPids = ref<Map<string, number>>(new Map())
+  const latestRuns = ref<Map<string, RunRecord>>(new Map())
 
   async function refreshRunningApps() {
     try {
       const infos = await invoke<RunningAppInfo[]>('get_running_apps')
+      const runs = await invoke<RunRecord[]>('get_recent_runs')
       runningAppIds.value = new Set(infos.map(info => info.app_id))
       runningPids.value = new Map(
         infos
           .filter((info): info is RunningAppInfo & { pid: number } => info.pid != null)
           .map(info => [info.app_id, info.pid]),
       )
+      const latest = new Map<string, RunRecord>()
+      for (const run of runs.sort((a, b) => b.started_at - a.started_at)) {
+        if (!latest.has(run.app_id)) latest.set(run.app_id, run)
+      }
+      latestRuns.value = latest
     } catch { /* ignore */ }
   }
 
@@ -41,13 +63,14 @@ export function useLauncher(
     loading.value = true
     try {
       const [bgR, bgG, bgB] = getBackgroundRGB()
-      const result = await invoke<{ message: string; pid: number | null }>('launch_app_window', {
+      const result = await invoke<{ message: string; pid: number | null; run_id: string | null }>('launch_app_window', {
         appId: app.id,
         command: app.command,
         url: app.url,
         width: app.width,
         height: app.height,
         appName: app.name,
+        itemType: app.type || 'web',
         bgR,
         bgG,
         bgB,
@@ -70,6 +93,7 @@ export function useLauncher(
       if (app.command.trim()) {
         openLogDialog(app)
       }
+      await refreshRunningApps()
     } catch (e: unknown) {
       showMessage(`启动失败: ${getErrorMessage(e)}`, 'error')
     }
@@ -85,6 +109,7 @@ export function useLauncher(
         const s = new Set(runningAppIds.value)
         s.add(e.payload)
         runningAppIds.value = s
+        refreshRunningApps()
       }),
       await listen<string>('app-stopped', (e) => {
         const s = new Set(runningAppIds.value)
@@ -93,11 +118,16 @@ export function useLauncher(
         const m = new Map(runningPids.value)
         m.delete(e.payload)
         runningPids.value = m
+        refreshRunningApps()
       }),
       await listen<string>('app-process-stopped', (e) => {
         const m = new Map(runningPids.value)
         m.delete(e.payload)
         runningPids.value = m
+        refreshRunningApps()
+      }),
+      await listen<{ app_id: string }>('app-run-updated', () => {
+        refreshRunningApps()
       }),
       await listen<string>('tray-launch-app', async (e) => {
         const app = apps.value.find(a => a.id === e.payload)
@@ -124,5 +154,5 @@ export function useLauncher(
     } catch { /* ignore */ }
   }
 
-  return { loading, runningAppIds, runningPids, refreshRunningApps, launchApp, stopApp, showAppWindow }
+  return { loading, runningAppIds, runningPids, latestRuns, refreshRunningApps, launchApp, stopApp, showAppWindow }
 }

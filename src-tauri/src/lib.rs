@@ -5,16 +5,21 @@ mod process;
 mod tray;
 mod url_check;
 
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike};
+use chrono_tz::Tz;
 use tauri::{Emitter, Listener, Manager};
 use tauri_plugin_store::StoreExt;
 
 use html_title::extract_html_title;
 use process::{
-    create_log_path, kill_app_process, now_millis, persist_session, read_log_tail,
+    append_run_record, create_log_path, create_run_id, get_run_records, kill_app_process,
+    latest_log_path_for_app, now_millis, persist_session, read_log_tail,
     restore_persisted_sessions, spawn_process_monitor, spawn_shell_command, window_label_for,
-    AppState, AppWindowInfo, PersistedSession, ProcessInfo,
+    AppState, AppWindowInfo, ItemType, PersistedSession, ProcessInfo, RunRecord, RunStatus,
+    RunTrigger,
 };
 use url_check::check_url_inner;
 
@@ -40,6 +45,7 @@ pub fn run() {
             launch_app_window,
             get_running_apps,
             get_app_logs,
+            get_recent_runs,
             stop_app,
             show_app_window,
             notify_apps_updated,
@@ -87,6 +93,7 @@ pub fn run() {
             }
 
             restore_persisted_sessions(&app.handle());
+            start_scheduler(&app.handle());
 
             // 设置系统托盘（macOS 菜单栏图标）
             #[cfg(target_os = "macos")]
@@ -121,6 +128,7 @@ pub fn run() {
 struct LaunchResult {
     message: String,
     pid: Option<u32>,
+    run_id: Option<String>,
 }
 
 /// 启动应用并在新窗口中运行
@@ -134,10 +142,23 @@ async fn launch_app_window(
     width: f64,
     height: f64,
     app_name: String,
+    item_type: Option<ItemType>,
     bg_r: u8,
     bg_g: u8,
     bg_b: u8,
 ) -> Result<LaunchResult, String> {
+    let item_type = item_type.unwrap_or_default();
+    if item_type == ItemType::Service || item_type == ItemType::Task {
+        return launch_command_item(
+            &app,
+            item_type,
+            app_id,
+            app_name,
+            command,
+            RunTrigger::Manual,
+        );
+    }
+
     let window_label = window_label_for(&app_id);
     let window_info = AppWindowInfo {
         url: url.clone(),
@@ -156,6 +177,7 @@ async fn launch_app_window(
         return Ok(LaunchResult {
             message: "窗口已存在，已聚焦".into(),
             pid: None,
+            run_id: None,
         });
     }
 
@@ -176,7 +198,9 @@ async fn launch_app_window(
                 pid: None,
                 log_path: None,
                 logs,
-                window: window_info,
+                item_type: ItemType::Web,
+                run_id: None,
+                window: Some(window_info),
             },
         );
         let _ = app.emit("app-launched", app_id.clone());
@@ -184,12 +208,15 @@ async fn launch_app_window(
         return Ok(LaunchResult {
             message: "窗口已打开".into(),
             pid: None,
+            run_id: None,
         });
     }
 
     // 有命令：启动进程，立即返回，后台等待 URL 后创建窗口
     let log_path = create_log_path(&app, &app_id)?;
     let (child, pid) = spawn_shell_command(&command, Some(&log_path))?;
+    let run_id = create_run_id(&app_id);
+    let started_at = now_millis();
     let logs = Arc::new(Mutex::new(Vec::new()));
 
     // 存入 HashMap + emit，让前端立即看到日志
@@ -200,19 +227,40 @@ async fn launch_app_window(
             pid: Some(pid),
             log_path: Some(log_path.clone()),
             logs,
-            window: window_info.clone(),
+            item_type: ItemType::Web,
+            run_id: Some(run_id.clone()),
+            window: Some(window_info.clone()),
+        },
+    );
+    append_run_record(
+        &app,
+        RunRecord {
+            id: run_id.clone(),
+            app_id: app_id.clone(),
+            app_name: app_name.clone(),
+            item_type: ItemType::Web,
+            status: RunStatus::Running,
+            pid: Some(pid),
+            exit_code: None,
+            started_at,
+            finished_at: None,
+            log_path: log_path.to_string_lossy().to_string(),
+            trigger: RunTrigger::Manual,
         },
     );
     persist_session(
         &app,
         PersistedSession {
             app_id: app_id.clone(),
+            app_name: app_name.clone(),
+            item_type: ItemType::Web,
             command: command.clone(),
             url: url.clone(),
             pid,
             log_path: log_path.to_string_lossy().to_string(),
-            started_at: now_millis(),
-            window: window_info.clone(),
+            started_at,
+            run_id: Some(run_id.clone()),
+            window: Some(window_info.clone()),
         },
     );
     let _ = app.emit("app-launched", app_id.clone());
@@ -274,6 +322,102 @@ async fn launch_app_window(
     Ok(LaunchResult {
         message: "进程已启动".into(),
         pid: Some(pid),
+        run_id: Some(run_id),
+    })
+}
+
+fn launch_command_item(
+    app: &tauri::AppHandle,
+    item_type: ItemType,
+    app_id: String,
+    app_name: String,
+    command: String,
+    trigger: RunTrigger,
+) -> Result<LaunchResult, String> {
+    if command.trim().is_empty() {
+        return Err("命令不能为空".to_string());
+    }
+
+    if item_type == ItemType::Task {
+        let already_running = app
+            .try_state::<AppState>()
+            .map(|state| recover_lock(&state.processes).contains_key(&app_id))
+            .unwrap_or(false);
+        if already_running {
+            return Ok(LaunchResult {
+                message: "任务正在运行".into(),
+                pid: None,
+                run_id: None,
+            });
+        }
+    } else {
+        kill_app_process(app, &app_id);
+    }
+
+    let log_path = create_log_path(app, &app_id)?;
+    let (child, pid) = spawn_shell_command(&command, Some(&log_path))?;
+    let run_id = create_run_id(&app_id);
+    let started_at = now_millis();
+    let logs = Arc::new(Mutex::new(Vec::new()));
+
+    let state = app.state::<AppState>();
+    recover_lock(&state.processes).insert(
+        app_id.clone(),
+        ProcessInfo {
+            child: Some(child),
+            pid: Some(pid),
+            log_path: Some(log_path.clone()),
+            logs,
+            item_type,
+            run_id: Some(run_id.clone()),
+            window: None,
+        },
+    );
+
+    append_run_record(
+        app,
+        RunRecord {
+            id: run_id.clone(),
+            app_id: app_id.clone(),
+            app_name: app_name.clone(),
+            item_type,
+            status: RunStatus::Running,
+            pid: Some(pid),
+            exit_code: None,
+            started_at,
+            finished_at: None,
+            log_path: log_path.to_string_lossy().to_string(),
+            trigger,
+        },
+    );
+    persist_session(
+        app,
+        PersistedSession {
+            app_id: app_id.clone(),
+            app_name,
+            item_type,
+            command,
+            url: String::new(),
+            pid,
+            log_path: log_path.to_string_lossy().to_string(),
+            started_at,
+            run_id: Some(run_id.clone()),
+            window: None,
+        },
+    );
+
+    let _ = app.emit("app-launched", app_id.clone());
+    spawn_process_monitor(app, &app_id);
+
+    let message = if item_type == ItemType::Task {
+        "任务已启动"
+    } else {
+        "服务已启动"
+    };
+    Ok(LaunchResult {
+        message: message.into(),
+        pid: Some(pid),
+        run_id: Some(run_id),
     })
 }
 
@@ -281,6 +425,7 @@ async fn launch_app_window(
 struct RunningAppInfo {
     app_id: String,
     pid: Option<u32>,
+    item_type: ItemType,
 }
 
 /// 获取当前运行的 app ID 列表
@@ -291,22 +436,35 @@ fn get_running_apps(state: tauri::State<'_, AppState>) -> Result<Vec<RunningAppI
         .map(|(app_id, info)| RunningAppInfo {
             app_id: app_id.clone(),
             pid: info.pid,
+            item_type: info.item_type,
         })
         .collect())
 }
 
 /// 获取指定应用的日志缓冲
 #[tauri::command]
-fn get_app_logs(state: tauri::State<'_, AppState>, app_id: String) -> Result<Vec<String>, String> {
+fn get_app_logs(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    app_id: String,
+) -> Result<Vec<String>, String> {
     let processes = recover_lock(&state.processes);
     if let Some(info) = processes.get(&app_id) {
         if let Some(path) = &info.log_path {
             return Ok(read_log_tail(path, 2000));
         }
         Ok(recover_lock(&info.logs).clone())
+    } else if let Some(path) = latest_log_path_for_app(&app, &app_id) {
+        Ok(read_log_tail(&path, 2000))
     } else {
         Ok(vec![])
     }
+}
+
+/// 获取最近运行记录
+#[tauri::command]
+fn get_recent_runs(app: tauri::AppHandle) -> Result<Vec<RunRecord>, String> {
+    Ok(get_run_records(&app, None, 500))
 }
 
 /// 停止应用进程（杀掉进程、关闭窗口）
@@ -344,7 +502,7 @@ pub(crate) fn show_or_create_app_window(
     let window_info = app.try_state::<AppState>().and_then(|state| {
         recover_lock(&state.processes)
             .get(app_id)
-            .map(|info| info.window.clone())
+            .and_then(|info| info.window.clone())
     });
 
     if let Some(info) = window_info {
@@ -383,6 +541,470 @@ fn open_url_in_browser(url: &str) {
 fn open_in_browser(url: String) -> Result<(), String> {
     open_url_in_browser(&url);
     Ok(())
+}
+
+// ── 定时任务 ──
+
+#[derive(Clone, serde::Deserialize)]
+struct StoredRunItem {
+    id: String,
+    name: String,
+    #[serde(default, rename = "type")]
+    item_type: ItemType,
+    #[serde(default)]
+    command: String,
+    #[serde(default)]
+    schedule: ScheduleConfig,
+}
+
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScheduleConfig {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    cron: String,
+    #[serde(default = "default_timezone")]
+    timezone: String,
+    #[serde(default = "default_missed_policy")]
+    missed_policy: String,
+    #[serde(default)]
+    last_run_at: Option<u64>,
+}
+
+fn default_timezone() -> String {
+    "Asia/Shanghai".to_string()
+}
+
+fn default_missed_policy() -> String {
+    "skip".to_string()
+}
+
+fn start_scheduler(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        loop {
+            run_scheduler_tick(&app);
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
+    });
+}
+
+fn run_scheduler_tick(app: &tauri::AppHandle) {
+    let schedule_state = read_schedule_state(app);
+    for item in read_scheduled_items(app) {
+        if item.item_type != ItemType::Task || item.command.trim().is_empty() {
+            continue;
+        }
+        let last_run_at = schedule_state
+            .get(&item.id)
+            .copied()
+            .into_iter()
+            .chain(item.schedule.last_run_at)
+            .max()
+            .unwrap_or_else(now_millis);
+        let Some(due_at) = schedule_due_at(&item.schedule, last_run_at) else {
+            continue;
+        };
+
+        let item_id = item.id.clone();
+        let launch_result = launch_command_item(
+            app,
+            ItemType::Task,
+            item.id,
+            item.name,
+            item.command,
+            RunTrigger::Schedule,
+        );
+        if should_advance_schedule_state(&launch_result) {
+            set_schedule_last_run_at(app, &item_id, due_at);
+        } else if let Err(err) = launch_result {
+            eprintln!("定时任务启动失败: {}", err);
+        }
+    }
+}
+
+fn should_advance_schedule_state(result: &Result<LaunchResult, String>) -> bool {
+    matches!(result, Ok(result) if result.run_id.is_some())
+}
+
+fn read_scheduled_items(app: &tauri::AppHandle) -> Vec<StoredRunItem> {
+    let Ok(store) = app.store("qqr-store.json") else {
+        return Vec::new();
+    };
+    store
+        .get("apps")
+        .and_then(|value| serde_json::from_value::<Vec<StoredRunItem>>(value).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|item| item.schedule.enabled)
+        .collect()
+}
+
+fn set_schedule_last_run_at(app: &tauri::AppHandle, app_id: &str, due_at: u64) {
+    let Ok(store) = app.store("qqr-store.json") else {
+        return;
+    };
+    let mut state = read_schedule_state(app);
+    state.insert(app_id.to_string(), due_at);
+    let _ = store.set(
+        "schedule_state",
+        serde_json::to_value(state).unwrap_or_default(),
+    );
+    let _ = store.save();
+}
+
+fn read_schedule_state(app: &tauri::AppHandle) -> HashMap<String, u64> {
+    let Ok(store) = app.store("qqr-store.json") else {
+        return HashMap::new();
+    };
+    store
+        .get("schedule_state")
+        .and_then(|value| serde_json::from_value::<HashMap<String, u64>>(value).ok())
+        .unwrap_or_default()
+}
+
+fn schedule_due_at(schedule: &ScheduleConfig, last_run_at: u64) -> Option<u64> {
+    schedule_due_at_from_now(schedule, last_run_at, Local::now())
+}
+
+fn schedule_due_at_from_now<T: TimeZone>(
+    schedule: &ScheduleConfig,
+    last_run_at: u64,
+    now: DateTime<T>,
+) -> Option<u64> {
+    let timezone = schedule_timezone(schedule);
+    schedule_due_at_at(schedule, last_run_at, now.with_timezone(&timezone))
+}
+
+fn schedule_timezone(schedule: &ScheduleConfig) -> Tz {
+    schedule
+        .timezone
+        .parse()
+        .unwrap_or(chrono_tz::Asia::Shanghai)
+}
+
+fn schedule_due_at_at(
+    schedule: &ScheduleConfig,
+    last_run_at: u64,
+    now: DateTime<Tz>,
+) -> Option<u64> {
+    if !schedule.enabled || schedule.cron.trim().is_empty() {
+        return None;
+    }
+    let spec = CronSpec::parse(&schedule.cron)?;
+    let now_minute = minute_start(now);
+
+    if schedule.missed_policy == "run-once" {
+        find_last_due_since(&spec, last_run_at, now_minute)
+    } else {
+        let due_at = now_minute.timestamp_millis() as u64;
+        if due_at > last_run_at && spec.matches(now_minute) {
+            Some(due_at)
+        } else {
+            None
+        }
+    }
+}
+
+fn minute_start(time: DateTime<Tz>) -> DateTime<Tz> {
+    time.timezone()
+        .with_ymd_and_hms(
+            time.year(),
+            time.month(),
+            time.day(),
+            time.hour(),
+            time.minute(),
+            0,
+        )
+        .single()
+        .unwrap_or(time)
+}
+
+fn find_last_due_since(spec: &CronSpec, last_run_at: u64, now_minute: DateTime<Tz>) -> Option<u64> {
+    let lower = now_minute
+        .timezone()
+        .timestamp_millis_opt(last_run_at as i64)
+        .single()
+        .map(minute_start)
+        .unwrap_or_else(|| now_minute.clone());
+    let mut cursor = now_minute;
+    let max_lookback = cursor.clone() - ChronoDuration::days(32);
+    while cursor > lower && cursor >= max_lookback {
+        if spec.matches(cursor) {
+            let due_at = cursor.timestamp_millis() as u64;
+            if due_at > last_run_at {
+                return Some(due_at);
+            }
+        }
+        cursor -= ChronoDuration::minutes(1);
+    }
+    None
+}
+
+struct CronSpec {
+    minutes: CronField,
+    hours: CronField,
+    days: CronField,
+    months: CronField,
+    weekdays: CronField,
+}
+
+impl CronSpec {
+    fn parse(value: &str) -> Option<Self> {
+        let parts: Vec<&str> = value.split_whitespace().collect();
+        if parts.len() != 5 {
+            return None;
+        }
+        Some(Self {
+            minutes: CronField::parse(parts[0], 0, 59, false)?,
+            hours: CronField::parse(parts[1], 0, 23, false)?,
+            days: CronField::parse(parts[2], 1, 31, false)?,
+            months: CronField::parse(parts[3], 1, 12, false)?,
+            weekdays: CronField::parse(parts[4], 0, 7, true)?,
+        })
+    }
+
+    fn matches(&self, time: DateTime<Tz>) -> bool {
+        let weekday = time.weekday().num_days_from_sunday();
+        self.minutes.matches(time.minute())
+            && self.hours.matches(time.hour())
+            && self.days.matches(time.day())
+            && self.months.matches(time.month())
+            && self.weekdays.matches(weekday)
+    }
+}
+
+struct CronField {
+    values: HashSet<u32>,
+    sunday_seven: bool,
+}
+
+impl CronField {
+    fn parse(value: &str, min: u32, max: u32, sunday_seven: bool) -> Option<Self> {
+        let mut values = HashSet::new();
+        for raw_part in value.split(',') {
+            let part = raw_part.trim();
+            if part.is_empty() {
+                return None;
+            }
+            let (range_part, step) = if let Some((range, step)) = part.split_once('/') {
+                (range, step.parse::<u32>().ok()?)
+            } else {
+                (part, 1)
+            };
+            if step == 0 {
+                return None;
+            }
+
+            let (start, end) = if range_part == "*" {
+                (min, max)
+            } else if let Some((start, end)) = range_part.split_once('-') {
+                (start.parse::<u32>().ok()?, end.parse::<u32>().ok()?)
+            } else {
+                let single = range_part.parse::<u32>().ok()?;
+                (single, single)
+            };
+            if start < min || end > max || start > end {
+                return None;
+            }
+            let mut current = start;
+            while current <= end {
+                values.insert(current);
+                current = current.saturating_add(step);
+                if current == 0 {
+                    break;
+                }
+            }
+        }
+        Some(Self {
+            values,
+            sunday_seven,
+        })
+    }
+
+    fn matches(&self, value: u32) -> bool {
+        self.values.contains(&value)
+            || (self.sunday_seven && value == 0 && self.values.contains(&7))
+    }
+}
+
+#[cfg(test)]
+mod scheduler_tests {
+    use super::*;
+
+    fn test_schedule(cron: &str, missed_policy: &str) -> ScheduleConfig {
+        ScheduleConfig {
+            enabled: true,
+            cron: cron.to_string(),
+            timezone: default_timezone(),
+            missed_policy: missed_policy.to_string(),
+            last_run_at: None,
+        }
+    }
+
+    fn local_time(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+    ) -> DateTime<Tz> {
+        chrono_tz::Asia::Shanghai
+            .with_ymd_and_hms(year, month, day, hour, minute, second)
+            .single()
+            .unwrap()
+    }
+
+    fn millis<T: TimeZone>(time: DateTime<T>) -> u64 {
+        time.timestamp_millis() as u64
+    }
+
+    #[test]
+    fn cron_field_supports_steps_ranges_and_lists() {
+        let field = CronField::parse("0,10-20/5,*/30", 0, 59, false).unwrap();
+
+        assert!(field.matches(0));
+        assert!(field.matches(10));
+        assert!(field.matches(15));
+        assert!(field.matches(20));
+        assert!(field.matches(30));
+        assert!(!field.matches(25));
+    }
+
+    #[test]
+    fn cron_spec_rejects_invalid_values() {
+        assert!(CronSpec::parse("* * * *").is_none());
+        assert!(CronSpec::parse("60 * * * *").is_none());
+        assert!(CronField::parse("*/0", 0, 59, false).is_none());
+    }
+
+    #[test]
+    fn cron_spec_treats_weekday_seven_as_sunday() {
+        let spec = CronSpec::parse("0 9 * * 7").unwrap();
+
+        assert!(spec.matches(local_time(2026, 5, 3, 9, 0, 0)));
+        assert!(!spec.matches(local_time(2026, 5, 4, 9, 0, 0)));
+    }
+
+    #[test]
+    fn schedule_skip_policy_runs_only_current_matching_minute() {
+        let schedule = test_schedule("30 9 * * *", "skip");
+        let now = local_time(2026, 5, 1, 9, 30, 15);
+        let last_run_at = millis(local_time(2026, 5, 1, 9, 29, 0));
+        let expected_due_at = millis(local_time(2026, 5, 1, 9, 30, 0));
+
+        assert_eq!(
+            schedule_due_at_at(&schedule, last_run_at, now),
+            Some(expected_due_at)
+        );
+        assert_eq!(
+            schedule_due_at_at(
+                &schedule,
+                expected_due_at,
+                local_time(2026, 5, 1, 9, 30, 30)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn schedule_skip_policy_does_not_backfill_missed_runs() {
+        let schedule = test_schedule("0 9 * * *", "skip");
+        let now = local_time(2026, 5, 1, 12, 0, 0);
+        let last_run_at = millis(local_time(2026, 4, 30, 8, 0, 0));
+
+        assert_eq!(schedule_due_at_at(&schedule, last_run_at, now), None);
+    }
+
+    #[test]
+    fn schedule_run_once_policy_backfills_latest_due_minute() {
+        let schedule = test_schedule("0 9 * * *", "run-once");
+        let now = local_time(2026, 5, 1, 12, 0, 0);
+        let last_run_at = millis(local_time(2026, 4, 30, 8, 0, 0));
+        let expected_due_at = millis(local_time(2026, 5, 1, 9, 0, 0));
+
+        assert_eq!(
+            schedule_due_at_at(&schedule, last_run_at, now),
+            Some(expected_due_at)
+        );
+    }
+
+    #[test]
+    fn schedule_disabled_returns_none() {
+        let mut schedule = test_schedule("* * * * *", "skip");
+        schedule.enabled = false;
+
+        assert_eq!(
+            schedule_due_at_at(&schedule, 0, local_time(2026, 5, 1, 9, 0, 0)),
+            None
+        );
+    }
+
+    #[test]
+    fn schedule_uses_configured_timezone() {
+        let mut schedule = test_schedule("0 9 * * *", "skip");
+        schedule.timezone = "Asia/Tokyo".to_string();
+        let now = chrono::Utc
+            .with_ymd_and_hms(2026, 5, 1, 0, 0, 30)
+            .single()
+            .unwrap();
+        let last_run_at = millis(
+            chrono_tz::Asia::Tokyo
+                .with_ymd_and_hms(2026, 4, 30, 9, 0, 0)
+                .single()
+                .unwrap(),
+        );
+        let expected_due_at = millis(
+            chrono_tz::Asia::Tokyo
+                .with_ymd_and_hms(2026, 5, 1, 9, 0, 0)
+                .single()
+                .unwrap(),
+        );
+
+        assert_eq!(
+            schedule_due_at_from_now(&schedule, last_run_at, now),
+            Some(expected_due_at)
+        );
+    }
+
+    #[test]
+    fn schedule_invalid_timezone_falls_back_to_shanghai() {
+        let mut schedule = test_schedule("0 9 * * *", "skip");
+        schedule.timezone = "Not/AZone".to_string();
+        let now = chrono::Utc
+            .with_ymd_and_hms(2026, 5, 1, 1, 0, 30)
+            .single()
+            .unwrap();
+        let last_run_at = millis(local_time(2026, 4, 30, 9, 0, 0));
+        let expected_due_at = millis(local_time(2026, 5, 1, 9, 0, 0));
+
+        assert_eq!(
+            schedule_due_at_from_now(&schedule, last_run_at, now),
+            Some(expected_due_at)
+        );
+    }
+
+    #[test]
+    fn schedule_state_advances_only_after_real_launch() {
+        let launched = Ok(LaunchResult {
+            message: "任务已启动".to_string(),
+            pid: Some(1000),
+            run_id: Some("run-1".to_string()),
+        });
+        let already_running = Ok(LaunchResult {
+            message: "任务正在运行".to_string(),
+            pid: None,
+            run_id: None,
+        });
+        let failed = Err("启动命令失败".to_string());
+
+        assert!(should_advance_schedule_state(&launched));
+        assert!(!should_advance_schedule_state(&already_running));
+        assert!(!should_advance_schedule_state(&failed));
+    }
 }
 
 // ── 内部辅助 ──

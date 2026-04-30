@@ -18,6 +18,8 @@ fn recover_lock<T>(mutex: &std::sync::Mutex<T>) -> MutexGuard<'_, T> {
 struct AppEntry {
     id: String,
     name: String,
+    #[serde(default, rename = "type")]
+    item_type: String,
 }
 
 /// 从 tauri-plugin-store 读取应用列表
@@ -169,7 +171,21 @@ pub fn setup_tray(app: &AppHandle) {
                 app_id => {
                     let running = read_running_ids(app);
                     if running.contains(app_id) {
-                        let _ = crate::show_or_create_app_window(app, app_id);
+                        let app_entry = read_apps_from_store(app)
+                            .into_iter()
+                            .find(|item| item.id == app_id);
+                        if app_entry
+                            .as_ref()
+                            .map(|item| item.item_type.as_str())
+                            .filter(|item_type| !item_type.is_empty())
+                            .unwrap_or("web")
+                            == "web"
+                        {
+                            let _ = crate::show_or_create_app_window(app, app_id);
+                        } else if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
                     } else {
                         let _ = app.emit("tray-launch-app", app_id.to_string());
                     }

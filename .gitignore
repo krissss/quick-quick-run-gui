@@ -33,3 +33,4 @@ src-tauri/data/
 .env.*
 .gitnexus
 /memory
+.codex

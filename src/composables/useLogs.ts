@@ -29,7 +29,7 @@ export function useLogs() {
     logAppName.value = app.name
     logLaunchFailed.value = false
     logLaunchFailedReason.value = ''
-    logWindowOpened.value = windowAlreadyOpen
+    logWindowOpened.value = windowAlreadyOpen || app.type !== 'web'
     logLines.value = []
 
     // 先拉一次缓冲日志
