@@ -46,9 +46,17 @@ export function useLauncher(
         const m = new Map(runningPids.value)
         m.set(app.id, result.pid)
         runningPids.value = m
+      } else if (!app.command.trim()) {
+        const m = new Map(runningPids.value)
+        m.delete(app.id)
+        runningPids.value = m
+        showMessage(result.message, 'success')
       } else {
         showMessage(result.message, 'success')
       }
+      const s = new Set(runningAppIds.value)
+      s.add(app.id)
+      runningAppIds.value = s
       if (app.command.trim()) {
         openLogDialog(app)
       }
@@ -72,6 +80,11 @@ export function useLauncher(
         const s = new Set(runningAppIds.value)
         s.delete(e.payload)
         runningAppIds.value = s
+        const m = new Map(runningPids.value)
+        m.delete(e.payload)
+        runningPids.value = m
+      }),
+      await listen<string>('app-process-stopped', (e) => {
         const m = new Map(runningPids.value)
         m.delete(e.payload)
         runningPids.value = m

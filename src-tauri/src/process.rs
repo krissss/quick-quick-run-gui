@@ -154,7 +154,7 @@ pub fn spawn_log_reader(
     });
 }
 
-/// 监控进程退出：定期 try_wait，进程自然退出时 emit app-stopped + app-launch-failed
+/// 监控进程退出：定期 try_wait，进程自然退出时只清理 PID，保留窗口运行态
 pub fn spawn_process_monitor(app: &tauri::AppHandle, app_id: &str) {
     let app = app.clone();
     let app_id = app_id.to_string();
@@ -184,12 +184,11 @@ pub fn spawn_process_monitor(app: &tauri::AppHandle, app_id: &str) {
             };
             if exited {
                 let state = app.state::<AppState>();
-                recover_lock(&state.processes).remove(&app_id);
-                let _ = app.emit("app-stopped", app_id.clone());
-                let _ = app.emit("app-launch-failed", serde_json::json!({
-                    "app_id": app_id,
-                    "reason": "process_exited",
-                }));
+                let mut processes = recover_lock(&state.processes);
+                if let Some(info) = processes.get_mut(&app_id) {
+                    info.child = None;
+                }
+                let _ = app.emit("app-process-stopped", app_id.clone());
                 return;
             }
         }
