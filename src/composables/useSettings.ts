@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { getTheme, setTheme, type Theme } from '@/lib/theme'
 import { enable as autostartEnable, disable as autostartDisable, isEnabled as autostartIsEnabled } from '@tauri-apps/plugin-autostart'
 import { save } from '@tauri-apps/plugin-dialog'
@@ -22,12 +22,8 @@ export function useSettings(
     currentTheme.value = next[currentTheme.value]
     setTheme(currentTheme.value)
   }
-  const themeIcon = (() => {
-    if (currentTheme.value === 'light') return '☀️'
-    if (currentTheme.value === 'dark') return '🌙'
-    return '💻'
-  })
-  const themeLabel = (() => {
+  const themeIcon = computed(() => currentTheme.value)
+  const themeLabel = computed(() => {
     if (currentTheme.value === 'light') return '亮色'
     if (currentTheme.value === 'dark') return '暗色'
     return '跟随系统'

@@ -12,8 +12,9 @@ use tauri_plugin_store::StoreExt;
 
 use html_title::extract_html_title;
 use process::{
-    AppState, ProcessInfo, kill_app_process, spawn_log_reader,
-    spawn_process_monitor, spawn_shell_command, window_label_for,
+    create_log_path, kill_app_process, now_millis, persist_session, read_log_tail,
+    restore_persisted_sessions, spawn_process_monitor, spawn_shell_command, window_label_for,
+    AppState, AppWindowInfo, PersistedSession, ProcessInfo,
 };
 use url_check::check_url_inner;
 
@@ -66,7 +67,9 @@ pub fn run() {
                             let _ = win.hide();
                         }
                         #[cfg(target_os = "macos")]
-                        { let _ = dock::hide_dock_icon(); }
+                        {
+                            let _ = dock::hide_dock_icon();
+                        }
                     }
                 });
             }
@@ -74,12 +77,16 @@ pub fn run() {
             // 恢复主窗口保存的位置（逻辑坐标）
             if let Some(window) = app.get_webview_window("main") {
                 if let Some(state) = load_window_state(&app.handle(), "main") {
-                    let pos = tauri::Position::Logical(tauri::LogicalPosition::new(state.x, state.y));
-                    let size = tauri::Size::Logical(tauri::LogicalSize::new(state.width, state.height));
+                    let pos =
+                        tauri::Position::Logical(tauri::LogicalPosition::new(state.x, state.y));
+                    let size =
+                        tauri::Size::Logical(tauri::LogicalSize::new(state.width, state.height));
                     let _ = window.set_size(size);
                     let _ = window.set_position(pos);
                 }
             }
+
+            restore_persisted_sessions(&app.handle());
 
             // 设置系统托盘（macOS 菜单栏图标）
             #[cfg(target_os = "macos")]
@@ -132,12 +139,24 @@ async fn launch_app_window(
     bg_b: u8,
 ) -> Result<LaunchResult, String> {
     let window_label = window_label_for(&app_id);
+    let window_info = AppWindowInfo {
+        url: url.clone(),
+        width,
+        height,
+        app_name: app_name.clone(),
+        bg_r,
+        bg_g,
+        bg_b,
+    };
 
     // 如果窗口已存在，取消最小化并聚焦
     if let Some(existing) = app.get_webview_window(&window_label) {
         let _ = existing.unminimize();
         let _ = existing.set_focus();
-        return Ok(LaunchResult { message: "窗口已存在，已聚焦".into(), pid: None });
+        return Ok(LaunchResult {
+            message: "窗口已存在，已聚焦".into(),
+            pid: None,
+        });
     }
 
     // 先杀掉同 app_id 的旧进程
@@ -148,72 +167,53 @@ async fn launch_app_window(
     if !has_command {
         // 无命令：直接创建窗口
         let logs = Arc::new(Mutex::new(Vec::new()));
-        let window_url = build_app_window_url(&url);
-        let saved_state = load_window_state(&app, &app_id);
-
-        let mut builder = tauri::WebviewWindowBuilder::new(
-            &app, &window_label, window_url,
-        )
-        .title(&app_name)
-        .background_color(tauri::utils::config::Color(bg_r, bg_g, bg_b, 255))
-        .on_new_window(move |url, _features| {
-            open_url_in_browser(url.as_str());
-            tauri::webview::NewWindowResponse::Deny
-        });
-
-        // 恢复保存的位置和大小
-        if let Some(state) = saved_state {
-            builder = builder
-                .inner_size(state.width, state.height)
-                .position(state.x, state.y);
-        } else {
-            builder = builder
-                .inner_size(width, height)
-                .center();
-        }
-
-        let webview_window = builder
-            .build()
-            .map_err(|e| format!("创建窗口失败: {}", e))?;
-
-        let app_save = app.clone();
-        let app_id_save = app_id.clone();
-        webview_window.on_window_event(move |event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                if let Some(win) = app_save.get_webview_window(&window_label_for(&app_id_save)) {
-                    save_window_state(&app_save, &app_id_save, &win);
-                    let _ = win.minimize();
-                }
-            }
-        });
+        let _ = create_app_window(&app, &app_id, &window_info)?;
 
         recover_lock(&state.processes).insert(
             app_id.clone(),
-            ProcessInfo { child: None, logs },
+            ProcessInfo {
+                child: None,
+                pid: None,
+                log_path: None,
+                logs,
+                window: window_info,
+            },
         );
         let _ = app.emit("app-launched", app_id.clone());
         let _ = app.emit("app-window-opened", app_id);
-        return Ok(LaunchResult { message: "窗口已打开".into(), pid: None });
+        return Ok(LaunchResult {
+            message: "窗口已打开".into(),
+            pid: None,
+        });
     }
 
     // 有命令：启动进程，立即返回，后台等待 URL 后创建窗口
-    let (mut child, pid) = spawn_shell_command(&command)?;
+    let log_path = create_log_path(&app, &app_id)?;
+    let (child, pid) = spawn_shell_command(&command, Some(&log_path))?;
     let logs = Arc::new(Mutex::new(Vec::new()));
-
-    let stdout = child.inner().stdout.take();
-    let stderr = child.inner().stderr.take();
-    if let Some(out) = stdout {
-        spawn_log_reader(&app, &app_id, out, logs.clone());
-    }
-    if let Some(err) = stderr {
-        spawn_log_reader(&app, &app_id, err, logs.clone());
-    }
 
     // 存入 HashMap + emit，让前端立即看到日志
     recover_lock(&state.processes).insert(
         app_id.clone(),
-        ProcessInfo { child: Some(child), logs },
+        ProcessInfo {
+            child: Some(child),
+            pid: Some(pid),
+            log_path: Some(log_path.clone()),
+            logs,
+            window: window_info.clone(),
+        },
+    );
+    persist_session(
+        &app,
+        PersistedSession {
+            app_id: app_id.clone(),
+            command: command.clone(),
+            url: url.clone(),
+            pid,
+            log_path: log_path.to_string_lossy().to_string(),
+            started_at: now_millis(),
+            window: window_info.clone(),
+        },
     );
     let _ = app.emit("app-launched", app_id.clone());
 
@@ -224,8 +224,8 @@ async fn launch_app_window(
     let app_bg = app.clone();
     let app_id_bg = app_id.clone();
     let url_bg = url.clone();
-    let app_name_bg = app_name.clone();
-    tokio::spawn(async move {
+    let window_info_bg = window_info.clone();
+    tauri::async_runtime::spawn(async move {
         let reachable = check_url_inner(&url_bg, 15).await;
 
         // 检查进程是否还在（可能已退出）
@@ -238,82 +238,61 @@ async fn launch_app_window(
         }
 
         if !reachable {
-            let _ = app_bg.emit("app-launch-failed", serde_json::json!({
-                "app_id": app_id_bg,
-                "reason": "timeout",
-            }));
+            let _ = app_bg.emit(
+                "app-launch-failed",
+                serde_json::json!({
+                    "app_id": app_id_bg,
+                    "reason": "timeout",
+                }),
+            );
             kill_app_process(&app_bg, &app_id_bg);
             return;
         }
 
         // 创建窗口
-        let label = window_label_for(&app_id_bg);
-        let window_url = build_app_window_url(&url_bg);
-        let saved_state = load_window_state(&app_bg, &app_id_bg);
-
-        let mut builder = tauri::WebviewWindowBuilder::new(
-            &app_bg, &label, window_url,
-        )
-        .title(&app_name_bg)
-        .background_color(tauri::utils::config::Color(bg_r, bg_g, bg_b, 255))
-        .on_new_window(move |url, _features| {
-            open_url_in_browser(url.as_str());
-            tauri::webview::NewWindowResponse::Deny
-        });
-
-        // 恢复保存的位置和大小
-        if let Some(state) = saved_state {
-            builder = builder
-                .inner_size(state.width, state.height)
-                .position(state.x, state.y);
-        } else {
-            builder = builder
-                .inner_size(width, height)
-                .center();
-        }
-
-        let webview_window = match builder.build()
-        {
+        let webview_window = match create_app_window(&app_bg, &app_id_bg, &window_info_bg) {
             Ok(w) => w,
             Err(e) => {
-                let _ = app_bg.emit("app-launch-failed", serde_json::json!({
-                    "app_id": app_id_bg,
-                    "reason": format!("创建窗口失败: {}", e),
-                }));
+                let _ = app_bg.emit(
+                    "app-launch-failed",
+                    serde_json::json!({
+                        "app_id": app_id_bg,
+                        "reason": e,
+                    }),
+                );
                 kill_app_process(&app_bg, &app_id_bg);
                 return;
             }
         };
 
-        let app_s = app_bg.clone();
-        let app_id_s = app_id_bg.clone();
-        let label_s = label.clone();
-        webview_window.on_window_event(move |event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                if let Some(win) = app_s.get_webview_window(&label_s) {
-                    save_window_state(&app_s, &app_id_s, &win);
-                    let _ = win.minimize();
-                }
-            }
-        });
-
         // 设置窗口标题
-        let label2 = window_label_for(&app_id_bg);
-        if let Some(win) = app_bg.get_webview_window(&label2) {
-            let _ = set_window_title_inner(&win, &url_bg).await;
-        }
+        let _ = set_window_title_inner(&webview_window, &url_bg).await;
 
         let _ = app_bg.emit("app-window-opened", app_id_bg);
     });
 
-    Ok(LaunchResult { message: "进程已启动".into(), pid: Some(pid) })
+    Ok(LaunchResult {
+        message: "进程已启动".into(),
+        pid: Some(pid),
+    })
+}
+
+#[derive(serde::Serialize)]
+struct RunningAppInfo {
+    app_id: String,
+    pid: Option<u32>,
 }
 
 /// 获取当前运行的 app ID 列表
 #[tauri::command]
-fn get_running_apps(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
-    Ok(recover_lock(&state.processes).keys().cloned().collect())
+fn get_running_apps(state: tauri::State<'_, AppState>) -> Result<Vec<RunningAppInfo>, String> {
+    Ok(recover_lock(&state.processes)
+        .iter()
+        .map(|(app_id, info)| RunningAppInfo {
+            app_id: app_id.clone(),
+            pid: info.pid,
+        })
+        .collect())
 }
 
 /// 获取指定应用的日志缓冲
@@ -321,6 +300,9 @@ fn get_running_apps(state: tauri::State<'_, AppState>) -> Result<Vec<String>, St
 fn get_app_logs(state: tauri::State<'_, AppState>, app_id: String) -> Result<Vec<String>, String> {
     let processes = recover_lock(&state.processes);
     if let Some(info) = processes.get(&app_id) {
+        if let Some(path) = &info.log_path {
+            return Ok(read_log_tail(path, 2000));
+        }
         Ok(recover_lock(&info.logs).clone())
     } else {
         Ok(vec![])
@@ -344,8 +326,29 @@ fn stop_app(app: tauri::AppHandle, app_id: String) -> Result<(), String> {
 /// 显示/聚焦已运行应用的窗口（取消最小化）
 #[tauri::command]
 fn show_app_window(app: tauri::AppHandle, app_id: String) -> Result<(), String> {
-    let label = window_label_for(&app_id);
+    show_or_create_app_window(&app, &app_id)
+}
+
+pub(crate) fn show_or_create_app_window(
+    app: &tauri::AppHandle,
+    app_id: &str,
+) -> Result<(), String> {
+    let label = window_label_for(app_id);
     if let Some(win) = app.get_webview_window(&label) {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+        return Ok(());
+    }
+
+    let window_info = app.try_state::<AppState>().and_then(|state| {
+        recover_lock(&state.processes)
+            .get(app_id)
+            .map(|info| info.window.clone())
+    });
+
+    if let Some(info) = window_info {
+        let win = create_app_window(app, app_id, &info)?;
         let _ = win.unminimize();
         let _ = win.show();
         let _ = win.set_focus();
@@ -370,7 +373,9 @@ fn open_url_in_browser(url: &str) {
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
 
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd").args(["/C", "start", url]).spawn();
+    let _ = std::process::Command::new("cmd")
+        .args(["/C", "start", url])
+        .spawn();
 }
 
 /// 在系统默认浏览器中打开 URL（IPC 命令）
@@ -382,22 +387,85 @@ fn open_in_browser(url: String) -> Result<(), String> {
 
 // ── 内部辅助 ──
 
+fn create_app_window(
+    app: &tauri::AppHandle,
+    app_id: &str,
+    info: &AppWindowInfo,
+) -> Result<tauri::WebviewWindow, String> {
+    let label = window_label_for(app_id);
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.unminimize();
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(existing);
+    }
+
+    let window_url = build_app_window_url(&info.url);
+    let saved_state = load_window_state(app, app_id);
+
+    let mut builder = tauri::WebviewWindowBuilder::new(app, &label, window_url)
+        .title(&info.app_name)
+        .background_color(tauri::utils::config::Color(
+            info.bg_r, info.bg_g, info.bg_b, 255,
+        ))
+        .on_new_window(move |url, _features| {
+            open_url_in_browser(url.as_str());
+            tauri::webview::NewWindowResponse::Deny
+        });
+
+    if let Some(state) = saved_state {
+        builder = builder
+            .inner_size(state.width, state.height)
+            .position(state.x, state.y);
+    } else {
+        builder = builder.inner_size(info.width, info.height).center();
+    }
+
+    let webview_window = builder
+        .build()
+        .map_err(|e| format!("创建窗口失败: {}", e))?;
+
+    let app_save = app.clone();
+    let app_id_save = app_id.to_string();
+    let label_save = label.clone();
+    webview_window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            if let Some(win) = app_save.get_webview_window(&label_save) {
+                save_window_state(&app_save, &app_id_save, &win);
+                let _ = win.minimize();
+            }
+        }
+    });
+
+    Ok(webview_window)
+}
+
 async fn set_window_title_inner(window: &tauri::WebviewWindow, url: &str) -> Result<(), String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
-    let resp = client.get(url).send().await.map_err(|e| format!("请求失败: {}", e))?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {}", e))?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
 
-    let html = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+    let html = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
     let title = extract_html_title(&html);
 
     if let Some(title) = title {
-        window.set_title(&title).map_err(|e| format!("设置标题失败: {}", e))?;
+        window
+            .set_title(&title)
+            .map_err(|e| format!("设置标题失败: {}", e))?;
     }
 
     Ok(())
@@ -455,10 +523,7 @@ fn build_app_window_url(target_url: &str) -> tauri::WebviewUrl {
     }
     #[cfg(not(debug_assertions))]
     {
-        let path = format!(
-            "app-window.html?url={}",
-            urlencoding::encode(target_url),
-        );
+        let path = format!("app-window.html?url={}", urlencoding::encode(target_url),);
         tauri::WebviewUrl::App(path.into())
     }
 }

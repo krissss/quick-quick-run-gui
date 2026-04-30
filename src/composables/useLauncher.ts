@@ -4,6 +4,11 @@ import { listen } from '@tauri-apps/api/event'
 import type { AppItem } from '@/lib/store'
 import { getErrorMessage } from './useMessage'
 
+interface RunningAppInfo {
+  app_id: string
+  pid: number | null
+}
+
 export function useLauncher(
   apps: { value: AppItem[] },
   showMessage: (msg: string, type?: 'success' | 'error' | 'info') => void,
@@ -15,8 +20,13 @@ export function useLauncher(
 
   async function refreshRunningApps() {
     try {
-      const ids = await invoke<string[]>('get_running_apps')
-      runningAppIds.value = new Set(ids)
+      const infos = await invoke<RunningAppInfo[]>('get_running_apps')
+      runningAppIds.value = new Set(infos.map(info => info.app_id))
+      runningPids.value = new Map(
+        infos
+          .filter((info): info is RunningAppInfo & { pid: number } => info.pid != null)
+          .map(info => [info.app_id, info.pid]),
+      )
     } catch { /* ignore */ }
   }
 

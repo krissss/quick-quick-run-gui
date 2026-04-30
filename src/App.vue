@@ -319,7 +319,67 @@ onMounted(async () => {
                 <div class="text-sm font-medium">外观主题</div>
                 <div class="text-xs text-muted-foreground mt-0.5">{{ themeLabel }}</div>
               </div>
-              <Button variant="ghost" size="sm" @click="toggleTheme" class="text-sm px-2">{{ themeIcon }}</Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                class="h-8 w-8 px-0"
+                :title="`切换主题：${themeLabel}`"
+                aria-label="切换主题"
+                @click="toggleTheme"
+              >
+                <svg
+                  v-if="themeIcon === 'light'"
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2" />
+                  <path d="M12 20v2" />
+                  <path d="m4.93 4.93 1.41 1.41" />
+                  <path d="m17.66 17.66 1.41 1.41" />
+                  <path d="M2 12h2" />
+                  <path d="M20 12h2" />
+                  <path d="m6.34 17.66-1.41 1.41" />
+                  <path d="m19.07 4.93-1.41 1.41" />
+                </svg>
+                <svg
+                  v-else-if="themeIcon === 'dark'"
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+                </svg>
+                <svg
+                  v-else
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect x="2" y="3" width="20" height="14" rx="2" />
+                  <path d="M8 21h8" />
+                  <path d="M12 17v4" />
+                </svg>
+              </Button>
             </div>
 
             <div style="box-shadow: 0 -1px 0 0 var(--border)" />

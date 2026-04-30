@@ -53,12 +53,19 @@ fn build_menu(app: &AppHandle) -> tauri::menu::Menu<tauri::Wry> {
     let mut mb = MenuBuilder::new(app);
 
     // 分组：运行中 / 未运行
-    let running_apps: Vec<&AppEntry> = all_apps.iter().filter(|a| running.contains(&a.id)).collect();
-    let stopped_apps: Vec<&AppEntry> = all_apps.iter().filter(|a| !running.contains(&a.id)).collect();
+    let running_apps: Vec<&AppEntry> = all_apps
+        .iter()
+        .filter(|a| running.contains(&a.id))
+        .collect();
+    let stopped_apps: Vec<&AppEntry> = all_apps
+        .iter()
+        .filter(|a| !running.contains(&a.id))
+        .collect();
 
     // 运行中应用（带 ● 标记）
     for a in &running_apps {
-        if let Ok(item) = MenuItem::with_id(app, &a.id, format!("● {}", a.name), true, None::<&str>) {
+        if let Ok(item) = MenuItem::with_id(app, &a.id, format!("● {}", a.name), true, None::<&str>)
+        {
             mb = mb.item(&item);
         }
     }
@@ -84,6 +91,12 @@ fn build_menu(app: &AppHandle) -> tauri::menu::Menu<tauri::Wry> {
 
     if let Ok(item) = MenuItem::with_id(app, "show-main", "显示主窗口", true, None::<&str>) {
         mb = mb.item(&item);
+    }
+    if !running_apps.is_empty() {
+        if let Ok(item) = MenuItem::with_id(app, "stop-all", "停止所有服务", true, None::<&str>)
+        {
+            mb = mb.item(&item);
+        }
     }
     if let Ok(sep) = PredefinedMenuItem::separator(app) {
         mb = mb.item(&sep);
@@ -137,12 +150,17 @@ pub fn setup_tray(app: &AppHandle) {
             let id = event.id().as_ref();
             match id {
                 "quit" => {
-                    crate::process::force_kill_all(app);
                     app.exit(0);
+                }
+                "stop-all" => {
+                    crate::process::force_kill_all(app);
+                    rebuild_tray_menu(app);
                 }
                 "show-main" => {
                     #[cfg(target_os = "macos")]
-                    { let _ = crate::dock::show_dock_icon(); }
+                    {
+                        let _ = crate::dock::show_dock_icon();
+                    }
                     if let Some(win) = app.get_webview_window("main") {
                         let _ = win.show();
                         let _ = win.set_focus();
@@ -151,12 +169,7 @@ pub fn setup_tray(app: &AppHandle) {
                 app_id => {
                     let running = read_running_ids(app);
                     if running.contains(app_id) {
-                        let label = crate::process::window_label_for(app_id);
-                        if let Some(win) = app.get_webview_window(&label) {
-                            let _ = win.unminimize();
-                            let _ = win.show();
-                            let _ = win.set_focus();
-                        }
+                        let _ = crate::show_or_create_app_window(app, app_id);
                     } else {
                         let _ = app.emit("tray-launch-app", app_id.to_string());
                     }

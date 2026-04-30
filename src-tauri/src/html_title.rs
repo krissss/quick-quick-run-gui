@@ -4,9 +4,15 @@ use scraper::{Html, Selector};
 pub fn extract_html_title(html: &str) -> Option<String> {
     let document = Html::parse_document(html);
     let selector = Selector::parse("title").ok()?;
-    let title = document.select(&selector).next()?.text().collect::<String>();
+    let title = document
+        .select(&selector)
+        .next()?
+        .text()
+        .collect::<String>();
     let trimmed = title.trim().to_string();
-    if trimmed.is_empty() { return None; }
+    if trimmed.is_empty() {
+        return None;
+    }
     Some(trimmed)
 }
 
