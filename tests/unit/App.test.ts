@@ -79,6 +79,12 @@ function appRow(wrapper: VueWrapper, appId: string) {
   return row
 }
 
+function visibleAppIds() {
+  return Array.from(document.querySelectorAll('[data-app-id]'))
+    .map((item) => (item as HTMLElement).dataset.appId)
+    .filter((id): id is string => !!id)
+}
+
 describe('App', () => {
   afterEach(() => {
     vi.useRealTimers()
@@ -155,6 +161,48 @@ describe('App', () => {
       { id: 'service-1', order: 2 },
     ])
     expect(mock.getCalls('notify_apps_updated')).toHaveLength(1)
+  })
+
+  it('groups apps in the sidebar and filters them by search and type', async () => {
+    const { wrapper } = await mountApp({
+      store: { apps: [webApp, serviceApp, taskApp] },
+    })
+
+    expect(document.body.textContent).toContain('网页1')
+    expect(document.body.textContent).toContain('服务1')
+    expect(document.body.textContent).toContain('任务1')
+
+    await inputByPlaceholder(wrapper, '搜索名称、命令或 URL').setValue('worker')
+    await flushPromises()
+    expect(visibleAppIds()).toEqual(['service-1'])
+
+    await wrapper.get('button[aria-label="清空搜索"]').trigger('click')
+    await wrapper.get('button[aria-label="筛选任务"]').trigger('click')
+    await flushPromises()
+
+    expect(visibleAppIds()).toEqual(['task-1'])
+  })
+
+  it('duplicates the current app into a new template', async () => {
+    const { mock, wrapper } = await mountApp({
+      store: { apps: [webApp] },
+    })
+
+    await buttonContaining(wrapper, 'qwenpaw').trigger('click')
+    await buttonContaining(wrapper, '复制').trigger('click')
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('添加应用')
+    expect((inputByPlaceholder(wrapper, '例如：我的博客').element as HTMLInputElement).value).toBe('qwenpaw 副本')
+    expect((inputByPlaceholder(wrapper, 'http://localhost:3000').element as HTMLInputElement).value).toBe('http://localhost:3000')
+
+    await buttonContaining(wrapper, '添加', true).trigger('click')
+    await flushPromises()
+
+    expect(mock.storeData.apps).toMatchObject([
+      { id: 'web-1', name: 'qwenpaw', order: 0 },
+      { name: 'qwenpaw 副本', url: 'http://localhost:3000', order: 1 },
+    ])
   })
 
   it('adds and deletes a scheduled task through the form', async () => {

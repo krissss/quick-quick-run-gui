@@ -154,6 +154,58 @@ describe('useApps integration', () => {
     expect(mock.getCalls('notify_apps_updated')).toHaveLength(1)
   })
 
+  it('duplicates an app into a new template with a unique name', async () => {
+    const mock = setupTauriMocks({
+      store: {
+        apps: [
+          {
+            id: 'task-1',
+            name: '日报',
+            type: 'task',
+            command: 'pnpm report',
+            schedule: { enabled: true, cron: '0 9 * * *', timezone: 'Asia/Shanghai', missedPolicy: 'skip' },
+          },
+          {
+            id: 'task-2',
+            name: '日报 副本',
+            type: 'task',
+            command: 'pnpm report-copy',
+            schedule: { enabled: true, cron: '30 9 * * *', timezone: 'Asia/Shanghai', missedPolicy: 'run-once' },
+          },
+        ],
+      },
+    })
+    const messages: Array<{ text: string; type?: string }> = []
+    const apps = useApps((text, type) => messages.push({ text, type }))
+
+    await apps.refreshApps()
+    apps.selectApp(apps.apps.value[0])
+    apps.duplicateApp(apps.editForm.value)
+
+    expect(apps.isNew.value).toBe(true)
+    expect(apps.editForm.value).toMatchObject({
+      id: '',
+      name: '日报 副本 2',
+      type: 'task',
+      command: 'pnpm report',
+      schedule: {
+        enabled: true,
+        cron: '0 9 * * *',
+        timezone: 'Asia/Shanghai',
+        missedPolicy: 'skip',
+      },
+    })
+
+    await apps.saveApp()
+
+    expect(mock.storeData.apps).toMatchObject([
+      { id: 'task-1', name: '日报' },
+      { id: 'task-2', name: '日报 副本' },
+      { name: '日报 副本 2', command: 'pnpm report' },
+    ])
+    expect(messages.at(-1)).toEqual({ text: '已添加', type: 'success' })
+  })
+
   it('ignores backend update notification failures while persisting', async () => {
     const mock = setupTauriMocks({
       rejectCommands: { notify_apps_updated: new Error('offline') },

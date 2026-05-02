@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -21,7 +21,7 @@ const { showLogDialog, logAppId, logAppName, logLines, logLaunchFailed, logLaunc
 // ── 应用管理 ──
 const {
   apps, editForm, isNew,
-  selectApp, openAddForm, refreshApps, saveApp, deleteApp,
+  selectApp, openAddForm, duplicateApp, refreshApps, saveApp, deleteApp,
   reorderApps,
   setAppType, setScheduleEnabled, setMissedPolicy, setScheduleCron,
 } = useApps(showMessage)
@@ -89,6 +89,39 @@ function primaryActionLabel(app: AppItem) {
 
 function schedulePolicyLabel(value: MissedPolicy) {
   return value === 'run-once' ? '补跑一次' : '跳过'
+}
+
+const APP_TYPES: AppType[] = ['web', 'service', 'task']
+const sidebarSearch = ref('')
+const sidebarFilter = ref<'all' | AppType>('all')
+
+const filteredApps = computed(() => {
+  const query = sidebarSearch.value.trim().toLowerCase()
+  return apps.value.filter((app) => {
+    if (sidebarFilter.value !== 'all' && app.type !== sidebarFilter.value) return false
+    if (!query) return true
+    const haystack = [app.name, app.command, app.url, itemTypeLabel(app.type)].join(' ').toLowerCase()
+    return haystack.includes(query)
+  })
+})
+
+const groupedApps = computed(() => APP_TYPES
+  .map((type) => ({
+    type,
+    label: itemTypeLabel(type),
+    apps: filteredApps.value.filter((app) => app.type === type),
+  }))
+  .filter(group => group.apps.length > 0))
+
+function updateSidebarFilter(value: string | string[]) {
+  if (Array.isArray(value) || !value) return
+  if (value === 'all' || value === 'web' || value === 'service' || value === 'task') {
+    sidebarFilter.value = value
+  }
+}
+
+function clearSidebarSearch() {
+  sidebarSearch.value = ''
 }
 
 const draggedAppId = ref<string | null>(null)
@@ -164,6 +197,11 @@ function handleAppClick(event: MouseEvent, app: AppItem) {
     return
   }
   selectApp(app)
+}
+
+function duplicateSelectedApp() {
+  if (!editForm.value.id) return
+  duplicateApp(editForm.value)
 }
 
 // ── 初始化 ──
@@ -255,58 +293,86 @@ onMounted(async () => {
 
     <!-- ═══ 左侧栏：应用列表 ═══ -->
     <div class="w-56 shrink-0 flex flex-col border-r border-border">
-      <div class="flex-1 overflow-y-auto py-2">
-        <div
-          v-for="app in apps"
-          :key="app.id"
-          class="px-2"
-        >
-          <div>
-            <button
-              type="button"
-              class="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors cursor-grab select-none touch-none active:cursor-grabbing"
-              :class="[
-                editForm.id === app.id && !isNew ? 'bg-accent text-foreground' : 'text-foreground hover:bg-accent/50',
-                draggedAppId === app.id ? 'opacity-50' : '',
-                dragOverAppId === app.id ? 'bg-accent/70 shadow-[inset_0_0_0_1px_var(--ring)]' : '',
-              ]"
-              :data-app-id="app.id"
-              :title="`拖动排序：${app.name}`"
-              @pointerdown="handleAppPointerDown($event, app.id)"
-              @pointermove="handleAppPointerMove"
-              @pointerup="handleAppPointerUp"
-              @pointercancel="resetAppDrag"
-              @click="handleAppClick($event, app)"
-            >
-              <div class="relative shrink-0">
-                <div
-                  class="w-7 h-7 rounded-md flex items-center justify-center text-xs font-medium"
-                  :class="iconGradient(app.name)"
-                >
-                  {{ app.name.charAt(0).toUpperCase() }}
-                </div>
-                <div
-                  v-if="runningAppIds.has(app.id)"
-                  class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500"
-                />
-              </div>
-              <div class="min-w-0 flex-1">
-                <div class="truncate text-sm">{{ app.name }}</div>
-                <div class="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                  <span>{{ itemTypeLabel(app.type) }}</span>
-                  <span v-if="runStatusLabel(app)" class="inline-flex items-center gap-1">
-                    <span class="h-1 w-1 rounded-full" :class="statusDotClass(app)" />
-                    {{ runStatusLabel(app) }}
-                  </span>
-                </div>
-              </div>
-            </button>
-          </div>
+      <div class="space-y-2 border-b border-border p-2">
+        <div class="relative">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
+          <Input
+            v-model="sidebarSearch"
+            class="h-8 pl-8 pr-8 text-xs"
+            placeholder="搜索名称、命令或 URL"
+            aria-label="搜索应用"
+          />
+          <button
+            v-if="sidebarSearch"
+            type="button"
+            class="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            aria-label="清空搜索"
+            title="清空搜索"
+            @click="clearSidebarSearch"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
         </div>
 
-        <!-- 添加按钮 -->
+        <ToggleGroup
+          class="grid w-full grid-cols-4 gap-1"
+          :model-value="sidebarFilter"
+          type="single"
+          aria-label="筛选应用类型"
+          @update:model-value="updateSidebarFilter"
+        >
+          <ToggleGroupItem value="all" class="h-8 px-0" aria-label="显示全部" title="全部">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+            </svg>
+          </ToggleGroupItem>
+          <ToggleGroupItem value="web" class="h-8 px-0" aria-label="筛选网页" title="网页">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M3 12h18" />
+              <path d="M12 3a15 15 0 0 1 0 18" />
+              <path d="M12 3a15 15 0 0 0 0 18" />
+            </svg>
+          </ToggleGroupItem>
+          <ToggleGroupItem value="service" class="h-8 px-0" aria-label="筛选服务" title="服务">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 7h16" />
+              <path d="M4 12h16" />
+              <path d="M4 17h16" />
+              <path d="M7 7v10" />
+            </svg>
+          </ToggleGroupItem>
+          <ToggleGroupItem value="task" class="h-8 px-0" aria-label="筛选任务" title="任务">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="8" />
+              <path d="M12 8v4l3 2" />
+            </svg>
+          </ToggleGroupItem>
+        </ToggleGroup>
+
         <button
-          class="w-full flex items-center gap-2.5 px-4 py-2 transition-colors cursor-pointer"
+          class="w-full flex items-center gap-2.5 rounded-md px-2 py-2 transition-colors cursor-pointer"
           :class="isNew ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'"
           @click="openAddForm"
         >
@@ -315,6 +381,70 @@ onMounted(async () => {
           </div>
           <span class="text-sm">添加应用</span>
         </button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto py-2">
+        <div v-if="filteredApps.length === 0" class="px-4 py-8 text-xs text-muted-foreground">
+          没有匹配的应用
+        </div>
+
+        <div
+          v-for="group in groupedApps"
+          :key="group.type"
+          class="space-y-1.5 px-2 pb-3"
+        >
+          <div class="flex items-center justify-between px-2 text-[10px] font-medium text-muted-foreground">
+            <span>{{ group.label }}</span>
+            <span>{{ group.apps.length }}</span>
+          </div>
+
+          <div class="space-y-0.5">
+            <div
+              v-for="app in group.apps"
+              :key="app.id"
+            >
+              <button
+                type="button"
+                class="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors cursor-grab select-none touch-none active:cursor-grabbing"
+                :class="[
+                  editForm.id === app.id && !isNew ? 'bg-accent text-foreground' : 'text-foreground hover:bg-accent/50',
+                  draggedAppId === app.id ? 'opacity-50' : '',
+                  dragOverAppId === app.id ? 'bg-accent/70 shadow-[inset_0_0_0_1px_var(--ring)]' : '',
+                ]"
+                :data-app-id="app.id"
+                :title="`拖动排序：${app.name}`"
+                @pointerdown="handleAppPointerDown($event, app.id)"
+                @pointermove="handleAppPointerMove"
+                @pointerup="handleAppPointerUp"
+                @pointercancel="resetAppDrag"
+                @click="handleAppClick($event, app)"
+              >
+                <div class="relative shrink-0">
+                  <div
+                    class="w-7 h-7 rounded-md flex items-center justify-center text-xs font-medium"
+                    :class="iconGradient(app.name)"
+                  >
+                    {{ app.name.charAt(0).toUpperCase() }}
+                  </div>
+                  <div
+                    v-if="runningAppIds.has(app.id)"
+                    class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500"
+                  />
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="truncate text-sm">{{ app.name }}</div>
+                  <div class="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <span>{{ itemTypeLabel(app.type) }}</span>
+                    <span v-if="runStatusLabel(app)" class="inline-flex items-center gap-1">
+                      <span class="h-1 w-1 rounded-full" :class="statusDotClass(app)" />
+                      {{ runStatusLabel(app) }}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 底部设置 -->
@@ -455,6 +585,18 @@ onMounted(async () => {
         <!-- 操作按钮 -->
         <div class="flex gap-2 pt-2">
           <Button size="sm" @click="saveApp">{{ isNew ? '添加' : '保存' }}</Button>
+          <Button
+            v-if="!isNew"
+            variant="secondary"
+            size="sm"
+            @click="duplicateSelectedApp"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="11" height="11" rx="2" />
+              <path d="M5 15V7a2 2 0 0 1 2-2h8" />
+            </svg>
+            复制
+          </Button>
           <Button
             v-if="!isNew"
             size="sm"

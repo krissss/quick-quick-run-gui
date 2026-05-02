@@ -12,6 +12,18 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
   const editForm = ref<AppItem>(emptyApp())
   const isNew = ref(true)
 
+  function buildDuplicateName(sourceName: string) {
+    const baseName = (sourceName.trim() || '未命名').replace(/\s*副本(?:\s+\d+)?$/, '').trim() || '未命名'
+    const existingNames = new Set(apps.value.map(app => app.name.trim()))
+    let candidate = `${baseName} 副本`
+    let suffix = 2
+    while (existingNames.has(candidate)) {
+      candidate = `${baseName} 副本 ${suffix}`
+      suffix += 1
+    }
+    return candidate
+  }
+
   function selectApp(app: AppItem) {
     isNew.value = false
     editForm.value = normalizeApp(app)
@@ -20,6 +32,21 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
   function openAddForm() {
     isNew.value = true
     editForm.value = emptyApp()
+  }
+
+  function duplicateApp(app: AppItem) {
+    const source = normalizeApp(app)
+    isNew.value = true
+    editForm.value = normalizeApp({
+      ...source,
+      id: '',
+      name: buildDuplicateName(source.name),
+      order: undefined,
+      schedule: {
+        ...source.schedule,
+        lastRunAt: Date.now(),
+      },
+    })
   }
 
   // 当 apps 列表变化时同步表单（比如删除后）
@@ -138,7 +165,7 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
 
   return {
     apps, editForm, isNew,
-    selectApp, openAddForm, refreshApps, persistApps, saveApp, deleteApp,
+    selectApp, openAddForm, duplicateApp, refreshApps, persistApps, saveApp, deleteApp,
     reorderApps,
     setAppType, setScheduleEnabled, setMissedPolicy, setScheduleCron, touchSchedule,
   }
