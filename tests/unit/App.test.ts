@@ -73,6 +73,12 @@ function detailPanel(wrapper: VueWrapper) {
   return panel
 }
 
+function appRow(wrapper: VueWrapper, appId: string) {
+  const row = wrapper.find(`[data-app-id="${appId}"]`)
+  if (!row.exists()) throw new Error(`App row not found: ${appId}`)
+  return row
+}
+
 describe('App', () => {
   afterEach(() => {
     vi.useRealTimers()
@@ -125,6 +131,30 @@ describe('App', () => {
     expect(document.body.textContent).toContain('运行')
     await buttonContaining(wrapper, '运行', true).trigger('click')
     expect(mock.getCalls('launch_app_window').length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('reorders apps by dragging a list item', async () => {
+    const { mock, wrapper } = await mountApp({
+      store: { apps: [webApp, serviceApp, taskApp] },
+    })
+
+    const taskRow = appRow(wrapper, 'task-1')
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => appRow(wrapper, 'web-1').element),
+    })
+
+    await taskRow.trigger('pointerdown', { button: 0, pointerId: 1, clientX: 10, clientY: 10 })
+    await taskRow.trigger('pointermove', { pointerId: 1, clientX: 10, clientY: 20 })
+    await taskRow.trigger('pointerup', { pointerId: 1, clientX: 10, clientY: 20 })
+    await flushPromises()
+
+    expect(mock.storeData.apps).toMatchObject([
+      { id: 'task-1', order: 0 },
+      { id: 'web-1', order: 1 },
+      { id: 'service-1', order: 2 },
+    ])
+    expect(mock.getCalls('notify_apps_updated')).toHaveLength(1)
   })
 
   it('adds and deletes a scheduled task through the form', async () => {

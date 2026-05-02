@@ -40,7 +40,10 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
   }
 
   async function persistApps() {
-    await saveApps(apps.value)
+    const orderedApps = apps.value.map((app, index) => ({ ...app, order: index }))
+    const orderChanged = orderedApps.some((app, index) => apps.value[index]?.order !== app.order)
+    if (orderChanged) apps.value = orderedApps
+    await saveApps(orderedApps)
     try { await invoke('notify_apps_updated') } catch { /* ignore */ }
   }
 
@@ -76,6 +79,7 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
       if (idx !== -1) apps.value[idx] = { ...app }
     } else {
       app.id = crypto.randomUUID()
+      app.order = apps.value.length
       apps.value.push({ ...app })
       isNew.value = false
     }
@@ -110,16 +114,32 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
 
   async function deleteApp() {
     if (!editForm.value.id) return
-    apps.value = apps.value.filter(a => a.id !== editForm.value.id)
+    apps.value = apps.value
+      .filter(a => a.id !== editForm.value.id)
+      .map((app, index) => ({ ...app, order: index }))
     await persistApps()
     editForm.value = emptyApp()
     isNew.value = true
     showMessage('已删除', 'success')
   }
 
+  async function reorderApps(activeId: string, targetId: string) {
+    if (!activeId || !targetId || activeId === targetId) return
+    const fromIndex = apps.value.findIndex(app => app.id === activeId)
+    const toIndex = apps.value.findIndex(app => app.id === targetId)
+    if (fromIndex === -1 || toIndex === -1) return
+
+    const next = [...apps.value]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    apps.value = next.map((app, index) => ({ ...app, order: index }))
+    await persistApps()
+  }
+
   return {
     apps, editForm, isNew,
     selectApp, openAddForm, refreshApps, persistApps, saveApp, deleteApp,
+    reorderApps,
     setAppType, setScheduleEnabled, setMissedPolicy, setScheduleCron, touchSchedule,
   }
 }

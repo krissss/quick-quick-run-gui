@@ -5,6 +5,7 @@ import {
   loadApps,
   loadHideDockOnClose,
   normalizeApp,
+  normalizeApps,
   saveApps,
   saveHideDockOnClose,
 } from '@/lib/store'
@@ -56,6 +57,28 @@ describe('store helpers', () => {
     expect(mock.getCalls('plugin:store|save')).toHaveLength(1)
   })
 
+  it('sorts loaded apps by order and saves the current array order', async () => {
+    const mock = setupTauriMocks({
+      store: {
+        apps: [
+          { id: 'second', name: 'Second', url: 'http://localhost:3002', order: 1 },
+          { id: 'first', name: 'First', url: 'http://localhost:3001', order: 0 },
+        ],
+      },
+    })
+
+    const loaded = await loadApps()
+    expect(loaded.map((app) => app.id)).toEqual(['first', 'second'])
+    expect(loaded.map((app) => app.order)).toEqual([0, 1])
+
+    await saveApps([loaded[1], loaded[0]])
+
+    expect(mock.storeData.apps).toMatchObject([
+      { id: 'second', order: 0 },
+      { id: 'first', order: 1 },
+    ])
+  })
+
   it('migrates legacy localStorage data when the store has no apps', async () => {
     const legacy = [{ id: 'legacy-local', name: 'Local', url: 'http://localhost:5173' }]
     localStorage.setItem('qqr-apps', JSON.stringify(legacy))
@@ -93,6 +116,18 @@ describe('store helpers', () => {
     const imported = await importData(JSON.stringify([{ id: 'task-1', name: 'Task', type: 'task', command: 'echo ok' }]))
     expect(imported[0]).toMatchObject({ id: 'task-1', type: 'task', command: 'echo ok' })
     expect(mock.storeData.apps).toMatchObject([{ id: 'task-1', type: 'task' }])
+  })
+
+  it('normalizes app arrays with stable contiguous order values', () => {
+    expect(normalizeApps([
+      { id: 'third', name: 'Third', url: 'http://localhost:3003', order: 10 },
+      { id: 'first', name: 'First', url: 'http://localhost:3001', order: 2 },
+      { id: 'second', name: 'Second', url: 'http://localhost:3002' },
+    ])).toMatchObject([
+      { id: 'first', order: 0 },
+      { id: 'second', order: 1 },
+      { id: 'third', order: 2 },
+    ])
   })
 
   it('rejects invalid imported data', async () => {

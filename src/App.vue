@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -22,6 +22,7 @@ const { showLogDialog, logAppId, logAppName, logLines, logLaunchFailed, logLaunc
 const {
   apps, editForm, isNew,
   selectApp, openAddForm, refreshApps, saveApp, deleteApp,
+  reorderApps,
   setAppType, setScheduleEnabled, setMissedPolicy, setScheduleCron,
 } = useApps(showMessage)
 
@@ -88,6 +89,81 @@ function primaryActionLabel(app: AppItem) {
 
 function schedulePolicyLabel(value: MissedPolicy) {
   return value === 'run-once' ? '补跑一次' : '跳过'
+}
+
+const draggedAppId = ref<string | null>(null)
+const dragOverAppId = ref<string | null>(null)
+const dragPointerId = ref<number | null>(null)
+const dragStartPoint = ref<{ x: number; y: number; appId: string } | null>(null)
+const suppressClickAppId = ref<string | null>(null)
+let suppressClickTimer: ReturnType<typeof setTimeout> | null = null
+const dragThreshold = 6
+
+function appIdFromPoint(x: number, y: number) {
+  const element = document.elementFromPoint(x, y)
+  const row = element?.closest('[data-app-id]') as HTMLElement | null
+  return row?.dataset.appId || null
+}
+
+function resetAppDrag() {
+  draggedAppId.value = null
+  dragOverAppId.value = null
+  dragPointerId.value = null
+  dragStartPoint.value = null
+}
+
+function handleAppPointerDown(event: PointerEvent, appId: string) {
+  if (event.button !== 0) return
+  dragStartPoint.value = { x: event.clientX, y: event.clientY, appId }
+  dragOverAppId.value = null
+  dragPointerId.value = event.pointerId
+  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
+}
+
+function handleAppPointerMove(event: PointerEvent) {
+  if (dragPointerId.value !== event.pointerId || !dragStartPoint.value) return
+  const distance = Math.hypot(
+    event.clientX - dragStartPoint.value.x,
+    event.clientY - dragStartPoint.value.y,
+  )
+  if (!draggedAppId.value && distance < dragThreshold) return
+  if (!draggedAppId.value) draggedAppId.value = dragStartPoint.value.appId
+  event.preventDefault()
+  const targetId = appIdFromPoint(event.clientX, event.clientY)
+  dragOverAppId.value = targetId && targetId !== draggedAppId.value ? targetId : null
+}
+
+async function handleAppPointerUp(event: PointerEvent) {
+  if (dragPointerId.value !== event.pointerId || !dragStartPoint.value) return
+  const activeId = dragStartPoint.value.appId
+  const hasDragged = !!draggedAppId.value
+  const targetId = dragOverAppId.value || appIdFromPoint(event.clientX, event.clientY)
+  if (hasDragged) {
+    event.preventDefault()
+    suppressClickAppId.value = activeId
+    if (suppressClickTimer) clearTimeout(suppressClickTimer)
+    suppressClickTimer = window.setTimeout(() => {
+      if (suppressClickAppId.value === activeId) suppressClickAppId.value = null
+      suppressClickTimer = null
+    }, 0)
+  }
+  ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
+  if (hasDragged && targetId && activeId !== targetId) await reorderApps(activeId, targetId)
+  resetAppDrag()
+}
+
+function handleAppClick(event: MouseEvent, app: AppItem) {
+  if (suppressClickAppId.value === app.id) {
+    event.preventDefault()
+    event.stopPropagation()
+    suppressClickAppId.value = null
+    if (suppressClickTimer) {
+      clearTimeout(suppressClickTimer)
+      suppressClickTimer = null
+    }
+    return
+  }
+  selectApp(app)
 }
 
 // ── 初始化 ──
@@ -180,36 +256,53 @@ onMounted(async () => {
     <!-- ═══ 左侧栏：应用列表 ═══ -->
     <div class="w-56 shrink-0 flex flex-col border-r border-border">
       <div class="flex-1 overflow-y-auto py-2">
-        <button
+        <div
           v-for="app in apps"
           :key="app.id"
-          class="w-full flex items-center gap-2.5 px-4 py-2 text-left transition-colors cursor-pointer"
-          :class="editForm.id === app.id && !isNew ? 'bg-accent text-foreground' : 'text-foreground hover:bg-accent/50'"
-          @click="selectApp(app)"
+          class="px-2"
         >
-          <div class="relative shrink-0">
-            <div
-              class="w-7 h-7 rounded-md flex items-center justify-center text-xs font-medium"
-              :class="iconGradient(app.name)"
+          <div>
+            <button
+              type="button"
+              class="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors cursor-grab select-none touch-none active:cursor-grabbing"
+              :class="[
+                editForm.id === app.id && !isNew ? 'bg-accent text-foreground' : 'text-foreground hover:bg-accent/50',
+                draggedAppId === app.id ? 'opacity-50' : '',
+                dragOverAppId === app.id ? 'bg-accent/70 shadow-[inset_0_0_0_1px_var(--ring)]' : '',
+              ]"
+              :data-app-id="app.id"
+              :title="`拖动排序：${app.name}`"
+              @pointerdown="handleAppPointerDown($event, app.id)"
+              @pointermove="handleAppPointerMove"
+              @pointerup="handleAppPointerUp"
+              @pointercancel="resetAppDrag"
+              @click="handleAppClick($event, app)"
             >
-              {{ app.name.charAt(0).toUpperCase() }}
-            </div>
-            <div
-              v-if="runningAppIds.has(app.id)"
-              class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500"
-            />
+              <div class="relative shrink-0">
+                <div
+                  class="w-7 h-7 rounded-md flex items-center justify-center text-xs font-medium"
+                  :class="iconGradient(app.name)"
+                >
+                  {{ app.name.charAt(0).toUpperCase() }}
+                </div>
+                <div
+                  v-if="runningAppIds.has(app.id)"
+                  class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500"
+                />
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-sm">{{ app.name }}</div>
+                <div class="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <span>{{ itemTypeLabel(app.type) }}</span>
+                  <span v-if="runStatusLabel(app)" class="inline-flex items-center gap-1">
+                    <span class="h-1 w-1 rounded-full" :class="statusDotClass(app)" />
+                    {{ runStatusLabel(app) }}
+                  </span>
+                </div>
+              </div>
+            </button>
           </div>
-          <div class="min-w-0 flex-1">
-            <div class="truncate text-sm">{{ app.name }}</div>
-            <div class="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <span>{{ itemTypeLabel(app.type) }}</span>
-              <span v-if="runStatusLabel(app)" class="inline-flex items-center gap-1">
-                <span class="h-1 w-1 rounded-full" :class="statusDotClass(app)" />
-                {{ runStatusLabel(app) }}
-              </span>
-            </div>
-          </div>
-        </button>
+        </div>
 
         <!-- 添加按钮 -->
         <button

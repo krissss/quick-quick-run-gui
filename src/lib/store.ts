@@ -49,6 +49,7 @@ export function defaultSchedule(): ScheduleConfig {
 
 export function normalizeApp(app: Partial<AppItem>): AppItem {
   const type = app.type || 'web'
+  const order = typeof app.order === 'number' && Number.isFinite(app.order) ? app.order : undefined
   return {
     id: app.id || '',
     name: app.name || '',
@@ -57,7 +58,7 @@ export function normalizeApp(app: Partial<AppItem>): AppItem {
     url: app.url || '',
     width: app.width || 1200,
     height: app.height || 800,
-    order: app.order,
+    order,
     schedule: {
       ...defaultSchedule(),
       ...(app.schedule || {}),
@@ -67,19 +68,34 @@ export function normalizeApp(app: Partial<AppItem>): AppItem {
   }
 }
 
+export function normalizeApps(apps: Partial<AppItem>[], sortByOrder = true): AppItem[] {
+  const normalized = apps
+    .map((app, index) => {
+      const order = typeof app.order === 'number' && Number.isFinite(app.order) ? app.order : index
+      return normalizeApp({ ...app, order })
+    })
+
+  const ordered = sortByOrder
+    ? [...normalized].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    : normalized
+
+  return ordered
+    .map((app, index) => ({ ...app, order: index }))
+}
+
 export async function loadApps(): Promise<AppItem[]> {
   const store = await getStore()
 
   // 尝试从 store 读取
   const apps = await store.get<AppItem[]>(APPS_KEY)
-  if (apps) return apps.map(normalizeApp)
+  if (apps) return normalizeApps(apps)
 
   // 首次使用：尝试从 localStorage 迁移
   try {
     const raw = localStorage.getItem(LS_KEY_APPS)
     if (raw) {
       const migrated = JSON.parse(raw)
-      const normalized = migrated.map(normalizeApp)
+      const normalized = normalizeApps(migrated)
       await store.set(APPS_KEY, normalized)
       await store.save()
       localStorage.removeItem(LS_KEY_APPS)
@@ -92,7 +108,7 @@ export async function loadApps(): Promise<AppItem[]> {
 
 export async function saveApps(apps: AppItem[]): Promise<void> {
   const store = await getStore()
-  await store.set(APPS_KEY, apps.map(normalizeApp))
+  await store.set(APPS_KEY, normalizeApps(apps, false))
   await store.save()
 }
 
@@ -109,14 +125,14 @@ export async function saveHideDockOnClose(enabled: boolean): Promise<void> {
 
 export async function exportData(): Promise<string> {
   const store = await getStore()
-  const apps = (await store.get<AppItem[]>(APPS_KEY) || []).map(normalizeApp)
+  const apps = normalizeApps(await store.get<AppItem[]>(APPS_KEY) || [])
   return JSON.stringify(apps, null, 2)
 }
 
 export async function importData(json: string): Promise<AppItem[]> {
   const apps = JSON.parse(json) as Partial<AppItem>[]
   if (!Array.isArray(apps)) throw new Error('数据格式错误')
-  const normalized = apps.map(normalizeApp)
+  const normalized = normalizeApps(apps, false)
   await saveApps(normalized)
   return normalized
 }

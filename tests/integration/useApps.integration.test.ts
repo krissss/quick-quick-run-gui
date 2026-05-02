@@ -124,6 +124,36 @@ describe('useApps integration', () => {
     expect(apps.isNew.value).toBe(true)
   })
 
+  it('reorders apps, persists order values, and keeps the selected app in sync', async () => {
+    const mock = setupTauriMocks({
+      store: {
+        apps: [
+          { id: 'web-1', name: 'Web', type: 'web', url: 'http://localhost:3000', order: 0 },
+          { id: 'service-1', name: 'Service', type: 'service', command: 'pnpm serve', order: 1 },
+          { id: 'task-1', name: 'Task', type: 'task', command: 'pnpm task', order: 2 },
+        ],
+      },
+    })
+    const apps = useApps(() => {})
+
+    await apps.refreshApps()
+    apps.selectApp(apps.apps.value[1])
+    await apps.reorderApps('task-1', 'web-1')
+
+    expect(apps.apps.value.map((app) => app.id)).toEqual(['task-1', 'web-1', 'service-1'])
+    expect(apps.apps.value.map((app) => app.order)).toEqual([0, 1, 2])
+    expect(apps.editForm.value.id).toBe('service-1')
+    expect(mock.storeData.apps).toMatchObject([
+      { id: 'task-1', order: 0 },
+      { id: 'web-1', order: 1 },
+      { id: 'service-1', order: 2 },
+    ])
+    expect(mock.getCalls('notify_apps_updated')).toHaveLength(1)
+
+    await apps.reorderApps('missing', 'web-1')
+    expect(mock.getCalls('notify_apps_updated')).toHaveLength(1)
+  })
+
   it('ignores backend update notification failures while persisting', async () => {
     const mock = setupTauriMocks({
       rejectCommands: { notify_apps_updated: new Error('offline') },
