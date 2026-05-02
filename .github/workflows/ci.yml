@@ -15,7 +15,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
+  rust-test:
+    name: Rust tests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +38,12 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -47,11 +54,37 @@ jobs:
         with:
           run_install: false
 
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Frontend type check
         run: pnpm run build
+
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    needs: [rust-test, frontend-build]
+    if: ${{ always() }}
+    steps:
+      - name: Check test results
+        run: |
+          rust_result="${{ needs.rust-test.result }}"
+          frontend_result="${{ needs.frontend-build.result }}"
+          echo "Rust tests: ${rust_result}"
+          echo "Frontend build: ${frontend_result}"
+          test "${rust_result}" = "success"
+          test "${frontend_result}" = "success"
 
   build:
     needs: test
