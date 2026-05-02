@@ -37,13 +37,13 @@ export function useLauncher(
   async function refreshRunningApps() {
     try {
       const infos = await invoke<RunningAppInfo[]>('get_running_apps')
-      const runs = await invoke<RunRecord[]>('get_recent_runs')
       runningAppIds.value = new Set(infos.map(info => info.app_id))
       runningPids.value = new Map(
         infos
           .filter((info): info is RunningAppInfo & { pid: number } => info.pid != null)
           .map(info => [info.app_id, info.pid]),
       )
+      const runs = await invoke<RunRecord[]>('get_recent_runs')
       const latest = new Map<string, RunRecord>()
       for (const run of runs.sort((a, b) => b.started_at - a.started_at)) {
         if (!latest.has(run.app_id)) latest.set(run.app_id, run)

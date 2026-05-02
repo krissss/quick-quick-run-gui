@@ -430,7 +430,11 @@ struct RunningAppInfo {
 
 /// 获取当前运行的 app ID 列表
 #[tauri::command]
-fn get_running_apps(state: tauri::State<'_, AppState>) -> Result<Vec<RunningAppInfo>, String> {
+fn get_running_apps(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<RunningAppInfo>, String> {
+    restore_persisted_sessions(&app);
     Ok(recover_lock(&state.processes)
         .iter()
         .map(|(app_id, info)| RunningAppInfo {

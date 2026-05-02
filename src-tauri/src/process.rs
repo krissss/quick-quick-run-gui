@@ -342,21 +342,28 @@ pub fn restore_persisted_sessions(handle: &tauri::AppHandle) {
             continue;
         }
 
-        let logs = Arc::new(Mutex::new(Vec::new()));
-        let info = ProcessInfo {
-            child: None,
-            pid: Some(session.pid),
-            log_path: Some(PathBuf::from(&session.log_path)),
-            logs,
-            item_type: session.item_type,
-            run_id: session.run_id.clone(),
-            window: session.window.clone(),
-        };
-
+        let mut should_monitor = false;
         if let Some(state) = handle.try_state::<AppState>() {
-            recover_lock(&state.processes).insert(session.app_id.clone(), info);
+            let mut processes = recover_lock(&state.processes);
+            if !processes.contains_key(&session.app_id) {
+                processes.insert(
+                    session.app_id.clone(),
+                    ProcessInfo {
+                        child: None,
+                        pid: Some(session.pid),
+                        log_path: Some(PathBuf::from(&session.log_path)),
+                        logs: Arc::new(Mutex::new(Vec::new())),
+                        item_type: session.item_type,
+                        run_id: session.run_id.clone(),
+                        window: session.window.clone(),
+                    },
+                );
+                should_monitor = true;
+            }
         }
-        spawn_recovered_process_monitor(handle, &session.app_id, session.pid);
+        if should_monitor {
+            spawn_recovered_process_monitor(handle, &session.app_id, session.pid);
+        }
         live_sessions.push(session);
     }
 
