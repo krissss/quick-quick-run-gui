@@ -218,7 +218,7 @@ pub fn setup_tray(app: &AppHandle) {
     let menu = build_menu(app);
 
     let _tray = TrayIconBuilder::with_id("main-tray")
-        .tooltip("Quick Quick Run GUI")
+        .tooltip("QQRun")
         .icon(icon)
         .icon_as_template(true)
         .menu(&menu)
