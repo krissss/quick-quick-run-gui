@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use std::sync::MutexGuard;
 use tauri::{
     image::Image,
-    menu::{MenuBuilder, MenuItem, PredefinedMenuItem},
-    tray::TrayIconBuilder,
+    menu::{MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager,
 };
 
@@ -40,10 +40,27 @@ fn read_apps_from_store(app: &AppHandle) -> Vec<AppEntry> {
 /// 读取当前运行中的应用 ID
 fn read_running_ids(app: &AppHandle) -> HashSet<String> {
     use crate::process::AppState;
+    crate::process::restore_persisted_sessions(app);
     if let Some(state) = app.try_state::<AppState>() {
         recover_lock(&state.processes).keys().cloned().collect()
     } else {
         HashSet::new()
+    }
+}
+
+fn app_item_type(app: &AppEntry) -> &str {
+    if app.item_type.is_empty() {
+        "web"
+    } else {
+        app.item_type.as_str()
+    }
+}
+
+fn launch_action_label(app: &AppEntry) -> &'static str {
+    if app_item_type(app) == "task" {
+        "运行"
+    } else {
+        "启动"
     }
 }
 
@@ -53,8 +70,6 @@ fn build_menu(app: &AppHandle) -> tauri::menu::Menu<tauri::Wry> {
     let running = read_running_ids(app);
 
     let mut mb = MenuBuilder::new(app);
-
-    // 分组：运行中 / 未运行
     let running_apps: Vec<&AppEntry> = all_apps
         .iter()
         .filter(|a| running.contains(&a.id))
@@ -64,25 +79,8 @@ fn build_menu(app: &AppHandle) -> tauri::menu::Menu<tauri::Wry> {
         .filter(|a| !running.contains(&a.id))
         .collect();
 
-    // 运行中应用（带 ● 标记）
-    for a in &running_apps {
-        if let Ok(item) = MenuItem::with_id(app, &a.id, format!("● {}", a.name), true, None::<&str>)
-        {
-            mb = mb.item(&item);
-        }
-    }
-
-    if !running_apps.is_empty() && !stopped_apps.is_empty() {
-        if let Ok(sep) = PredefinedMenuItem::separator(app) {
-            mb = mb.item(&sep);
-        }
-    }
-
-    // 未运行应用
-    for a in &stopped_apps {
-        if let Ok(item) = MenuItem::with_id(app, &a.id, &a.name, true, None::<&str>) {
-            mb = mb.item(&item);
-        }
+    if let Ok(item) = MenuItem::with_id(app, "show-main", "显示主窗口", true, None::<&str>) {
+        mb = mb.item(&item);
     }
 
     if !all_apps.is_empty() {
@@ -91,11 +89,87 @@ fn build_menu(app: &AppHandle) -> tauri::menu::Menu<tauri::Wry> {
         }
     }
 
-    if let Ok(item) = MenuItem::with_id(app, "show-main", "显示主窗口", true, None::<&str>) {
-        mb = mb.item(&item);
+    let running_windows: Vec<&AppEntry> = running_apps
+        .iter()
+        .copied()
+        .filter(|a| app_item_type(a) == "web")
+        .collect();
+    if !running_windows.is_empty() {
+        let mut submenu = SubmenuBuilder::new(app, "运行中的窗口");
+        for a in running_windows {
+            if let Ok(item) = MenuItem::with_id(
+                app,
+                format!("show:{}", a.id),
+                format!("打开 {}", a.name),
+                true,
+                None::<&str>,
+            ) {
+                submenu = submenu.item(&item);
+            }
+        }
+        if let Ok(menu) = submenu.build() {
+            mb = mb.item(&menu);
+        }
     }
+
+    let background_items: Vec<&AppEntry> = running_apps
+        .iter()
+        .copied()
+        .filter(|a| app_item_type(a) != "web")
+        .collect();
+    if !background_items.is_empty() {
+        let mut submenu = SubmenuBuilder::new(app, "运行中的服务和任务");
+        let item_count = background_items.len();
+        for (index, a) in background_items.into_iter().enumerate() {
+            if let Ok(item) = MenuItem::with_id(
+                app,
+                format!("log:{}", a.id),
+                format!("查看 {} 日志", a.name),
+                true,
+                None::<&str>,
+            ) {
+                submenu = submenu.item(&item);
+            }
+            if let Ok(item) = MenuItem::with_id(
+                app,
+                format!("stop:{}", a.id),
+                format!("停止 {}", a.name),
+                true,
+                None::<&str>,
+            ) {
+                submenu = submenu.item(&item);
+            }
+            if index + 1 < item_count {
+                if let Ok(sep) = PredefinedMenuItem::separator(app) {
+                    submenu = submenu.item(&sep);
+                }
+            }
+        }
+        if let Ok(menu) = submenu.build() {
+            mb = mb.item(&menu);
+        }
+    }
+
+    if !stopped_apps.is_empty() {
+        let mut submenu = SubmenuBuilder::new(app, "启动未运行项");
+        for a in &stopped_apps {
+            if let Ok(item) = MenuItem::with_id(
+                app,
+                format!("launch:{}", a.id),
+                format!("{} {}", launch_action_label(a), a.name),
+                true,
+                None::<&str>,
+            ) {
+                submenu = submenu.item(&item);
+            }
+        }
+        if let Ok(menu) = submenu.build() {
+            mb = mb.item(&menu);
+        }
+    }
+
     if !running_apps.is_empty() {
-        if let Ok(item) = MenuItem::with_id(app, "stop-all", "停止所有服务", true, None::<&str>)
+        if let Ok(item) = MenuItem::with_id(app, "stop-all", "停止全部运行项", true, None::<&str>)
         {
             mb = mb.item(&item);
         }
@@ -148,48 +222,36 @@ pub fn setup_tray(app: &AppHandle) {
         .icon(icon)
         .icon_as_template(true)
         .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                crate::show_main_window(tray.app_handle());
+            }
+        })
         .on_menu_event(move |app, event| {
             let id = event.id().as_ref();
-            match id {
-                "quit" => {
-                    app.exit(0);
-                }
-                "stop-all" => {
-                    crate::process::force_kill_all(app);
-                    rebuild_tray_menu(app);
-                }
-                "show-main" => {
-                    #[cfg(target_os = "macos")]
-                    {
-                        let _ = crate::dock::show_dock_icon();
-                    }
-                    if let Some(win) = app.get_webview_window("main") {
-                        let _ = win.show();
-                        let _ = win.set_focus();
-                    }
-                }
-                app_id => {
-                    let running = read_running_ids(app);
-                    if running.contains(app_id) {
-                        let app_entry = read_apps_from_store(app)
-                            .into_iter()
-                            .find(|item| item.id == app_id);
-                        if app_entry
-                            .as_ref()
-                            .map(|item| item.item_type.as_str())
-                            .filter(|item_type| !item_type.is_empty())
-                            .unwrap_or("web")
-                            == "web"
-                        {
-                            let _ = crate::show_or_create_app_window(app, app_id);
-                        } else if let Some(win) = app.get_webview_window("main") {
-                            let _ = win.show();
-                            let _ = win.set_focus();
-                        }
-                    } else {
-                        let _ = app.emit("tray-launch-app", app_id.to_string());
-                    }
-                }
+            if id == "quit" {
+                app.exit(0);
+            } else if id == "stop-all" {
+                crate::process::force_kill_all(app);
+                rebuild_tray_menu(app);
+            } else if id == "show-main" {
+                crate::show_main_window(app);
+            } else if let Some(app_id) = id.strip_prefix("show:") {
+                let _ = crate::show_or_create_app_window(app, app_id);
+            } else if let Some(app_id) = id.strip_prefix("log:") {
+                crate::show_main_window(app);
+                let _ = app.emit("tray-open-log", app_id.to_string());
+            } else if let Some(app_id) = id.strip_prefix("stop:") {
+                crate::process::kill_app_process(app, app_id);
+                rebuild_tray_menu(app);
+            } else if let Some(app_id) = id.strip_prefix("launch:") {
+                let _ = app.emit("tray-launch-app", app_id.to_string());
             }
         })
         .build(app);

@@ -29,7 +29,12 @@ const {
 const { runningAppIds, runningPids, latestRuns, refreshRunningApps, launchApp, stopApp, showAppWindow } = useLauncher(apps, showMessage, openLogDialog)
 
 // ── 设置 ──
-const { showSettingsDialog, autostartEnabled, themeIcon, themeLabel, toggleTheme, openSettingsDialog, toggleAutostart, closeSettingsDialog, handleExport, handleImport } = useSettings(apps, showMessage)
+const {
+  showSettingsDialog, autostartEnabled, hideDockOnClose,
+  themeIcon, themeLabel, toggleTheme,
+  openSettingsDialog, toggleAutostart, toggleHideDockOnClose,
+  closeSettingsDialog, handleExport, handleImport,
+} = useSettings(apps, showMessage)
 
 // ── 图标颜色（单色灰调） ──
 const ICON_COLORS = [
@@ -422,6 +427,16 @@ onMounted(async () => {
                 <div class="text-xs text-muted-foreground mt-0.5">登录时自动启动应用</div>
               </div>
               <Switch :model-value="autostartEnabled" @update:model-value="toggleAutostart" />
+            </div>
+
+            <div style="box-shadow: 0 -1px 0 0 var(--border)" />
+
+            <div class="flex items-center justify-between py-3">
+              <div>
+                <div class="text-sm font-medium">菜单栏模式</div>
+                <div class="text-xs text-muted-foreground mt-0.5">关闭主窗口时隐藏 Dock 图标</div>
+              </div>
+              <Switch :model-value="hideDockOnClose" @update:model-value="toggleHideDockOnClose" />
             </div>
 
             <div style="box-shadow: 0 -1px 0 0 var(--border)" />

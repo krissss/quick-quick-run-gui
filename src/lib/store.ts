@@ -2,6 +2,7 @@ import { Store } from '@tauri-apps/plugin-store'
 
 const STORE_FILE = 'qqr-store.json'
 const APPS_KEY = 'apps'
+const HIDE_DOCK_ON_CLOSE_KEY = 'hide_dock_on_close'
 const LS_KEY_APPS = 'qqr-apps'
 
 let _store: Store | null = null
@@ -92,6 +93,17 @@ export async function loadApps(): Promise<AppItem[]> {
 export async function saveApps(apps: AppItem[]): Promise<void> {
   const store = await getStore()
   await store.set(APPS_KEY, apps.map(normalizeApp))
+  await store.save()
+}
+
+export async function loadHideDockOnClose(): Promise<boolean> {
+  const store = await getStore()
+  return (await store.get<boolean>(HIDE_DOCK_ON_CLOSE_KEY)) || false
+}
+
+export async function saveHideDockOnClose(enabled: boolean): Promise<void> {
+  const store = await getStore()
+  await store.set(HIDE_DOCK_ON_CLOSE_KEY, enabled)
   await store.save()
 }
 

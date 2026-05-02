@@ -41,8 +41,6 @@ pnpm tauri:build  # Tauri 生产构建
 | `show_app_window` | `appId` | - | - |
 | `notify_apps_updated` | - | - | - |
 | `open_in_browser` | `url` | - | - |
-| `hide_dock_icon_cmd` | - | - | macOS |
-| `show_dock_icon_cmd` | - | - | macOS |
 
 **事件（后端 → 前端）：**
 | 事件 | Payload |
@@ -55,6 +53,7 @@ pnpm tauri:build  # Tauri 生产构建
 | `app-log` | `{app_id: string, line: string}` |
 | `app-launch-failed` | `{app_id: string, reason: string}` |
 | `tray-launch-app` | `string` (app_id) |
+| `tray-open-log` | `string` (app_id) |
 
 ### 进程管理（`src-tauri/src/process.rs`）
 
@@ -86,12 +85,14 @@ pnpm tauri:build  # Tauri 生产构建
 - `running_sessions`：重启恢复用的运行中进程快照。
 - `run_records`：最多保留 500 条运行历史。
 - `schedule_state`：调度器按 app id 保存的最近成功触发 due 时间。
+- `hide_dock_on_close`：关闭主窗口时是否进入仅菜单栏模式（默认 `false`）。
 
 ### 窗口管理
 
 - 主窗口：`main` (index.html → App.vue)
 - 应用窗口：动态创建，label 格式 `app-{appId前8字符}`（`window_label_for()`），加载 `app-window.html` (AppWindow.vue)
-- 主窗口关闭时隐藏 Dock 图标，应用仅保留菜单栏图标（macOS）
+- 主窗口关闭时默认只隐藏窗口并保留 Dock 图标；启用「菜单栏模式」后才隐藏 Dock 图标（macOS）。
+- 点击 Dock 图标或菜单栏图标会重新显示主窗口；菜单栏右键菜单提供打开运行中 web 窗口、查看 service/task 日志、停止运行项等操作。
 
 ### Vite 多页入口
 

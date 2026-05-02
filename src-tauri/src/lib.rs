@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike};
 use chrono_tz::Tz;
-use tauri::{Emitter, Listener, Manager};
+use tauri::{Emitter, Listener, Manager, RunEvent};
 use tauri_plugin_store::StoreExt;
 
 use html_title::extract_html_title;
@@ -73,7 +73,7 @@ pub fn run() {
                             let _ = win.hide();
                         }
                         #[cfg(target_os = "macos")]
-                        {
+                        if hide_dock_on_close_enabled(&handle) {
                             let _ = dock::hide_dock_icon();
                         }
                     }
@@ -117,8 +117,13 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, RunEvent::Reopen { .. }) {
+                show_main_window(app);
+            }
+        });
 }
 
 // ── IPC 命令 ──
@@ -489,6 +494,18 @@ fn stop_app(app: tauri::AppHandle, app_id: String) -> Result<(), String> {
 #[tauri::command]
 fn show_app_window(app: tauri::AppHandle, app_id: String) -> Result<(), String> {
     show_or_create_app_window(&app, &app_id)
+}
+
+pub(crate) fn show_main_window(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = dock::show_dock_icon();
+    }
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
 }
 
 pub(crate) fn show_or_create_app_window(
@@ -1135,6 +1152,14 @@ fn load_window_state(app: &tauri::AppHandle, app_id: &str) -> Option<WindowState
         }
     }
     None
+}
+
+fn hide_dock_on_close_enabled(app: &tauri::AppHandle) -> bool {
+    app.store("qqr-store.json")
+        .ok()
+        .and_then(|store| store.get("hide_dock_on_close"))
+        .and_then(|value| serde_json::from_value::<bool>(value).ok())
+        .unwrap_or(false)
 }
 
 /// 构建独立窗口加载的 URL

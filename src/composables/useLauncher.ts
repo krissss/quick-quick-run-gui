@@ -133,6 +133,10 @@ export function useLauncher(
         const app = apps.value.find(a => a.id === e.payload)
         if (app) await launchApp(app)
       }),
+      await listen<string>('tray-open-log', (e) => {
+        const app = apps.value.find(a => a.id === e.payload)
+        if (app) openLogDialog(app)
+      }),
     )
   })
 

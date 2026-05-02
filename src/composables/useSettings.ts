@@ -5,7 +5,7 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import { writeFile, readTextFile } from '@tauri-apps/plugin-fs'
 import { invoke } from '@tauri-apps/api/core'
-import { exportData, importData } from '@/lib/store'
+import { exportData, importData, loadHideDockOnClose, saveHideDockOnClose } from '@/lib/store'
 import { getErrorMessage } from './useMessage'
 
 export function useSettings(
@@ -14,6 +14,7 @@ export function useSettings(
 ) {
   const showSettingsDialog = ref(false)
   const autostartEnabled = ref(false)
+  const hideDockOnClose = ref(false)
 
   // 主题
   const currentTheme = ref<Theme>(getTheme())
@@ -32,6 +33,11 @@ export function useSettings(
   async function openSettingsDialog() {
     showSettingsDialog.value = true
     try {
+      hideDockOnClose.value = await loadHideDockOnClose()
+    } catch {
+      hideDockOnClose.value = false
+    }
+    try {
       autostartEnabled.value = await autostartIsEnabled()
     } catch {
       autostartEnabled.value = false
@@ -44,6 +50,15 @@ export function useSettings(
       else { await autostartDisable(); autostartEnabled.value = false }
     } catch (e: unknown) {
       showMessage(`设置自启动失败: ${getErrorMessage(e)}`, 'error')
+    }
+  }
+
+  async function toggleHideDockOnClose(value: boolean) {
+    try {
+      await saveHideDockOnClose(value)
+      hideDockOnClose.value = value
+    } catch (e: unknown) {
+      showMessage(`保存菜单栏模式失败: ${getErrorMessage(e)}`, 'error')
     }
   }
 
@@ -85,9 +100,9 @@ export function useSettings(
   }
 
   return {
-    showSettingsDialog, autostartEnabled,
+    showSettingsDialog, autostartEnabled, hideDockOnClose,
     currentTheme, themeIcon, themeLabel, toggleTheme,
-    openSettingsDialog, toggleAutostart, closeSettingsDialog,
+    openSettingsDialog, toggleAutostart, toggleHideDockOnClose, closeSettingsDialog,
     handleExport, handleImport,
   }
 }
