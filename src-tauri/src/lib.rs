@@ -10,7 +10,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike};
 use chrono_tz::Tz;
-use tauri::{Emitter, Listener, Manager, RunEvent};
+use tauri::{Emitter, Manager};
+#[cfg(target_os = "macos")]
+use tauri::{Listener, RunEvent};
 use tauri_plugin_store::StoreExt;
 
 use html_title::extract_html_title;
@@ -120,9 +122,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
             if matches!(event, RunEvent::Reopen { .. }) {
                 show_main_window(app);
             }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
         });
 }
 
@@ -537,9 +542,9 @@ pub(crate) fn show_or_create_app_window(
 
 /// 前端通知应用列表已更新，重建托盘菜单
 #[tauri::command]
-fn notify_apps_updated(app: tauri::AppHandle) -> Result<(), String> {
+fn notify_apps_updated(_app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    tray::rebuild_tray_menu(&app);
+    tray::rebuild_tray_menu(&_app);
     Ok(())
 }
 
