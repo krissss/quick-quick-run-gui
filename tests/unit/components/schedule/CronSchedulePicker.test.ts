@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
-import CronSchedulePicker from '@/components/CronSchedulePicker.vue'
+import CronSchedulePicker from '@/components/schedule/CronSchedulePicker.vue'
 import { Input } from '@/components/ui/input'
 
 function buttonByText(wrapper: ReturnType<typeof mount>, text: string) {

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { useSettings } from '@/composables/useSettings'
 import type { AppItem } from '@/lib/store'
-import { setupTauriMocks } from '../helpers/tauri'
+import { setupTauriMocks } from '../../helpers/tauri'
 
 const importedApp: AppItem = {
   id: 'imported',

@@ -1,7 +1,7 @@
 import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { validateCronExpression } from '@/lib/cron'
-import { defaultSchedule, loadApps, normalizeApp, saveApps, type AppItem, type AppType, type MissedPolicy } from '@/lib/store'
+import { defaultSchedule, loadApps, normalizeApp, saveApps, type AppItem, type AppProfile, type AppType, type MissedPolicy } from '@/lib/store'
 
 export function emptyApp(): AppItem {
   return {
@@ -179,10 +179,35 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
     await persistApps()
   }
 
+  async function updateAppProfiles(app: AppItem, profiles: AppProfile[], activeProfileId: string) {
+    const nextApp = {
+      ...app,
+      profiles,
+      activeProfileId,
+    }
+    const appIndex = apps.value.findIndex(item => item.id === app.id)
+    if (appIndex !== -1) {
+      apps.value[appIndex] = {
+        ...apps.value[appIndex],
+        profiles,
+        activeProfileId,
+      }
+      await persistApps()
+    }
+    if (editForm.value.id === app.id) {
+      editForm.value = {
+        ...editForm.value,
+        profiles,
+        activeProfileId,
+      }
+    }
+    return nextApp
+  }
+
   return {
     apps, editForm, isNew,
     selectApp, openAddForm, duplicateApp, refreshApps, persistApps, saveApp, deleteApp,
-    reorderApps,
+    reorderApps, updateAppProfiles,
     setAppType, setScheduleEnabled, setMissedPolicy, setScheduleCron, touchSchedule,
   }
 }

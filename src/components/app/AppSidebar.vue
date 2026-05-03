@@ -1,0 +1,302 @@
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { Input } from '@/components/ui/input'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { iconGradient, itemTypeLabel, runStatusLabel, statusDotClass } from '@/lib/appDisplay'
+import type { AppItem, AppType } from '@/lib/store'
+import type { RunRecord } from '@/composables/useLauncher'
+
+const props = defineProps<{
+  apps: AppItem[]
+  selectedAppId: string
+  isNew: boolean
+  runningAppIds: Set<string>
+  latestRuns: Map<string, RunRecord>
+}>()
+
+const emit = defineEmits<{
+  add: []
+  select: [app: AppItem]
+  reorder: [activeId: string, targetId: string]
+  openSettings: []
+}>()
+
+const APP_TYPES: AppType[] = ['web', 'service', 'task']
+const sidebarSearch = ref('')
+const sidebarFilter = ref<'all' | AppType>('all')
+
+const filteredApps = computed(() => {
+  const query = sidebarSearch.value.trim().toLowerCase()
+  return props.apps.filter((app) => {
+    if (sidebarFilter.value !== 'all' && app.type !== sidebarFilter.value) return false
+    if (!query) return true
+    const profileText = app.profiles
+      .flatMap(profile => [profile.name, ...Object.values(profile.values || {})])
+      .join(' ')
+    const haystack = [app.name, app.command, app.workingDirectory, app.url, profileText, itemTypeLabel(app.type)].join(' ').toLowerCase()
+    return haystack.includes(query)
+  })
+})
+
+const groupedApps = computed(() => APP_TYPES
+  .map((type) => ({
+    type,
+    label: itemTypeLabel(type),
+    apps: filteredApps.value.filter((app) => app.type === type),
+  }))
+  .filter(group => group.apps.length > 0))
+
+const draggedAppId = ref<string | null>(null)
+const dragOverAppId = ref<string | null>(null)
+const dragPointerId = ref<number | null>(null)
+const dragStartPoint = ref<{ x: number; y: number; appId: string } | null>(null)
+const suppressClickAppId = ref<string | null>(null)
+let suppressClickTimer: ReturnType<typeof setTimeout> | null = null
+const dragThreshold = 6
+
+function updateSidebarFilter(value: string | string[]) {
+  if (Array.isArray(value) || !value) return
+  if (value === 'all' || value === 'web' || value === 'service' || value === 'task') {
+    sidebarFilter.value = value
+  }
+}
+
+function clearSidebarSearch() {
+  sidebarSearch.value = ''
+}
+
+function appIdFromPoint(x: number, y: number) {
+  const element = document.elementFromPoint(x, y)
+  const row = element?.closest('[data-app-id]') as HTMLElement | null
+  return row?.dataset.appId || null
+}
+
+function resetAppDrag() {
+  draggedAppId.value = null
+  dragOverAppId.value = null
+  dragPointerId.value = null
+  dragStartPoint.value = null
+}
+
+function handleAppPointerDown(event: PointerEvent, appId: string) {
+  if (event.button !== 0) return
+  dragStartPoint.value = { x: event.clientX, y: event.clientY, appId }
+  dragOverAppId.value = null
+  dragPointerId.value = event.pointerId
+  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
+}
+
+function handleAppPointerMove(event: PointerEvent) {
+  if (dragPointerId.value !== event.pointerId || !dragStartPoint.value) return
+  const distance = Math.hypot(
+    event.clientX - dragStartPoint.value.x,
+    event.clientY - dragStartPoint.value.y,
+  )
+  if (!draggedAppId.value && distance < dragThreshold) return
+  if (!draggedAppId.value) draggedAppId.value = dragStartPoint.value.appId
+  event.preventDefault()
+  const targetId = appIdFromPoint(event.clientX, event.clientY)
+  dragOverAppId.value = targetId && targetId !== draggedAppId.value ? targetId : null
+}
+
+function handleAppPointerUp(event: PointerEvent) {
+  if (dragPointerId.value !== event.pointerId || !dragStartPoint.value) return
+  const activeId = dragStartPoint.value.appId
+  const hasDragged = !!draggedAppId.value
+  const targetId = dragOverAppId.value || appIdFromPoint(event.clientX, event.clientY)
+  if (hasDragged) {
+    event.preventDefault()
+    suppressClickAppId.value = activeId
+    if (suppressClickTimer) clearTimeout(suppressClickTimer)
+    suppressClickTimer = window.setTimeout(() => {
+      if (suppressClickAppId.value === activeId) suppressClickAppId.value = null
+      suppressClickTimer = null
+    }, 0)
+  }
+  ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
+  if (hasDragged && targetId && activeId !== targetId) emit('reorder', activeId, targetId)
+  resetAppDrag()
+}
+
+function handleAppClick(event: MouseEvent, app: AppItem) {
+  if (suppressClickAppId.value === app.id) {
+    event.preventDefault()
+    event.stopPropagation()
+    suppressClickAppId.value = null
+    if (suppressClickTimer) {
+      clearTimeout(suppressClickTimer)
+      suppressClickTimer = null
+    }
+    return
+  }
+  emit('select', app)
+}
+</script>
+
+<template>
+  <div class="w-56 shrink-0 flex flex-col border-r border-border">
+    <div class="space-y-2 border-b border-border p-2">
+      <div class="relative">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <circle cx="11" cy="11" r="8" />
+          <path d="m21 21-4.3-4.3" />
+        </svg>
+        <Input
+          v-model="sidebarSearch"
+          class="h-8 pl-8 pr-8 text-xs"
+          placeholder="搜索名称、命令或 URL"
+          aria-label="搜索应用"
+        />
+        <button
+          v-if="sidebarSearch"
+          type="button"
+          class="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          aria-label="清空搜索"
+          title="清空搜索"
+          @click="clearSidebarSearch"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <ToggleGroup
+        class="grid w-full grid-cols-4 gap-1"
+        :model-value="sidebarFilter"
+        type="single"
+        aria-label="筛选应用类型"
+        @update:model-value="updateSidebarFilter"
+      >
+        <ToggleGroupItem value="all" class="h-8 px-0" aria-label="显示全部" title="全部">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" rx="1.5" />
+            <rect x="14" y="3" width="7" height="7" rx="1.5" />
+            <rect x="3" y="14" width="7" height="7" rx="1.5" />
+            <rect x="14" y="14" width="7" height="7" rx="1.5" />
+          </svg>
+        </ToggleGroupItem>
+        <ToggleGroupItem value="web" class="h-8 px-0" aria-label="筛选网页" title="网页">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3 12h18" />
+            <path d="M12 3a15 15 0 0 1 0 18" />
+            <path d="M12 3a15 15 0 0 0 0 18" />
+          </svg>
+        </ToggleGroupItem>
+        <ToggleGroupItem value="service" class="h-8 px-0" aria-label="筛选服务" title="服务">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 7h16" />
+            <path d="M4 12h16" />
+            <path d="M4 17h16" />
+            <path d="M7 7v10" />
+          </svg>
+        </ToggleGroupItem>
+        <ToggleGroupItem value="task" class="h-8 px-0" aria-label="筛选任务" title="任务">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="8" />
+            <path d="M12 8v4l3 2" />
+          </svg>
+        </ToggleGroupItem>
+      </ToggleGroup>
+
+      <button
+        class="w-full flex items-center gap-2.5 rounded-md px-2 py-2 transition-colors cursor-pointer"
+        :class="isNew ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'"
+        @click="$emit('add')"
+      >
+        <div class="w-7 h-7 rounded-md flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        </div>
+        <span class="text-sm">添加应用</span>
+      </button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto py-2">
+      <div v-if="filteredApps.length === 0" class="px-4 py-8 text-xs text-muted-foreground">
+        没有匹配的应用
+      </div>
+
+      <div
+        v-for="group in groupedApps"
+        :key="group.type"
+        class="space-y-1.5 px-2 pb-3"
+      >
+        <div class="flex items-center justify-between px-2 text-[10px] font-medium text-muted-foreground">
+          <span>{{ group.label }}</span>
+          <span>{{ group.apps.length }}</span>
+        </div>
+
+        <div class="space-y-0.5">
+          <div
+            v-for="app in group.apps"
+            :key="app.id"
+          >
+            <button
+              type="button"
+              class="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors cursor-grab select-none touch-none active:cursor-grabbing"
+              :class="[
+                selectedAppId === app.id && !isNew ? 'bg-accent text-foreground' : 'text-foreground hover:bg-accent/50',
+                draggedAppId === app.id ? 'opacity-50' : '',
+                dragOverAppId === app.id ? 'bg-accent/70 shadow-[inset_0_0_0_1px_var(--ring)]' : '',
+              ]"
+              :data-app-id="app.id"
+              :title="`拖动排序：${app.name}`"
+              @pointerdown="handleAppPointerDown($event, app.id)"
+              @pointermove="handleAppPointerMove"
+              @pointerup="handleAppPointerUp"
+              @pointercancel="resetAppDrag"
+              @click="handleAppClick($event, app)"
+            >
+              <div class="relative shrink-0">
+                <div
+                  class="w-7 h-7 rounded-md flex items-center justify-center text-xs font-medium"
+                  :class="iconGradient(app.name)"
+                >
+                  {{ app.name.charAt(0).toUpperCase() }}
+                </div>
+                <div
+                  v-if="runningAppIds.has(app.id)"
+                  class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500"
+                />
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-sm">{{ app.name }}</div>
+                <div class="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <span>{{ itemTypeLabel(app.type) }}</span>
+                  <span v-if="runStatusLabel(app, runningAppIds, latestRuns)" class="inline-flex items-center gap-1">
+                    <span class="h-1 w-1 rounded-full" :class="statusDotClass(app, runningAppIds, latestRuns)" />
+                    {{ runStatusLabel(app, runningAppIds, latestRuns) }}
+                  </span>
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="border-t border-border p-2">
+      <button
+        class="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+        @click="$emit('openSettings')"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        <span class="text-xs">设置</span>
+      </button>
+    </div>
+  </div>
+</template>

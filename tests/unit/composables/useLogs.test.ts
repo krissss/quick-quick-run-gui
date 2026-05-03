@@ -4,7 +4,7 @@ import { defineComponent, h } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useLogs } from '@/composables/useLogs'
 import type { AppItem } from '@/lib/store'
-import { setupTauriMocks } from '../helpers/tauri'
+import { setupTauriMocks } from '../../helpers/tauri'
 
 const app: AppItem = {
   id: 'app-1',

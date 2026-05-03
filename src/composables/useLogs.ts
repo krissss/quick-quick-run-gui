@@ -1,4 +1,4 @@
-import { ref, nextTick, useTemplateRef } from 'vue'
+import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { AppItem } from '@/lib/store'
@@ -8,21 +8,12 @@ export function useLogs() {
   const logAppId = ref('')
   const logAppName = ref('')
   const logLines = ref<string[]>([])
-  const logContainer = useTemplateRef<HTMLElement>('logContainer')
   const logLaunchFailed = ref(false)
   const logLaunchFailedReason = ref('')
   const logWindowOpened = ref(false)
   let logFailedUnlisten: (() => void) | null = null
   let logOpenedUnlisten: (() => void) | null = null
   let pollTimer: ReturnType<typeof setInterval> | null = null
-
-  function scrollToBottom() {
-    nextTick(() => {
-      if (logContainer.value) {
-        logContainer.value.scrollTop = logContainer.value.scrollHeight
-      }
-    })
-  }
 
   async function openLogDialog(app: AppItem, windowAlreadyOpen = false) {
     logAppId.value = app.id
@@ -39,7 +30,6 @@ export function useLogs() {
       logLines.value = []
     }
     showLogDialog.value = true
-    scrollToBottom()
 
     // 监听状态事件
     logFailedUnlisten = await listen<{ app_id: string; reason: string }>('app-launch-failed', (e) => {
@@ -63,7 +53,6 @@ export function useLogs() {
         if (all.length !== lastCount) {
           logLines.value = all
           lastCount = all.length
-          scrollToBottom()
         }
       } catch { /* ignore */ }
     }, 300)

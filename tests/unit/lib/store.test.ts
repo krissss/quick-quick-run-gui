@@ -12,7 +12,7 @@ import {
   saveApps,
   saveHideDockOnClose,
 } from '@/lib/store'
-import { setupTauriMocks } from '../helpers/tauri'
+import { setupTauriMocks } from '../../helpers/tauri'
 
 describe('store helpers', () => {
   it('normalizes legacy app records loaded from the store', async () => {
