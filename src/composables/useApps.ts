@@ -4,7 +4,26 @@ import { validateCronExpression } from '@/lib/cron'
 import { defaultSchedule, loadApps, normalizeApp, saveApps, type AppItem, type AppType, type MissedPolicy } from '@/lib/store'
 
 export function emptyApp(): AppItem {
-  return { id: '', name: '', type: 'web', command: '', workingDirectory: '', url: '', width: 1200, height: 800, schedule: defaultSchedule() }
+  return {
+    id: '',
+    name: '',
+    type: 'web',
+    command: '',
+    workingDirectory: '',
+    url: '',
+    width: 1200,
+    height: 800,
+    profiles: [],
+    activeProfileId: '',
+    schedule: defaultSchedule(),
+  }
+}
+
+function defaultAppName(app: AppItem) {
+  const command = app.command.trim()
+  if (command) return command
+  if (app.type === 'web') return app.url.trim()
+  return ''
 }
 
 export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 'info') => void) {
@@ -76,10 +95,6 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
 
   async function saveApp() {
     const app = normalizeApp(editForm.value)
-    if (!app.name.trim()) {
-      showMessage('请填写名称', 'error')
-      return
-    }
     if (app.type === 'web' && !app.url.trim()) {
       showMessage('请填写目标 URL', 'error')
       return
@@ -100,6 +115,7 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
         return
       }
     }
+    if (!app.name.trim()) app.name = defaultAppName(app)
     const wasNew = isNew.value
     if (!wasNew) {
       const idx = apps.value.findIndex(a => a.id === app.id)

@@ -1,7 +1,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { AppItem, AppType } from '@/lib/store'
+import { resolveAppProfile, type AppItem, type AppType } from '@/lib/store'
 import { getErrorMessage } from './useMessage'
 
 interface RunningAppInfo {
@@ -62,37 +62,38 @@ export function useLauncher(
   async function launchApp(app: AppItem) {
     loading.value = true
     try {
+      const launchTarget = resolveAppProfile(app)
       const [bgR, bgG, bgB] = getBackgroundRGB()
       const result = await invoke<{ message: string; pid: number | null; run_id: string | null }>('launch_app_window', {
-        appId: app.id,
-        command: app.command,
-        workingDirectory: app.workingDirectory,
-        url: app.url,
-        width: app.width,
-        height: app.height,
-        appName: app.name,
-        itemType: app.type || 'web',
+        appId: launchTarget.id,
+        command: launchTarget.command,
+        workingDirectory: launchTarget.workingDirectory,
+        url: launchTarget.url,
+        width: launchTarget.width,
+        height: launchTarget.height,
+        appName: launchTarget.name,
+        itemType: launchTarget.type || 'web',
         bgR,
         bgG,
         bgB,
       })
       if (result.pid != null) {
         const m = new Map(runningPids.value)
-        m.set(app.id, result.pid)
+        m.set(launchTarget.id, result.pid)
         runningPids.value = m
-      } else if (!app.command.trim()) {
+      } else if (!launchTarget.command.trim()) {
         const m = new Map(runningPids.value)
-        m.delete(app.id)
+        m.delete(launchTarget.id)
         runningPids.value = m
         showMessage(result.message, 'success')
       } else {
         showMessage(result.message, 'success')
       }
       const s = new Set(runningAppIds.value)
-      s.add(app.id)
+      s.add(launchTarget.id)
       runningAppIds.value = s
-      if (app.command.trim()) {
-        openLogDialog(app)
+      if (launchTarget.command.trim()) {
+        openLogDialog(launchTarget)
       }
       await refreshRunningApps()
     } catch (e: unknown) {

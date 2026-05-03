@@ -15,6 +15,8 @@ const qwenpaw: AppItem = {
   url: 'http://localhost:3000',
   width: 1200,
   height: 800,
+  profiles: [],
+  activeProfileId: '',
   schedule: {
     enabled: false,
     cron: '0 9 * * *',
@@ -156,6 +158,39 @@ describe('useLauncher integration', () => {
     expect(fallback.launcher.loading.value).toBe(false)
     styleSpy.mockRestore()
     fallback.wrapper.unmount()
+  })
+
+  it('resolves the active profile before launching', async () => {
+    const { launcher, mock, openLogDialog, wrapper } = await mountLauncher()
+    const profiledApp: AppItem = {
+      ...qwenpaw,
+      command: 'pnpm dev {account= : 账号} {--headless}',
+      activeProfileId: 'profile-1',
+      profiles: [
+        {
+          id: 'profile-1',
+          name: '账号 1',
+          values: {
+            account: 'demo',
+            headless: 'true',
+          },
+        },
+      ],
+    }
+
+    await launcher.launchApp(profiledApp)
+
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      command: 'pnpm dev demo --headless',
+      workingDirectory: '/Users/kriss/project',
+      url: 'http://localhost:3000',
+    })
+    expect(openLogDialog).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'qwenpaw-id',
+      command: 'pnpm dev demo --headless',
+      workingDirectory: '/Users/kriss/project',
+    }))
+    wrapper.unmount()
   })
 
   it('reports launch and stop failures', async () => {

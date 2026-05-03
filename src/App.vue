@@ -4,6 +4,7 @@ import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import CronSchedulePicker from '@/components/CronSchedulePicker.vue'
 import { useMessage } from '@/composables/useMessage'
@@ -11,7 +12,7 @@ import { useApps } from '@/composables/useApps'
 import { useLauncher } from '@/composables/useLauncher'
 import { useLogs } from '@/composables/useLogs'
 import { useSettings } from '@/composables/useSettings'
-import type { AppItem, AppType, MissedPolicy } from '@/lib/store'
+import { buildCommandWithProfile, parseCommandSignature, type AppItem, type AppProfile, type AppType, type CommandParam, type MissedPolicy } from '@/lib/store'
 
 // ── 消息 ──
 const { messages, showMessage, dismissMessage } = useMessage()
@@ -23,7 +24,7 @@ const { showLogDialog, logAppId, logAppName, logLines, logLaunchFailed, logLaunc
 const {
   apps, editForm, isNew,
   selectApp, openAddForm, duplicateApp, refreshApps, saveApp, deleteApp,
-  reorderApps,
+  reorderApps, persistApps,
   setAppType, setScheduleEnabled, setMissedPolicy, setScheduleCron,
 } = useApps(showMessage)
 
@@ -92,6 +93,14 @@ function schedulePolicyLabel(value: MissedPolicy) {
   return value === 'run-once' ? '补跑一次' : '跳过'
 }
 
+function namePlaceholder() {
+  const command = editForm.value.command.trim()
+  if (command) return command
+  const url = editForm.value.url.trim()
+  if (editForm.value.type === 'web' && url) return url
+  return editForm.value.type === 'web' ? '默认使用启动命令或 URL' : '默认使用执行命令'
+}
+
 const APP_TYPES: AppType[] = ['web', 'service', 'task']
 const sidebarSearch = ref('')
 const sidebarFilter = ref<'all' | AppType>('all')
@@ -101,7 +110,10 @@ const filteredApps = computed(() => {
   return apps.value.filter((app) => {
     if (sidebarFilter.value !== 'all' && app.type !== sidebarFilter.value) return false
     if (!query) return true
-    const haystack = [app.name, app.command, app.workingDirectory, app.url, itemTypeLabel(app.type)].join(' ').toLowerCase()
+    const profileText = app.profiles
+      .flatMap(profile => [profile.name, ...Object.values(profile.values || {})])
+      .join(' ')
+    const haystack = [app.name, app.command, app.workingDirectory, app.url, profileText, itemTypeLabel(app.type)].join(' ').toLowerCase()
     return haystack.includes(query)
   })
 })
@@ -138,6 +150,189 @@ async function chooseWorkingDirectory() {
   } catch {
     showMessage('选择工作目录失败', 'error')
   }
+}
+
+function createProfileId() {
+  return crypto.randomUUID?.() || `profile-${Date.now()}`
+}
+
+function commandParamDisplay(param: CommandParam) {
+  return param.kind === 'option' ? `--${param.key}` : `{${param.key}}`
+}
+
+const showRunDialog = ref(false)
+const runTargetApp = ref<AppItem | null>(null)
+const runSelectedProfileId = ref('')
+const runProfileNameDraft = ref('')
+const runValues = ref<Record<string, string>>({})
+
+const runCommandParams = computed(() =>
+  runTargetApp.value ? parseCommandSignature(runTargetApp.value.command).params : [],
+)
+const runSelectedProfile = computed(() =>
+  runTargetApp.value?.profiles.find(profile => profile.id === runSelectedProfileId.value) || null,
+)
+const runPreviewCommand = computed(() =>
+  runTargetApp.value ? buildCommandWithProfile(runTargetApp.value.command, runValues.value) : '',
+)
+
+function commandParamsFor(app: AppItem) {
+  return parseCommandSignature(app.command).params
+}
+
+function valuesForProfile(app: AppItem, profileId: string) {
+  const profile = app.profiles.find(item => item.id === profileId)
+  return Object.fromEntries(
+    commandParamsFor(app).map(param => [param.key, profile?.values?.[param.key] ?? param.default]),
+  )
+}
+
+function openRunDialog(app: AppItem) {
+  runTargetApp.value = app
+  runSelectedProfileId.value = app.activeProfileId || ''
+  runValues.value = valuesForProfile(app, runSelectedProfileId.value)
+  runProfileNameDraft.value = runSelectedProfile.value?.name || ''
+  showRunDialog.value = true
+}
+
+function closeRunDialog() {
+  showRunDialog.value = false
+  runTargetApp.value = null
+  runSelectedProfileId.value = ''
+  runProfileNameDraft.value = ''
+  runValues.value = {}
+}
+
+function selectRunProfile(profileId: string) {
+  const app = runTargetApp.value
+  if (!app) return
+  runSelectedProfileId.value = profileId
+  runValues.value = valuesForProfile(app, profileId)
+  runProfileNameDraft.value = runSelectedProfile.value?.name || ''
+}
+
+function runParamValue(param: CommandParam) {
+  return runValues.value[param.key] ?? param.default
+}
+
+function setRunParamValue(param: CommandParam, value: string | boolean) {
+  runValues.value = {
+    ...runValues.value,
+    [param.key]: typeof value === 'boolean' ? String(value) : value,
+  }
+}
+
+function runBoolValue(param: CommandParam) {
+  return ['true', '1', 'yes'].includes(runParamValue(param).trim().toLowerCase())
+}
+
+function uniqueRunProfileName(app: AppItem, name: string) {
+  const existing = new Set(app.profiles.map(profile => profile.name.trim()).filter(Boolean))
+  if (!existing.has(name)) return name
+  let index = 2
+  let candidate = `${name} ${index}`
+  while (existing.has(candidate)) {
+    index += 1
+    candidate = `${name} ${index}`
+  }
+  return candidate
+}
+
+async function persistRunProfiles(app: AppItem, profiles: AppProfile[], activeProfileId: string) {
+  const appIndex = apps.value.findIndex(item => item.id === app.id)
+  if (appIndex !== -1) {
+    apps.value[appIndex] = {
+      ...apps.value[appIndex],
+      profiles,
+      activeProfileId,
+    }
+    await persistApps()
+  }
+  if (editForm.value.id === app.id) {
+    editForm.value = {
+      ...editForm.value,
+      profiles,
+      activeProfileId,
+    }
+  }
+  runTargetApp.value = {
+    ...app,
+    profiles,
+    activeProfileId,
+  }
+  runSelectedProfileId.value = activeProfileId
+}
+
+async function saveRunDraftAsProfile() {
+  const app = runTargetApp.value
+  if (!app || runCommandParams.value.length === 0) return
+  const name = uniqueRunProfileName(app, runProfileNameDraft.value.trim() || `方案 ${app.profiles.length + 1}`)
+  const profile: AppProfile = {
+    id: createProfileId(),
+    name,
+    values: { ...runValues.value },
+  }
+
+  const nextProfiles = [...app.profiles, profile]
+  await persistRunProfiles(app, nextProfiles, profile.id)
+  runProfileNameDraft.value = profile.name
+  showMessage('已保存运行方案', 'success')
+}
+
+async function updateSelectedRunProfile() {
+  const app = runTargetApp.value
+  const profile = runSelectedProfile.value
+  if (!app || !profile) return
+  const nextProfiles = app.profiles.map(item =>
+    item.id === profile.id
+      ? {
+          ...item,
+          name: runProfileNameDraft.value.trim() || item.name || '未命名方案',
+          values: { ...runValues.value },
+        }
+      : item,
+  )
+  await persistRunProfiles(app, nextProfiles, profile.id)
+  showMessage('已更新运行方案', 'success')
+}
+
+async function deleteSelectedRunProfile() {
+  const app = runTargetApp.value
+  const profile = runSelectedProfile.value
+  if (!app || !profile) return
+  const nextProfiles = app.profiles.filter(item => item.id !== profile.id)
+  await persistRunProfiles(app, nextProfiles, '')
+  runValues.value = valuesForProfile({ ...app, profiles: nextProfiles, activeProfileId: '' }, '')
+  runProfileNameDraft.value = ''
+  showMessage('已删除运行方案', 'success')
+}
+
+async function requestLaunch(app: AppItem) {
+  if (commandParamsFor(app).length > 0) {
+    openRunDialog(app)
+    return
+  }
+  await launchApp(app)
+}
+
+async function launchRunDraft() {
+  const app = runTargetApp.value
+  if (!app) return
+  const draftProfileId = '__run-draft__'
+  const launchTarget: AppItem = {
+    ...app,
+    activeProfileId: draftProfileId,
+    profiles: [
+      ...app.profiles.filter(profile => profile.id !== draftProfileId),
+      {
+        id: draftProfileId,
+        name: runSelectedProfile.value?.name || '临时运行',
+        values: { ...runValues.value },
+      },
+    ],
+  }
+  closeRunDialog()
+  await launchApp(launchTarget)
 }
 
 const draggedAppId = ref<string | null>(null)
@@ -538,17 +733,38 @@ onMounted(async () => {
             </ToggleGroup>
           </div>
 
-          <div class="space-y-1.5">
-            <label class="text-xs font-medium text-muted-foreground">名称</label>
-            <Input v-model="editForm.name" :placeholder="editForm.type === 'task' ? '例如：同步日报' : '例如：我的博客'" />
+          <div v-if="editForm.type === 'web'" class="space-y-1.5">
+            <label class="text-xs font-medium text-muted-foreground">目标 URL</label>
+            <Input v-model="editForm.url" placeholder="http://localhost:3000" />
           </div>
           <div class="space-y-1.5">
-            <label class="text-xs font-medium text-muted-foreground">
-              {{ editForm.type === 'task' ? '执行命令' : '启动命令' }}
+            <label class="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <span>{{ editForm.type === 'task' ? '执行命令' : '启动命令' }}</span>
               <span v-if="editForm.type === 'web'" class="font-normal opacity-40">(可选)</span>
+              <TooltipProvider :delay-duration="150">
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <button
+                      type="button"
+                      class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-secondary text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--ring)]"
+                      aria-label="查看命令模板说明"
+                    >
+                      ?
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="start" class="max-w-[300px]">
+                    <div class="space-y-1.5">
+                      <p>支持完整 shell 语法，包括 <span class="font-mono">&&</span>、管道、环境变量。</p>
+                      <p><span class="font-mono">{name= : 名称}</span> 会作为位置参数替换。</p>
+                      <p><span class="font-mono">{--debug}</span> 是开关参数，<span class="font-mono">{--account= : 账号}</span> 会生成 <span class="font-mono">--account=值</span>。</p>
+                      <p>带模板的命令启动时会打开运行参数面板，可临时修改、另存或更新方案。</p>
+                      <p>工作目录请在下方单独设置。</p>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </label>
             <Input v-model="editForm.command" :placeholder="editForm.type === 'task' ? 'pnpm report' : 'npm run dev'" />
-            <p class="text-xs text-muted-foreground/60">支持 &&、管道等完整 shell 语法；目录在下方设置</p>
           </div>
           <div class="space-y-1.5">
             <label class="text-xs font-medium text-muted-foreground">
@@ -570,20 +786,6 @@ onMounted(async () => {
                   <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
                 </svg>
               </Button>
-            </div>
-          </div>
-          <div v-if="editForm.type === 'web'" class="space-y-1.5">
-            <label class="text-xs font-medium text-muted-foreground">目标 URL</label>
-            <Input v-model="editForm.url" placeholder="http://localhost:3000" />
-          </div>
-          <div v-if="editForm.type === 'web'" class="flex gap-4">
-            <div class="flex-1 space-y-1.5">
-              <label class="text-xs font-medium text-muted-foreground">宽度</label>
-              <Input v-model.number="editForm.width" type="number" />
-            </div>
-            <div class="flex-1 space-y-1.5">
-              <label class="text-xs font-medium text-muted-foreground">高度</label>
-              <Input v-model.number="editForm.height" type="number" />
             </div>
           </div>
           <div v-if="editForm.type === 'task'" class="space-y-3 rounded-lg bg-card p-3" style="box-shadow: var(--shadow-border)">
@@ -618,6 +820,23 @@ onMounted(async () => {
               </div>
             </div>
           </div>
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium text-muted-foreground">
+              名称
+              <span class="font-normal opacity-40">(可选)</span>
+            </label>
+            <Input v-model="editForm.name" :placeholder="namePlaceholder()" />
+          </div>
+          <div v-if="editForm.type === 'web'" class="flex gap-4">
+            <div class="flex-1 space-y-1.5">
+              <label class="text-xs font-medium text-muted-foreground">宽度</label>
+              <Input v-model.number="editForm.width" type="number" />
+            </div>
+            <div class="flex-1 space-y-1.5">
+              <label class="text-xs font-medium text-muted-foreground">高度</label>
+              <Input v-model.number="editForm.height" type="number" />
+            </div>
+          </div>
         </div>
 
         <!-- 操作按钮 -->
@@ -638,7 +857,7 @@ onMounted(async () => {
           <Button
             v-if="!isNew"
             size="sm"
-            @click="launchApp(editForm)"
+            @click="requestLaunch(editForm)"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
             {{ primaryActionLabel(editForm) }}
@@ -648,6 +867,150 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <!-- ═══ 运行参数面板（交互原型） ═══ -->
+    <Teleport to="body">
+      <div
+        v-if="showRunDialog && runTargetApp"
+        class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+        @click.self="closeRunDialog"
+      >
+        <div class="bg-card rounded-lg p-5 w-full max-w-xl max-h-[88vh] overflow-y-auto space-y-5" style="box-shadow: var(--shadow-card)">
+          <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <div class="text-xs font-medium text-muted-foreground">{{ itemTypeLabel(runTargetApp.type) }} / 运行参数</div>
+              <h2 class="mt-1 truncate text-base font-semibold tracking-[-0.32px]">{{ runTargetApp.name }}</h2>
+            </div>
+            <Button variant="ghost" size="sm" class="h-8 w-8 px-0 shrink-0" aria-label="关闭运行参数" @click="closeRunDialog">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 6 6 18" />
+                <path d="m6 6 12 12" />
+              </svg>
+            </Button>
+          </div>
+
+          <div class="space-y-2">
+            <div class="flex items-center justify-between gap-3">
+              <label class="text-xs font-medium text-muted-foreground">方案</label>
+              <span class="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                {{ runSelectedProfile ? (runSelectedProfile.name || '未命名方案') : '临时运行' }}
+              </span>
+            </div>
+            <div class="flex flex-wrap gap-1">
+              <Button
+                type="button"
+                size="sm"
+                :variant="!runSelectedProfileId ? 'secondary' : 'ghost'"
+                class="h-7 px-2 text-xs"
+                @click="selectRunProfile('')"
+              >
+                默认
+              </Button>
+              <Button
+                v-for="profile in runTargetApp.profiles"
+                :key="profile.id"
+                type="button"
+                size="sm"
+                :variant="runSelectedProfileId === profile.id ? 'secondary' : 'ghost'"
+                class="h-7 px-2 text-xs"
+                @click="selectRunProfile(profile.id)"
+              >
+                {{ profile.name || '未命名方案' }}
+              </Button>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <div
+              v-for="param in runCommandParams"
+              :key="param.key"
+              class="grid gap-2 py-3 shadow-[inset_0_-1px_0_0_var(--border)] last:shadow-none sm:grid-cols-[minmax(0,1fr)_minmax(180px,1.2fr)] sm:items-center"
+            >
+              <div class="min-w-0">
+                <div class="truncate text-sm font-medium">{{ param.label }}</div>
+                <div class="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                  {{ commandParamDisplay(param) }}
+                </div>
+              </div>
+              <Switch
+                v-if="param.type === 'bool'"
+                :model-value="runBoolValue(param)"
+                @update:model-value="setRunParamValue(param, $event)"
+              />
+              <Input
+                v-else
+                class="h-8 text-xs"
+                :placeholder="param.default || param.label"
+                :model-value="runParamValue(param)"
+                @update:model-value="setRunParamValue(param, String($event ?? ''))"
+              />
+            </div>
+          </div>
+
+          <div class="space-y-2 rounded-lg bg-secondary/60 p-3" style="box-shadow: var(--shadow-border)">
+            <div class="flex items-center justify-between gap-3">
+              <label class="text-xs font-medium text-muted-foreground">方案名称</label>
+              <Button
+                v-if="runSelectedProfile"
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="h-7 w-7 shrink-0 px-0 text-muted-foreground hover:text-destructive"
+                title="删除当前方案"
+                aria-label="删除当前方案"
+                @click="deleteSelectedRunProfile"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  <path d="M19 6 18 20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+              </Button>
+            </div>
+            <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+              <Input v-model="runProfileNameDraft" class="h-8 text-xs" placeholder="保存为方案名称" />
+              <Button
+                v-if="runSelectedProfile"
+                type="button"
+                size="sm"
+                class="shrink-0"
+                @click="updateSelectedRunProfile"
+              >
+                更新方案
+              </Button>
+              <Button
+                type="button"
+                :variant="runSelectedProfile ? 'secondary' : 'default'"
+                size="sm"
+                class="shrink-0"
+                @click="saveRunDraftAsProfile"
+              >
+                {{ runSelectedProfile ? '另存为新方案' : '保存方案' }}
+              </Button>
+            </div>
+          </div>
+
+          <div class="space-y-1.5">
+            <div class="text-xs font-medium text-muted-foreground">最终命令</div>
+            <div class="max-h-24 overflow-y-auto rounded-md bg-secondary px-2.5 py-2 font-mono text-[11px] leading-5 text-foreground break-all">
+              {{ runPreviewCommand || '空命令' }}
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <Button variant="secondary" size="sm" @click="closeRunDialog">取消</Button>
+            <Button size="sm" @click="launchRunDraft">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              运行
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- ═══ 日志查看器 ═══ -->
     <Teleport to="body">
@@ -676,7 +1039,7 @@ onMounted(async () => {
             <div v-if="logLines.length === 0" class="text-muted-foreground text-center py-10">暂无日志</div>
           </div>
           <div class="flex justify-end gap-2 mt-4">
-            <Button v-if="logLaunchFailed" variant="destructive" size="sm" @click="() => { const app = apps.find(a => a.id === logAppId); if (app) launchApp(app) }">重新启动</Button>
+            <Button v-if="logLaunchFailed" variant="destructive" size="sm" @click="() => { const app = apps.find(a => a.id === logAppId); if (app) requestLaunch(app) }">重新启动</Button>
             <Button variant="secondary" size="sm" @click="closeLogDialog">关闭</Button>
           </div>
         </div>

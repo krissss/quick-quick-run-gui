@@ -10,10 +10,6 @@ describe('useApps integration', () => {
     const apps = useApps((text, type) => messages.push({ text, type }))
 
     await apps.saveApp()
-    expect(messages.at(-1)).toEqual({ text: '请填写名称', type: 'error' })
-
-    apps.editForm.value.name = 'Website'
-    await apps.saveApp()
     expect(messages.at(-1)).toEqual({ text: '请填写目标 URL', type: 'error' })
 
     apps.setAppType('service')
@@ -26,6 +22,33 @@ describe('useApps integration', () => {
     apps.setScheduleCron('   ')
     await apps.saveApp()
     expect(messages.at(-1)).toEqual({ text: '请填写定时表达式', type: 'error' })
+  })
+
+  it('defaults the app name from the command or URL when omitted', async () => {
+    vi.stubGlobal('crypto', {
+      ...globalThis.crypto,
+      randomUUID: () => 'default-name',
+    })
+    const mock = setupTauriMocks()
+    const apps = useApps(() => {})
+
+    apps.setAppType('service')
+    apps.editForm.value.command = 'pnpm serve'
+    await apps.saveApp()
+    expect(mock.storeData.apps).toMatchObject([
+      { id: 'default-name', name: 'pnpm serve', command: 'pnpm serve' },
+    ])
+
+    apps.openAddForm()
+    vi.stubGlobal('crypto', {
+      ...globalThis.crypto,
+      randomUUID: () => 'default-url',
+    })
+    apps.editForm.value.url = 'http://localhost:5173'
+    await apps.saveApp()
+    expect(mock.storeData.apps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'default-url', name: 'http://localhost:5173', url: 'http://localhost:5173' }),
+    ]))
   })
 
   it('blocks saving an enabled task with an invalid cron expression', async () => {

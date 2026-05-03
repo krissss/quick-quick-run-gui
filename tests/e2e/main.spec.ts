@@ -152,7 +152,6 @@ test('shows a validation error for invalid custom task cron', async ({ page }) =
 
   await page.goto('/')
   await page.getByText('任务', { exact: true }).click()
-  await page.getByPlaceholder('例如：同步日报').fill('同步日报')
   await page.getByPlaceholder('pnpm report').fill('pnpm report')
   await page.getByRole('switch').click()
   await page.getByText('自定义', { exact: true }).click()

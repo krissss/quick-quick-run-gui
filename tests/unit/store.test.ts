@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildCommandWithProfile,
   exportData,
   importData,
   loadApps,
   loadHideDockOnClose,
   normalizeApp,
   normalizeApps,
+  parseCommandSignature,
+  resolveAppProfile,
   saveApps,
   saveHideDockOnClose,
 } from '@/lib/store'
@@ -34,6 +37,8 @@ describe('store helpers', () => {
       name: 'Legacy Web',
       type: 'web',
       workingDirectory: '',
+      profiles: [],
+      activeProfileId: '',
       width: 1200,
       height: 800,
       schedule: {
@@ -42,6 +47,59 @@ describe('store helpers', () => {
         timezone: 'Asia/Shanghai',
         missedPolicy: 'skip',
       },
+    })
+  })
+
+  it('parses command signatures and builds commands from profile values', () => {
+    expect(parseCommandSignature('uv run login.py {--account= : 账号} {--headless}')).toEqual({
+      baseCommand: 'uv run login.py',
+      params: [
+        { key: 'account', type: 'text', kind: 'option', default: '', label: '账号' },
+        { key: 'headless', type: 'bool', kind: 'option', default: 'false', label: 'headless' },
+      ],
+    })
+    expect(parseCommandSignature('echo {name= ： who}')).toEqual({
+      baseCommand: 'echo',
+      params: [
+        { key: 'name', type: 'text', kind: 'argument', default: '', label: 'who' },
+      ],
+    })
+
+    expect(buildCommandWithProfile('uv run login.py {--account= : 账号} {--headless}', {
+      account: 'demo',
+      headless: 'true',
+    })).toBe('uv run login.py --account=demo --headless')
+    expect(buildCommandWithProfile('uv run job.py {--delay=60 : 延迟} {--only=false}')).toBe('uv run job.py --delay=60')
+    expect(buildCommandWithProfile('uv run job.py {--target=hanxueling:79,87 : 目标} {--enabled=true}')).toBe('uv run job.py --target=hanxueling:79,87 --enabled')
+    expect(buildCommandWithProfile('echo {name= : who} {--newline=false}', { name: 'demo' })).toBe('echo demo')
+    expect(buildCommandWithProfile('echo {name=world : who}')).toBe('echo world')
+  })
+
+  it('normalizes and resolves active profile parameter values', () => {
+    const app = normalizeApp({
+      id: 'web-1',
+      name: 'Web',
+      type: 'web',
+      command: 'pnpm dev {account= : 账号} {--headless}',
+      workingDirectory: '/repo/default',
+      url: 'http://localhost:3000',
+      activeProfileId: 'profile-1',
+      profiles: [
+        {
+          id: 'profile-1',
+          name: '账号 1',
+          values: {
+            account: 'demo',
+            headless: 'true',
+          },
+        },
+      ],
+    })
+
+    expect(resolveAppProfile(app)).toMatchObject({
+      command: 'pnpm dev demo --headless',
+      workingDirectory: '/repo/default',
+      url: 'http://localhost:3000',
     })
   })
 

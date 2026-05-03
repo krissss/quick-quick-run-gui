@@ -15,6 +15,8 @@ const app: AppItem = {
   url: 'http://localhost:3000',
   width: 1200,
   height: 800,
+  profiles: [],
+  activeProfileId: '',
   schedule: {
     enabled: false,
     cron: '0 9 * * *',

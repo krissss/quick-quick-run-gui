@@ -21,6 +21,8 @@ const webApp: AppItem = {
   url: 'http://localhost:3000',
   width: 1200,
   height: 800,
+  profiles: [],
+  activeProfileId: '',
   schedule: baseSchedule,
 }
 
@@ -33,6 +35,8 @@ const serviceApp: AppItem = {
   url: '',
   width: 1200,
   height: 800,
+  profiles: [],
+  activeProfileId: '',
   schedule: baseSchedule,
 }
 
@@ -45,6 +49,8 @@ const taskApp: AppItem = {
   url: '',
   width: 1200,
   height: 800,
+  profiles: [],
+  activeProfileId: '',
   schedule: { ...baseSchedule, enabled: true, cron: '0 9 * * *', missedPolicy: 'run-once' },
 }
 
@@ -59,8 +65,18 @@ function buttonContaining(wrapper: VueWrapper, text: string, exact = false) {
 
 function inputByPlaceholder(wrapper: VueWrapper, placeholder: string) {
   const input = wrapper.findAll('input').find((item) => item.attributes('placeholder') === placeholder)
-  if (!input) throw new Error(`Input not found: ${placeholder}`)
-  return input
+  if (input) return input
+  const element = Array.from(document.querySelectorAll('input')).find((item) => item.getAttribute('placeholder') === placeholder)
+  if (element) return new DOMWrapper(element)
+  throw new Error(`Input not found: ${placeholder}`)
+}
+
+function inputByValue(wrapper: VueWrapper, value: string) {
+  const input = wrapper.findAll('input').find((item) => (item.element as HTMLInputElement).value === value)
+  if (input) return input
+  const element = Array.from(document.querySelectorAll('input')).find((item) => item.value === value)
+  if (element) return new DOMWrapper(element)
+  throw new Error(`Input with value not found: ${value}`)
 }
 
 async function mountApp(options: Parameters<typeof setupTauriMocks>[0] = {}) {
@@ -196,7 +212,7 @@ describe('App', () => {
     await flushPromises()
 
     expect(document.body.textContent).toContain('添加应用')
-    expect((inputByPlaceholder(wrapper, '例如：我的博客').element as HTMLInputElement).value).toBe('qwenpaw 副本')
+    expect((inputByValue(wrapper, 'qwenpaw 副本').element as HTMLInputElement).value).toBe('qwenpaw 副本')
     expect((inputByPlaceholder(wrapper, '~/repo').element as HTMLInputElement).value).toBe('/Users/kriss/qwenpaw')
     expect((inputByPlaceholder(wrapper, 'http://localhost:3000').element as HTMLInputElement).value).toBe('http://localhost:3000')
 
@@ -209,6 +225,56 @@ describe('App', () => {
     ])
   })
 
+  it('creates parameter profiles from the run dialog and launches with selected values', async () => {
+    const { mock, wrapper } = await mountApp({
+      store: { apps: [webApp] },
+    })
+
+    await buttonContaining(wrapper, 'qwenpaw').trigger('click')
+    await inputByPlaceholder(wrapper, 'npm run dev').setValue('pnpm dev {account= : 账号} {--headless}')
+    await buttonContaining(wrapper, '保存', true).trigger('click')
+    await flushPromises()
+
+    await buttonContaining(wrapper, '启动', true).trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('运行参数')
+
+    await inputByPlaceholder(wrapper, '账号').setValue('demo')
+    const headlessSwitch = document.querySelector('[role="switch"]')
+    expect(headlessSwitch).toBeTruthy()
+    await new DOMWrapper(headlessSwitch as Element).trigger('click')
+    await inputByPlaceholder(wrapper, '保存为方案名称').setValue('账号 1')
+    await buttonContaining(wrapper, '保存方案', true).trigger('click')
+    await flushPromises()
+
+    expect(mock.storeData.apps).toMatchObject([
+      {
+        id: 'web-1',
+        command: 'pnpm dev {account= : 账号} {--headless}',
+        activeProfileId: expect.any(String),
+        profiles: [
+          {
+            name: '账号 1',
+            values: {
+              account: 'demo',
+              headless: 'true',
+            },
+          },
+        ],
+      },
+    ])
+
+    expect(document.body.textContent).toContain('pnpm dev demo --headless')
+
+    await buttonContaining(wrapper, '运行', true).trigger('click')
+    await flushPromises()
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      command: 'pnpm dev demo --headless',
+      workingDirectory: '/Users/kriss/qwenpaw',
+      url: 'http://localhost:3000',
+    })
+  })
+
   it('adds and deletes a scheduled task through the form', async () => {
     vi.stubGlobal('crypto', {
       getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto),
@@ -218,7 +284,6 @@ describe('App', () => {
 
     await buttonContaining(wrapper, '任务', true).trigger('click')
     await flushPromises()
-    await inputByPlaceholder(wrapper, '例如：同步日报').setValue('同步日报')
     await inputByPlaceholder(wrapper, 'pnpm report').setValue('pnpm report')
     await inputByPlaceholder(wrapper, '~/repo').setValue('/Users/kriss/reports')
     await wrapper.get('[role="switch"]').trigger('click')
@@ -235,7 +300,7 @@ describe('App', () => {
     await flushPromises()
 
     expect(mock.storeData.apps).toMatchObject([
-      { id: 'new-task', name: '同步日报', type: 'task', workingDirectory: '/Users/kriss/reports', schedule: { cron: '*/10 * * * *', missedPolicy: 'run-once' } },
+      { id: 'new-task', name: 'pnpm report', type: 'task', workingDirectory: '/Users/kriss/reports', schedule: { cron: '*/10 * * * *', missedPolicy: 'run-once' } },
     ])
     expect(document.body.textContent).toContain('已添加')
 
@@ -287,7 +352,6 @@ describe('App', () => {
     })
     const { mock, wrapper } = await mountApp()
 
-    await inputByPlaceholder(wrapper, '例如：我的博客').setValue('Docs')
     await inputByPlaceholder(wrapper, 'http://localhost:3000').setValue('http://localhost:8080')
     await inputByPlaceholder(wrapper, '~/repo').setValue('/Users/kriss/docs')
     const numberInputs = wrapper.findAll('input[type="number"]')
@@ -297,7 +361,7 @@ describe('App', () => {
     await flushPromises()
 
     expect(mock.storeData.apps).toMatchObject([
-      { id: 'new-web', workingDirectory: '/Users/kriss/docs', width: 1440, height: 900 },
+      { id: 'new-web', name: 'http://localhost:8080', workingDirectory: '/Users/kriss/docs', width: 1440, height: 900 },
     ])
   })
 
@@ -331,11 +395,11 @@ describe('App', () => {
 
     await buttonContaining(wrapper, '添加应用').trigger('click')
     expect(detailPanel(wrapper).text()).toContain('添加应用')
-    expect(inputByPlaceholder(wrapper, '例如：我的博客').exists()).toBe(true)
+    expect(inputByPlaceholder(wrapper, '默认使用启动命令或 URL').exists()).toBe(true)
 
     await buttonContaining(wrapper, '添加', true).trigger('click')
     const alert = document.querySelector('[role="alert"]')
-    expect(alert?.textContent).toContain('请填写名称')
+    expect(alert?.textContent).toContain('请填写目标 URL')
     const closeNotice = document.querySelector('button[aria-label="关闭通知"]')
     if (!closeNotice) throw new Error('Close notification button not found')
     await new DOMWrapper(closeNotice as HTMLElement).trigger('click')

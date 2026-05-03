@@ -589,7 +589,228 @@ struct StoredRunItem {
     #[serde(default, rename = "workingDirectory")]
     working_directory: String,
     #[serde(default)]
+    profiles: Vec<StoredProfile>,
+    #[serde(default, rename = "activeProfileId")]
+    active_profile_id: String,
+    #[serde(default)]
     schedule: ScheduleConfig,
+}
+
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredProfile {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    values: HashMap<String, String>,
+}
+
+impl StoredRunItem {
+    fn active_profile(&self) -> Option<&StoredProfile> {
+        self.profiles
+            .iter()
+            .find(|profile| profile.id == self.active_profile_id)
+    }
+
+    fn effective_command(&self) -> String {
+        build_command_with_profile(
+            &self.command,
+            self.active_profile().map(|profile| &profile.values),
+        )
+    }
+
+    fn effective_working_directory(&self) -> String {
+        self.working_directory.clone()
+    }
+}
+
+#[derive(Clone, PartialEq)]
+enum CommandParamType {
+    Text,
+    Bool,
+}
+
+#[derive(Clone, PartialEq)]
+enum CommandParamKind {
+    Option,
+    Argument,
+}
+
+#[derive(Clone)]
+struct CommandParam {
+    key: String,
+    kind: CommandParamKind,
+    param_type: CommandParamType,
+    default_value: String,
+}
+
+#[cfg(test)]
+fn parse_command_signature(command: &str) -> (String, Vec<CommandParam>) {
+    let mut params = Vec::new();
+    let mut base = String::new();
+    let mut cursor = 0;
+
+    while let Some(relative_start) = command[cursor..].find('{') {
+        let start = cursor + relative_start;
+        let body_start = start + 1;
+        let Some(relative_end) = command[body_start..].find('}') else {
+            break;
+        };
+        let end = body_start + relative_end;
+        let signature = &command[body_start..end];
+        let Some(param) = parse_signature_block(signature) else {
+            base.push_str(&command[cursor..=end]);
+            cursor = end + 1;
+            continue;
+        };
+
+        base.push_str(&command[cursor..start]);
+        if param.kind == CommandParamKind::Argument {
+            base.push_str(&param.default_value);
+        } else {
+            base.push(' ');
+        }
+        params.push(param);
+        cursor = end + 1;
+    }
+
+    base.push_str(&command[cursor..]);
+    let base_command = base.split_whitespace().collect::<Vec<_>>().join(" ");
+    (base_command, params)
+}
+
+fn parse_signature_block(signature: &str) -> Option<CommandParam> {
+    let (kind, rest) = if let Some(rest) = signature.strip_prefix("--") {
+        (CommandParamKind::Option, rest)
+    } else {
+        (CommandParamKind::Argument, signature)
+    };
+    let key_len = rest
+        .bytes()
+        .take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'-')
+        .count();
+    if key_len == 0 {
+        return None;
+    }
+
+    let key = rest[..key_len].to_string();
+    let tail = &rest[key_len..];
+    if let Some(value_tail) = tail.strip_prefix('=') {
+        let default_value = split_signature_description(value_tail).0.trim().to_string();
+        let param_type = if kind == CommandParamKind::Option
+            && matches!(
+                default_value.trim().to_ascii_lowercase().as_str(),
+                "true" | "false"
+            ) {
+            CommandParamType::Bool
+        } else {
+            CommandParamType::Text
+        };
+        return Some(CommandParam {
+            key,
+            kind,
+            param_type,
+            default_value,
+        });
+    }
+
+    let trimmed_tail = tail.trim_start();
+    if kind == CommandParamKind::Option
+        && (trimmed_tail.is_empty()
+            || trimmed_tail.starts_with(':')
+            || trimmed_tail.starts_with('：'))
+    {
+        return Some(CommandParam {
+            key,
+            kind,
+            param_type: CommandParamType::Bool,
+            default_value: "false".to_string(),
+        });
+    }
+
+    None
+}
+
+fn split_signature_description(value: &str) -> (&str, Option<&str>) {
+    for (index, ch) in value.char_indices() {
+        if (ch == ':' || ch == '：')
+            && value[..index]
+                .chars()
+                .last()
+                .is_some_and(char::is_whitespace)
+        {
+            return (&value[..index], Some(value[index + ch.len_utf8()..].trim()));
+        }
+    }
+    (value, None)
+}
+
+fn is_truthy_param_value(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "true" | "1" | "yes"
+    )
+}
+
+fn build_command_with_profile(command: &str, values: Option<&HashMap<String, String>>) -> String {
+    let mut option_params = Vec::new();
+    let mut command_body = String::new();
+    let mut cursor = 0;
+
+    while let Some(relative_start) = command[cursor..].find('{') {
+        let start = cursor + relative_start;
+        let body_start = start + 1;
+        let Some(relative_end) = command[body_start..].find('}') else {
+            break;
+        };
+        let end = body_start + relative_end;
+        let signature = &command[body_start..end];
+        let Some(param) = parse_signature_block(signature) else {
+            command_body.push_str(&command[cursor..=end]);
+            cursor = end + 1;
+            continue;
+        };
+
+        let value = values
+            .and_then(|items| items.get(&param.key))
+            .map(String::as_str)
+            .unwrap_or(&param.default_value);
+        command_body.push_str(&command[cursor..start]);
+        if param.kind == CommandParamKind::Argument {
+            command_body.push_str(value);
+        } else {
+            command_body.push(' ');
+            option_params.push(param);
+        }
+        cursor = end + 1;
+    }
+    command_body.push_str(&command[cursor..]);
+
+    let base_command = command_body
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut parts = vec![base_command];
+    for param in option_params {
+        let value = values
+            .and_then(|items| items.get(&param.key))
+            .map(String::as_str)
+            .unwrap_or(&param.default_value);
+        match param.param_type {
+            CommandParamType::Bool => {
+                if is_truthy_param_value(value) {
+                    parts.push(format!("--{}", param.key));
+                }
+            }
+            CommandParamType::Text => parts.push(format!("--{}={}", param.key, value)),
+        }
+    }
+
+    parts
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[derive(Clone, Default, serde::Deserialize)]
@@ -629,9 +850,11 @@ fn start_scheduler(app: &tauri::AppHandle) {
 fn run_scheduler_tick(app: &tauri::AppHandle) {
     let schedule_state = read_schedule_state(app);
     for item in read_scheduled_items(app) {
-        if item.item_type != ItemType::Task || item.command.trim().is_empty() {
+        let command = item.effective_command();
+        if item.item_type != ItemType::Task || command.trim().is_empty() {
             continue;
         }
+        let working_directory = item.effective_working_directory();
         let last_run_at = schedule_state
             .get(&item.id)
             .copied()
@@ -649,8 +872,8 @@ fn run_scheduler_tick(app: &tauri::AppHandle) {
             ItemType::Task,
             item.id,
             item.name,
-            item.command,
-            item.working_directory,
+            command,
+            working_directory,
             RunTrigger::Schedule,
         );
         if should_advance_schedule_state(&launch_result) {
@@ -1040,6 +1263,61 @@ mod scheduler_tests {
         assert!(should_advance_schedule_state(&launched));
         assert!(!should_advance_schedule_state(&already_running));
         assert!(!should_advance_schedule_state(&failed));
+    }
+
+    #[test]
+    fn builds_command_from_active_profile_values() {
+        let mut values = HashMap::new();
+        values.insert("account".to_string(), "demo".to_string());
+        values.insert("headless".to_string(), "true".to_string());
+
+        let item = StoredRunItem {
+            id: "task-1".to_string(),
+            name: "Task".to_string(),
+            item_type: ItemType::Task,
+            command: "pnpm dev {account= : 账号} {--headless}".to_string(),
+            working_directory: "/repo/default".to_string(),
+            profiles: vec![StoredProfile {
+                id: "profile-1".to_string(),
+                values,
+            }],
+            active_profile_id: "profile-1".to_string(),
+            schedule: test_schedule("* * * * *", "skip"),
+        };
+
+        assert_eq!(item.effective_command(), "pnpm dev demo --headless");
+        assert_eq!(item.effective_working_directory(), "/repo/default");
+    }
+
+    #[test]
+    fn builds_command_from_signature_defaults() {
+        let (base_command, params) = parse_command_signature("echo {name= ： who}");
+        assert_eq!(base_command, "echo");
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].key, "name");
+        assert!(params[0].kind == CommandParamKind::Argument);
+
+        assert_eq!(
+            build_command_with_profile("uv run job.py {--delay=60 : 延迟} {--only=false}", None),
+            "uv run job.py --delay=60"
+        );
+        assert_eq!(
+            build_command_with_profile(
+                "uv run job.py {--target=hanxueling:79,87 : 目标} {--enabled=true}",
+                None
+            ),
+            "uv run job.py --target=hanxueling:79,87 --enabled"
+        );
+        assert_eq!(
+            build_command_with_profile("echo {name= ： who} {--newline=false}", None),
+            "echo"
+        );
+        let mut values = HashMap::new();
+        values.insert("name".to_string(), "demo".to_string());
+        assert_eq!(
+            build_command_with_profile("echo {name= : who} {--newline=false}", Some(&values)),
+            "echo demo"
+        );
     }
 }
 
