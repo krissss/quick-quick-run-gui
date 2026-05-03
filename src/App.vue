@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -100,7 +101,7 @@ const filteredApps = computed(() => {
   return apps.value.filter((app) => {
     if (sidebarFilter.value !== 'all' && app.type !== sidebarFilter.value) return false
     if (!query) return true
-    const haystack = [app.name, app.command, app.url, itemTypeLabel(app.type)].join(' ').toLowerCase()
+    const haystack = [app.name, app.command, app.workingDirectory, app.url, itemTypeLabel(app.type)].join(' ').toLowerCase()
     return haystack.includes(query)
   })
 })
@@ -122,6 +123,21 @@ function updateSidebarFilter(value: string | string[]) {
 
 function clearSidebarSearch() {
   sidebarSearch.value = ''
+}
+
+async function chooseWorkingDirectory() {
+  try {
+    const selected = await dialogOpen({
+      directory: true,
+      multiple: false,
+      defaultPath: editForm.value.workingDirectory || undefined,
+    })
+    if (typeof selected === 'string') {
+      editForm.value.workingDirectory = selected
+    }
+  } catch {
+    showMessage('选择工作目录失败', 'error')
+  }
 }
 
 const draggedAppId = ref<string | null>(null)
@@ -531,8 +547,30 @@ onMounted(async () => {
               {{ editForm.type === 'task' ? '执行命令' : '启动命令' }}
               <span v-if="editForm.type === 'web'" class="font-normal opacity-40">(可选)</span>
             </label>
-            <Input v-model="editForm.command" :placeholder="editForm.type === 'task' ? 'cd ~/repo && pnpm report' : 'cd ~/my-app && npm run dev'" />
-            <p class="text-xs text-muted-foreground/60">支持 cd、&&、管道等完整 shell 语法</p>
+            <Input v-model="editForm.command" :placeholder="editForm.type === 'task' ? 'pnpm report' : 'npm run dev'" />
+            <p class="text-xs text-muted-foreground/60">支持 &&、管道等完整 shell 语法；目录在下方设置</p>
+          </div>
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium text-muted-foreground">
+              工作目录
+              <span class="font-normal opacity-40">(可选)</span>
+            </label>
+            <div class="flex rounded-md shadow-[var(--shadow-border)] focus-within:shadow-[inset_0_0_0_1px_var(--ring)]">
+              <Input v-model="editForm.workingDirectory" class="min-w-0 flex-1 rounded-r-none shadow-none focus-visible:shadow-none" placeholder="~/repo" />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                class="shrink-0 rounded-l-none shadow-[inset_1px_0_0_0_var(--border)]"
+                title="选择工作目录"
+                aria-label="选择工作目录"
+                @click="chooseWorkingDirectory"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+                </svg>
+              </Button>
+            </div>
           </div>
           <div v-if="editForm.type === 'web'" class="space-y-1.5">
             <label class="text-xs font-medium text-muted-foreground">目标 URL</label>

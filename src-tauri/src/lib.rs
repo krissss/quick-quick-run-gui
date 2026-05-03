@@ -148,6 +148,7 @@ async fn launch_app_window(
     state: tauri::State<'_, AppState>,
     app_id: String,
     command: String,
+    working_directory: String,
     url: String,
     width: f64,
     height: f64,
@@ -165,6 +166,7 @@ async fn launch_app_window(
             app_id,
             app_name,
             command,
+            working_directory,
             RunTrigger::Manual,
         );
     }
@@ -224,7 +226,8 @@ async fn launch_app_window(
 
     // 有命令：启动进程，立即返回，后台等待 URL 后创建窗口
     let log_path = create_log_path(&app, &app_id)?;
-    let (child, pid) = spawn_shell_command(&command, Some(&log_path))?;
+    let (child, pid) =
+        spawn_shell_command(&command, Some(working_directory.as_str()), Some(&log_path))?;
     let run_id = create_run_id(&app_id);
     let started_at = now_millis();
     let logs = Arc::new(Mutex::new(Vec::new()));
@@ -265,6 +268,7 @@ async fn launch_app_window(
             app_name: app_name.clone(),
             item_type: ItemType::Web,
             command: command.clone(),
+            working_directory: working_directory.clone(),
             url: url.clone(),
             pid,
             log_path: log_path.to_string_lossy().to_string(),
@@ -342,6 +346,7 @@ fn launch_command_item(
     app_id: String,
     app_name: String,
     command: String,
+    working_directory: String,
     trigger: RunTrigger,
 ) -> Result<LaunchResult, String> {
     if command.trim().is_empty() {
@@ -365,7 +370,8 @@ fn launch_command_item(
     }
 
     let log_path = create_log_path(app, &app_id)?;
-    let (child, pid) = spawn_shell_command(&command, Some(&log_path))?;
+    let (child, pid) =
+        spawn_shell_command(&command, Some(working_directory.as_str()), Some(&log_path))?;
     let run_id = create_run_id(&app_id);
     let started_at = now_millis();
     let logs = Arc::new(Mutex::new(Vec::new()));
@@ -407,6 +413,7 @@ fn launch_command_item(
             app_name,
             item_type,
             command,
+            working_directory,
             url: String::new(),
             pid,
             log_path: log_path.to_string_lossy().to_string(),
@@ -579,6 +586,8 @@ struct StoredRunItem {
     item_type: ItemType,
     #[serde(default)]
     command: String,
+    #[serde(default, rename = "workingDirectory")]
+    working_directory: String,
     #[serde(default)]
     schedule: ScheduleConfig,
 }
@@ -641,6 +650,7 @@ fn run_scheduler_tick(app: &tauri::AppHandle) {
             item.id,
             item.name,
             item.command,
+            item.working_directory,
             RunTrigger::Schedule,
         );
         if should_advance_schedule_state(&launch_result) {

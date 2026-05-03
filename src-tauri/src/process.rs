@@ -90,6 +90,8 @@ pub struct PersistedSession {
     pub item_type: ItemType,
     pub command: String,
     #[serde(default)]
+    pub working_directory: String,
+    #[serde(default)]
     pub url: String,
     pub pid: u32,
     pub log_path: String,
@@ -179,11 +181,13 @@ fn get_shell() -> String {
 /// 启动 shell 进程（在独立进程组中），返回 (GroupChild, pid)
 pub fn spawn_shell_command(
     command: &str,
+    working_directory: Option<&str>,
     log_path: Option<&Path>,
 ) -> Result<(command_group::GroupChild, u32), String> {
     if command.trim().is_empty() {
         return Err("命令不能为空".to_string());
     }
+    let working_directory = resolve_working_directory(working_directory)?;
 
     let mut stdout = Stdio::piped();
     let mut stderr = Stdio::piped();
@@ -198,6 +202,9 @@ pub fn spawn_shell_command(
             .open(path)
             .map_err(|e| format!("打开日志文件失败: {}", e))?;
         let _ = writeln!(file, "\n[qqr] started at {}: {}", now_millis(), command);
+        if let Some(dir) = &working_directory {
+            let _ = writeln!(file, "[qqr] cwd: {}", dir.display());
+        }
         stdout = Stdio::from(
             file.try_clone()
                 .map_err(|e| format!("复制日志文件句柄失败: {}", e))?,
@@ -206,29 +213,64 @@ pub fn spawn_shell_command(
     }
 
     #[cfg(not(target_os = "windows"))]
-    let child = Command::new(get_shell())
-        .arg("-c")
-        .arg(command)
-        .stdout(stdout)
-        .stderr(stderr)
-        .group_spawn()
-        .map_err(|e| format!("启动命令失败: {}", e))?;
+    let child = {
+        let mut cmd = Command::new(get_shell());
+        cmd.arg("-c").arg(command).stdout(stdout).stderr(stderr);
+        if let Some(dir) = &working_directory {
+            cmd.current_dir(dir);
+        }
+        cmd.group_spawn()
+            .map_err(|e| format!("启动命令失败: {}", e))?
+    };
 
     #[cfg(target_os = "windows")]
     let child = {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        Command::new("cmd")
-            .args(["/C", command])
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", command])
             .stdout(stdout)
             .stderr(stderr)
-            .creation_flags(CREATE_NO_WINDOW)
-            .group_spawn()
+            .creation_flags(CREATE_NO_WINDOW);
+        if let Some(dir) = &working_directory {
+            cmd.current_dir(dir);
+        }
+        cmd.group_spawn()
             .map_err(|e| format!("启动命令失败: {}", e))?
     };
 
     let pid = child.id();
     Ok((child, pid))
+}
+
+fn resolve_working_directory(working_directory: Option<&str>) -> Result<Option<PathBuf>, String> {
+    let Some(raw) = working_directory
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+
+    let path = if raw == "~" || raw.starts_with("~/") || raw.starts_with("~\\") {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .ok_or_else(|| "无法展开工作目录中的 ~".to_string())?;
+        let suffix = raw
+            .trim_start_matches('~')
+            .trim_start_matches(|c| c == '/' || c == '\\');
+        if suffix.is_empty() {
+            PathBuf::from(home)
+        } else {
+            PathBuf::from(home).join(suffix)
+        }
+    } else {
+        PathBuf::from(raw)
+    };
+
+    if !path.is_dir() {
+        return Err(format!("工作目录不存在: {}", path.to_string_lossy()));
+    }
+    Ok(Some(path))
 }
 
 /// 生成窗口标签：app-{app_id 前 8 字符}
@@ -668,20 +710,33 @@ mod tests {
 
     #[test]
     fn spawn_shell_command_empty_string() {
-        assert!(spawn_shell_command("", None).is_err());
+        assert!(spawn_shell_command("", None, None).is_err());
     }
 
     #[test]
     fn spawn_shell_command_whitespace_only() {
-        assert!(spawn_shell_command("   ", None).is_err());
+        assert!(spawn_shell_command("   ", None, None).is_err());
     }
 
     #[test]
     fn spawn_shell_command_valid() {
-        let result = spawn_shell_command("echo hello", None);
+        let result = spawn_shell_command("echo hello", None, None);
         assert!(result.is_ok());
         let (mut child, pid) = result.unwrap();
         assert!(pid > 0);
         let _ = child.kill();
+    }
+
+    #[test]
+    fn resolve_working_directory_accepts_existing_directory() {
+        let cwd = std::env::current_dir().unwrap();
+        let result = resolve_working_directory(Some(cwd.to_string_lossy().as_ref())).unwrap();
+        assert_eq!(result.unwrap(), cwd);
+    }
+
+    #[test]
+    fn resolve_working_directory_rejects_missing_directory() {
+        let missing = std::env::temp_dir().join(format!("qqr-missing-{}", now_millis()));
+        assert!(resolve_working_directory(Some(missing.to_string_lossy().as_ref())).is_err());
     }
 }

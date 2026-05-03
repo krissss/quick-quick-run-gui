@@ -11,6 +11,7 @@ const app: AppItem = {
   name: 'Web App',
   type: 'web',
   command: 'pnpm dev',
+  workingDirectory: '',
   url: 'http://localhost:3000',
   width: 1200,
   height: 800,

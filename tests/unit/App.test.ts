@@ -17,6 +17,7 @@ const webApp: AppItem = {
   name: 'qwenpaw',
   type: 'web',
   command: 'pnpm dev',
+  workingDirectory: '/Users/kriss/qwenpaw',
   url: 'http://localhost:3000',
   width: 1200,
   height: 800,
@@ -28,6 +29,7 @@ const serviceApp: AppItem = {
   name: 'worker',
   type: 'service',
   command: 'pnpm worker',
+  workingDirectory: '/Users/kriss/worker',
   url: '',
   width: 1200,
   height: 800,
@@ -39,6 +41,7 @@ const taskApp: AppItem = {
   name: 'daily',
   type: 'task',
   command: 'pnpm daily',
+  workingDirectory: '/Users/kriss/daily',
   url: '',
   width: 1200,
   height: 800,
@@ -194,6 +197,7 @@ describe('App', () => {
 
     expect(document.body.textContent).toContain('添加应用')
     expect((inputByPlaceholder(wrapper, '例如：我的博客').element as HTMLInputElement).value).toBe('qwenpaw 副本')
+    expect((inputByPlaceholder(wrapper, '~/repo').element as HTMLInputElement).value).toBe('/Users/kriss/qwenpaw')
     expect((inputByPlaceholder(wrapper, 'http://localhost:3000').element as HTMLInputElement).value).toBe('http://localhost:3000')
 
     await buttonContaining(wrapper, '添加', true).trigger('click')
@@ -201,7 +205,7 @@ describe('App', () => {
 
     expect(mock.storeData.apps).toMatchObject([
       { id: 'web-1', name: 'qwenpaw', order: 0 },
-      { name: 'qwenpaw 副本', url: 'http://localhost:3000', order: 1 },
+      { name: 'qwenpaw 副本', workingDirectory: '/Users/kriss/qwenpaw', url: 'http://localhost:3000', order: 1 },
     ])
   })
 
@@ -215,7 +219,8 @@ describe('App', () => {
     await buttonContaining(wrapper, '任务', true).trigger('click')
     await flushPromises()
     await inputByPlaceholder(wrapper, '例如：同步日报').setValue('同步日报')
-    await inputByPlaceholder(wrapper, 'cd ~/repo && pnpm report').setValue('pnpm report')
+    await inputByPlaceholder(wrapper, 'pnpm report').setValue('pnpm report')
+    await inputByPlaceholder(wrapper, '~/repo').setValue('/Users/kriss/reports')
     await wrapper.get('[role="switch"]').trigger('click')
     await flushPromises()
     await buttonContaining(wrapper, '自定义', true).trigger('click')
@@ -230,7 +235,7 @@ describe('App', () => {
     await flushPromises()
 
     expect(mock.storeData.apps).toMatchObject([
-      { id: 'new-task', name: '同步日报', type: 'task', schedule: { cron: '*/10 * * * *', missedPolicy: 'run-once' } },
+      { id: 'new-task', name: '同步日报', type: 'task', workingDirectory: '/Users/kriss/reports', schedule: { cron: '*/10 * * * *', missedPolicy: 'run-once' } },
     ])
     expect(document.body.textContent).toContain('已添加')
 
@@ -284,6 +289,7 @@ describe('App', () => {
 
     await inputByPlaceholder(wrapper, '例如：我的博客').setValue('Docs')
     await inputByPlaceholder(wrapper, 'http://localhost:3000').setValue('http://localhost:8080')
+    await inputByPlaceholder(wrapper, '~/repo').setValue('/Users/kriss/docs')
     const numberInputs = wrapper.findAll('input[type="number"]')
     await numberInputs[0].setValue('1440')
     await numberInputs[1].setValue('900')
@@ -291,7 +297,7 @@ describe('App', () => {
     await flushPromises()
 
     expect(mock.storeData.apps).toMatchObject([
-      { id: 'new-web', width: 1440, height: 900 },
+      { id: 'new-web', workingDirectory: '/Users/kriss/docs', width: 1440, height: 900 },
     ])
   })
 

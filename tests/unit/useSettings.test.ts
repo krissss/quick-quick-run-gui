@@ -9,6 +9,7 @@ const importedApp: AppItem = {
   name: 'Imported',
   type: 'service',
   command: 'pnpm serve',
+  workingDirectory: '',
   url: '',
   width: 1200,
   height: 800,

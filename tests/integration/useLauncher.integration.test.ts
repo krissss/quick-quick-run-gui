@@ -11,6 +11,7 @@ const qwenpaw: AppItem = {
   name: 'qwenpaw',
   type: 'web',
   command: 'pnpm dev',
+  workingDirectory: '/Users/kriss/project',
   url: 'http://localhost:3000',
   width: 1200,
   height: 800,
@@ -147,6 +148,7 @@ describe('useLauncher integration', () => {
     await fallback.launcher.launchApp({ ...qwenpaw, command: '' })
     expect(fallback.showMessage.mock.calls.length).toBeGreaterThan(0)
     expect(fallback.mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      workingDirectory: '/Users/kriss/project',
       bgR: 255,
       bgG: 255,
       bgB: 255,

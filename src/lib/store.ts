@@ -19,6 +19,7 @@ export interface AppItem {
   name: string
   type: AppType
   command: string
+  workingDirectory: string
   url: string
   width: number
   height: number
@@ -55,6 +56,7 @@ export function normalizeApp(app: Partial<AppItem>): AppItem {
     name: app.name || '',
     type,
     command: app.command || '',
+    workingDirectory: app.workingDirectory || '',
     url: app.url || '',
     width: app.width || 1200,
     height: app.height || 800,

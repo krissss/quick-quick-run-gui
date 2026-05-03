@@ -66,6 +66,7 @@ export function useLauncher(
       const result = await invoke<{ message: string; pid: number | null; run_id: string | null }>('launch_app_window', {
         appId: app.id,
         command: app.command,
+        workingDirectory: app.workingDirectory,
         url: app.url,
         width: app.width,
         height: app.height,

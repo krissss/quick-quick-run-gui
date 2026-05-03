@@ -33,6 +33,7 @@ describe('store helpers', () => {
       id: 'legacy-web',
       name: 'Legacy Web',
       type: 'web',
+      workingDirectory: '',
       width: 1200,
       height: 800,
       schedule: {
@@ -114,8 +115,8 @@ describe('store helpers', () => {
     await expect(exportData()).resolves.toContain('"service-1"')
 
     const imported = await importData(JSON.stringify([{ id: 'task-1', name: 'Task', type: 'task', command: 'echo ok' }]))
-    expect(imported[0]).toMatchObject({ id: 'task-1', type: 'task', command: 'echo ok' })
-    expect(mock.storeData.apps).toMatchObject([{ id: 'task-1', type: 'task' }])
+    expect(imported[0]).toMatchObject({ id: 'task-1', type: 'task', command: 'echo ok', workingDirectory: '' })
+    expect(mock.storeData.apps).toMatchObject([{ id: 'task-1', type: 'task', workingDirectory: '' }])
   })
 
   it('normalizes app arrays with stable contiguous order values', () => {

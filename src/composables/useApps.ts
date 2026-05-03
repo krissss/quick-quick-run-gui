@@ -4,7 +4,7 @@ import { validateCronExpression } from '@/lib/cron'
 import { defaultSchedule, loadApps, normalizeApp, saveApps, type AppItem, type AppType, type MissedPolicy } from '@/lib/store'
 
 export function emptyApp(): AppItem {
-  return { id: '', name: '', type: 'web', command: '', url: '', width: 1200, height: 800, schedule: defaultSchedule() }
+  return { id: '', name: '', type: 'web', command: '', workingDirectory: '', url: '', width: 1200, height: 800, schedule: defaultSchedule() }
 }
 
 export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 'info') => void) {
