@@ -104,7 +104,13 @@ async function installTauriMock(page: Page, state: Record<string, unknown>) {
 
           if (cmd === 'get_running_apps') return clone(testState.runningApps)
           if (cmd === 'get_recent_runs') return clone(testState.recentRuns)
+          if (cmd === 'get_app_log_runs') {
+            const appId = String(payload.appId)
+            return clone((testState.recentRuns as Array<{ app_id: string }>).filter(run => run.app_id === appId))
+          }
           if (cmd === 'get_app_logs') return []
+          if (cmd === 'clear_app_logs') return { removed: 0 }
+          if (cmd === 'prune_log_records') return { removed: 0 }
           if (cmd === 'notify_apps_updated') return null
           if (cmd === 'launch_app_window') return { message: '已启动', pid: 1234, run_id: 'run-1' }
           if (cmd === 'stop_app' || cmd === 'show_app_window' || cmd === 'open_in_browser') return null

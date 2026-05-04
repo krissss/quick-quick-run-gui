@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 
 defineProps<{
   open: boolean
   autostartEnabled: boolean
   hideDockOnClose: boolean
+  logRetentionLimit: number
   themeIcon: 'light' | 'dark' | 'system'
   themeLabel: string
 }>()
@@ -14,6 +16,7 @@ defineEmits<{
   close: []
   toggleAutostart: [enabled: boolean]
   toggleHideDockOnClose: [enabled: boolean]
+  updateLogRetentionLimit: [limit: number]
   toggleTheme: []
   importData: []
   exportData: []
@@ -47,6 +50,24 @@ defineEmits<{
               <div class="text-xs text-muted-foreground mt-0.5">关闭主窗口时隐藏 Dock 图标</div>
             </div>
             <Switch aria-label="菜单栏模式" :model-value="hideDockOnClose" @update:model-value="$emit('toggleHideDockOnClose', $event)" />
+          </div>
+
+          <div class="h-px shadow-[0_-1px_0_0_var(--border)]" />
+
+          <div class="flex items-center justify-between gap-4 py-3">
+            <div>
+              <div class="text-sm font-medium">日志保留</div>
+              <div class="text-xs text-muted-foreground mt-0.5">每个应用保留最近运行日志</div>
+            </div>
+            <Input
+              class="h-8 w-24 text-right"
+              type="number"
+              min="1"
+              max="200"
+              :model-value="logRetentionLimit"
+              aria-label="日志保留数量"
+              @update:model-value="$emit('updateLogRetentionLimit', Number($event))"
+            />
           </div>
 
           <div class="h-px shadow-[0_-1px_0_0_var(--border)]" />

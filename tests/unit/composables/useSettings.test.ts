@@ -35,7 +35,7 @@ describe('useSettings', () => {
   it('loads settings and toggles autostart, dock mode, and theme', async () => {
     localStorage.setItem('qqr-theme', 'light')
     const { mock, settings } = makeSettings({
-      store: { hide_dock_on_close: true },
+      store: { hide_dock_on_close: true, log_retention_limit: 12 },
       autostartEnabled: true,
     })
 
@@ -43,6 +43,7 @@ describe('useSettings', () => {
 
     expect(settings.showSettingsDialog.value).toBe(true)
     expect(settings.hideDockOnClose.value).toBe(true)
+    expect(settings.logRetentionLimit.value).toBe(12)
     expect(settings.autostartEnabled.value).toBe(true)
     expect(settings.themeLabel.value).toBe('亮色')
 
@@ -58,10 +59,13 @@ describe('useSettings', () => {
     await settings.toggleAutostart(false)
     await settings.toggleAutostart(true)
     await settings.toggleHideDockOnClose(false)
+    await settings.updateLogRetentionLimit(30)
     settings.closeSettingsDialog()
 
     expect(settings.showSettingsDialog.value).toBe(false)
     expect(mock.storeData.hide_dock_on_close).toBe(false)
+    expect(mock.storeData.log_retention_limit).toBe(30)
+    expect(mock.getCalls('prune_log_records')).toHaveLength(1)
     expect(mock.getCalls('plugin:autostart|disable')).toHaveLength(1)
     expect(mock.getCalls('plugin:autostart|enable')).toHaveLength(1)
   })
@@ -116,6 +120,7 @@ describe('useSettings', () => {
     expect(failing.settings.autostartEnabled.value).toBe(false)
 
     await failing.settings.toggleAutostart(true)
+    await failing.settings.updateLogRetentionLimit(30)
     await failing.settings.handleExport()
     await failing.settings.handleImport()
 

@@ -3,7 +3,10 @@ import { Store } from '@tauri-apps/plugin-store'
 const STORE_FILE = 'qqr-store.json'
 const APPS_KEY = 'apps'
 const HIDE_DOCK_ON_CLOSE_KEY = 'hide_dock_on_close'
+const LOG_RETENTION_LIMIT_KEY = 'log_retention_limit'
 const LS_KEY_APPS = 'qqr-apps'
+export const DEFAULT_LOG_RETENTION_LIMIT = 20
+export const MAX_LOG_RETENTION_LIMIT = 200
 
 let _store: Store | null = null
 
@@ -124,6 +127,12 @@ function nonNegativeNumber(value: unknown, fallback: number) {
 
 function positiveNumber(value: unknown, fallback: number) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+export function normalizeLogRetentionLimit(value: unknown) {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed)) return DEFAULT_LOG_RETENTION_LIMIT
+  return Math.min(MAX_LOG_RETENTION_LIMIT, Math.max(1, Math.round(parsed)))
 }
 
 function normalizeProfiles(profiles: Partial<AppProfile>[] | undefined): AppProfile[] {
@@ -343,6 +352,17 @@ export async function loadHideDockOnClose(): Promise<boolean> {
 export async function saveHideDockOnClose(enabled: boolean): Promise<void> {
   const store = await getFreshStore()
   await store.set(HIDE_DOCK_ON_CLOSE_KEY, enabled)
+  await store.save()
+}
+
+export async function loadLogRetentionLimit(): Promise<number> {
+  const store = await getFreshStore()
+  return normalizeLogRetentionLimit(await store.get<number>(LOG_RETENTION_LIMIT_KEY))
+}
+
+export async function saveLogRetentionLimit(limit: number): Promise<void> {
+  const store = await getFreshStore()
+  await store.set(LOG_RETENTION_LIMIT_KEY, normalizeLogRetentionLimit(limit))
   await store.save()
 }
 

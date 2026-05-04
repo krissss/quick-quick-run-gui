@@ -17,8 +17,9 @@ use tauri_plugin_store::StoreExt;
 
 use html_title::extract_html_title;
 use process::{
-    append_run_record, create_log_path, create_run_id, get_run_records, kill_app_process,
-    latest_log_path_for_app, now_millis, persist_session, read_log_tail,
+    append_run_record, clear_run_records, create_log_path, create_run_id, get_run_records,
+    kill_app_process, latest_log_path_for_app, now_millis, persist_session,
+    prune_run_records_for_retention, read_log_retention_limit, read_log_tail,
     restore_persisted_sessions, spawn_process_monitor, spawn_shell_command, window_label_for,
     AppState, AppWindowInfo, ItemType, PersistedSession, ProcessInfo, RunRecord, RunStatus,
     RunTrigger,
@@ -47,6 +48,9 @@ pub fn run() {
             launch_app_window,
             get_running_apps,
             get_app_logs,
+            get_app_log_runs,
+            clear_app_logs,
+            prune_log_records,
             get_recent_runs,
             stop_app,
             show_app_window,
@@ -139,6 +143,11 @@ struct LaunchResult {
     message: String,
     pid: Option<u32>,
     run_id: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct ClearLogsResult {
+    removed: usize,
 }
 
 /// 启动应用并在新窗口中运行
@@ -470,7 +479,18 @@ fn get_app_logs(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     app_id: String,
+    run_id: Option<String>,
 ) -> Result<Vec<String>, String> {
+    if let Some(run_id) = run_id {
+        let path = get_run_records(&app, Some(&app_id), 500)
+            .into_iter()
+            .find(|record| record.id == run_id)
+            .map(|record| record.log_path);
+        return Ok(path
+            .map(|path| read_log_tail(std::path::Path::new(&path), 2000))
+            .unwrap_or_default());
+    }
+
     let processes = recover_lock(&state.processes);
     if let Some(info) = processes.get(&app_id) {
         if let Some(path) = &info.log_path {
@@ -482,6 +502,39 @@ fn get_app_logs(
     } else {
         Ok(vec![])
     }
+}
+
+/// 获取指定应用最近运行记录，用于日志历史选择
+#[tauri::command]
+fn get_app_log_runs(
+    app: tauri::AppHandle,
+    app_id: String,
+    limit: Option<usize>,
+) -> Result<Vec<RunRecord>, String> {
+    let limit = limit
+        .unwrap_or_else(|| read_log_retention_limit(&app))
+        .clamp(1, 200);
+    Ok(get_run_records(&app, Some(&app_id), limit))
+}
+
+/// 清理指定应用的历史日志；run_ids 为空时清理全部已结束日志
+#[tauri::command]
+fn clear_app_logs(
+    app: tauri::AppHandle,
+    app_id: String,
+    run_ids: Option<Vec<String>>,
+) -> Result<ClearLogsResult, String> {
+    let removed = clear_run_records(&app, &app_id, run_ids);
+    let _ = app.emit("app-logs-cleared", app_id);
+    Ok(ClearLogsResult { removed })
+}
+
+/// 按当前设置裁剪历史日志记录
+#[tauri::command]
+fn prune_log_records(app: tauri::AppHandle) -> Result<ClearLogsResult, String> {
+    Ok(ClearLogsResult {
+        removed: prune_run_records_for_retention(&app),
+    })
 }
 
 /// 获取最近运行记录

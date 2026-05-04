@@ -21,12 +21,17 @@ const {
   logAppId,
   logAppName,
   logLines,
+  logRuns,
+  selectedLogRunId,
   logLaunchFailed,
   logLaunchFailedReason,
   logWindowOpened,
   openLogDialog,
+  selectLogRun,
+  clearSelectedLogRun,
+  clearAllLogRuns,
   closeLogDialog,
-} = useLogs()
+} = useLogs(showMessage)
 
 const {
   apps,
@@ -63,12 +68,14 @@ const {
   showSettingsDialog,
   autostartEnabled,
   hideDockOnClose,
+  logRetentionLimit,
   themeIcon,
   themeLabel,
   toggleTheme,
   openSettingsDialog,
   toggleAutostart,
   toggleHideDockOnClose,
+  updateLogRetentionLimit,
   closeSettingsDialog,
   handleExport,
   handleImport,
@@ -118,8 +125,8 @@ async function relaunchFromLog(appId: string) {
   if (app) await requestLaunch(app)
 }
 
-function openExistingLogDialog(app: AppItem) {
-  openLogDialog(app, true)
+async function openExistingLogDialog(app: AppItem) {
+  await openLogDialog(app, true)
 }
 
 function scheduleStartupLaunches() {
@@ -205,10 +212,15 @@ onUnmounted(() => {
       :app-id="logAppId"
       :app-name="logAppName"
       :lines="logLines"
+      :runs="logRuns"
+      :selected-run-id="selectedLogRunId"
       :launch-failed="logLaunchFailed"
       :launch-failed-reason="logLaunchFailedReason"
       :window-opened="logWindowOpened"
       :running-app-ids="runningAppIds"
+      @select-run="selectLogRun"
+      @clear-selected="clearSelectedLogRun"
+      @clear-all="clearAllLogRuns"
       @close="closeLogDialog"
       @relaunch="relaunchFromLog"
     />
@@ -217,11 +229,13 @@ onUnmounted(() => {
       :open="showSettingsDialog"
       :autostart-enabled="autostartEnabled"
       :hide-dock-on-close="hideDockOnClose"
+      :log-retention-limit="logRetentionLimit"
       :theme-icon="themeIcon"
       :theme-label="themeLabel"
       @close="closeSettingsDialog"
       @toggle-autostart="toggleAutostart"
       @toggle-hide-dock-on-close="toggleHideDockOnClose"
+      @update-log-retention-limit="updateLogRetentionLimit"
       @toggle-theme="toggleTheme"
       @import-data="handleImport"
       @export-data="handleExport"

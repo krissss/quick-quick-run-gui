@@ -8,6 +8,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use chrono::{Local, TimeZone};
 use command_group::CommandGroup;
 use tauri::{Emitter, Manager};
 use tauri_plugin_store::StoreExt;
@@ -15,6 +16,9 @@ use tauri_plugin_store::StoreExt;
 const STORE_FILE: &str = "qqr-store.json";
 const SESSIONS_KEY: &str = "running_sessions";
 const RUN_RECORDS_KEY: &str = "run_records";
+const LOG_RETENTION_LIMIT_KEY: &str = "log_retention_limit";
+const DEFAULT_LOG_RETENTION_LIMIT: usize = 20;
+const MAX_LOG_RETENTION_LIMIT: usize = 200;
 const LOG_TAIL_BYTES: u64 = 1024 * 1024;
 const MAX_RUN_RECORDS: usize = 500;
 
@@ -204,7 +208,12 @@ pub fn spawn_shell_command(
             .append(true)
             .open(path)
             .map_err(|e| format!("打开日志文件失败: {}", e))?;
-        let _ = writeln!(file, "\n[qqr] started at {}: {}", now_millis(), command);
+        let _ = writeln!(
+            file,
+            "\n[qqr] started at {}: {}",
+            format_log_timestamp(now_millis()),
+            command
+        );
         if let Some(dir) = &working_directory {
             let _ = writeln!(file, "[qqr] cwd: {}", dir.display());
         }
@@ -463,14 +472,24 @@ pub fn create_run_id(app_id: &str) -> String {
     format!("{}-{}", sanitize_path_segment(app_id), now_millis())
 }
 
+pub fn format_log_timestamp(timestamp_millis: u64) -> String {
+    let Ok(timestamp) = i64::try_from(timestamp_millis) else {
+        return timestamp_millis.to_string();
+    };
+    Local
+        .timestamp_millis_opt(timestamp)
+        .single()
+        .map(|time| time.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|| timestamp_millis.to_string())
+}
+
 pub fn append_run_record(handle: &tauri::AppHandle, record: RunRecord) {
     let mut records = read_run_records(handle);
     records.push(record.clone());
+    let removed = prune_run_records(&mut records, read_log_retention_limit(handle));
     records.sort_by_key(|record| record.started_at);
-    if records.len() > MAX_RUN_RECORDS {
-        records.drain(0..records.len() - MAX_RUN_RECORDS);
-    }
     save_run_records(handle, &records);
+    remove_log_files(&removed);
     emit_run_updated(handle, &record.app_id, &record.id, record.status);
 }
 
@@ -511,6 +530,55 @@ pub fn get_run_records(
         records.truncate(limit);
     }
     records
+}
+
+pub fn clear_run_records(
+    handle: &tauri::AppHandle,
+    app_id: &str,
+    run_ids: Option<Vec<String>>,
+) -> usize {
+    let selected: Option<HashSet<String>> = run_ids.map(|ids| ids.into_iter().collect());
+    let mut records = read_run_records(handle);
+    let mut removed = Vec::new();
+    records.retain(|record| {
+        let should_remove = record.app_id == app_id
+            && record.status != RunStatus::Running
+            && selected
+                .as_ref()
+                .map(|ids| ids.contains(&record.id))
+                .unwrap_or(true);
+        if should_remove {
+            removed.push(record.clone());
+        }
+        !should_remove
+    });
+    if !removed.is_empty() {
+        save_run_records(handle, &records);
+        remove_log_files(&removed);
+    }
+    removed.len()
+}
+
+pub fn prune_run_records_for_retention(handle: &tauri::AppHandle) -> usize {
+    let mut records = read_run_records(handle);
+    let removed = prune_run_records(&mut records, read_log_retention_limit(handle));
+    if !removed.is_empty() {
+        save_run_records(handle, &records);
+        remove_log_files(&removed);
+    }
+    removed.len()
+}
+
+pub fn read_log_retention_limit(handle: &tauri::AppHandle) -> usize {
+    let Ok(store) = handle.store(STORE_FILE) else {
+        return DEFAULT_LOG_RETENTION_LIMIT;
+    };
+    let _ = store.reload();
+    store
+        .get(LOG_RETENTION_LIMIT_KEY)
+        .and_then(|value| serde_json::from_value::<usize>(value).ok())
+        .map(normalize_log_retention_limit)
+        .unwrap_or(DEFAULT_LOG_RETENTION_LIMIT)
 }
 
 pub fn latest_log_path_for_app(handle: &tauri::AppHandle, app_id: &str) -> Option<PathBuf> {
@@ -576,6 +644,62 @@ fn save_run_records(handle: &tauri::AppHandle, records: &[RunRecord]) {
             serde_json::to_value(records).unwrap_or_default(),
         );
         let _ = store.save();
+    }
+}
+
+fn normalize_log_retention_limit(limit: usize) -> usize {
+    limit.clamp(1, MAX_LOG_RETENTION_LIMIT)
+}
+
+fn prune_run_records(records: &mut Vec<RunRecord>, log_retention_limit: usize) -> Vec<RunRecord> {
+    let limit = normalize_log_retention_limit(log_retention_limit);
+    records.sort_by_key(|record| record.started_at);
+
+    let mut remove_indices: HashSet<usize> = HashSet::new();
+    let mut per_app_counts: HashMap<String, usize> = HashMap::new();
+    for (index, record) in records.iter().enumerate().rev() {
+        let count = per_app_counts.entry(record.app_id.clone()).or_default();
+        if *count >= limit && record.status != RunStatus::Running {
+            remove_indices.insert(index);
+        } else {
+            *count += 1;
+        }
+    }
+
+    let retained_count = records.len().saturating_sub(remove_indices.len());
+    if retained_count > MAX_RUN_RECORDS {
+        let mut extra = retained_count - MAX_RUN_RECORDS;
+        for (index, record) in records.iter().enumerate() {
+            if extra == 0 {
+                break;
+            }
+            if remove_indices.contains(&index) || record.status == RunStatus::Running {
+                continue;
+            }
+            remove_indices.insert(index);
+            extra -= 1;
+        }
+    }
+
+    let mut removed = Vec::new();
+    let mut retained = Vec::with_capacity(records.len().saturating_sub(remove_indices.len()));
+    for (index, record) in records.drain(..).enumerate() {
+        if remove_indices.contains(&index) {
+            removed.push(record);
+        } else {
+            retained.push(record);
+        }
+    }
+    *records = retained;
+    removed
+}
+
+fn remove_log_files(records: &[RunRecord]) {
+    for record in records {
+        if record.log_path.is_empty() {
+            continue;
+        }
+        let _ = std::fs::remove_file(&record.log_path);
     }
 }
 
@@ -700,6 +824,22 @@ fn sanitize_path_segment(value: &str) -> String {
 mod tests {
     use super::*;
 
+    fn test_run(app_id: &str, id: &str, started_at: u64, status: RunStatus) -> RunRecord {
+        RunRecord {
+            id: id.to_string(),
+            app_id: app_id.to_string(),
+            app_name: app_id.to_string(),
+            item_type: ItemType::Task,
+            status,
+            pid: None,
+            exit_code: None,
+            started_at,
+            finished_at: Some(started_at + 1),
+            log_path: format!("/tmp/{id}.log"),
+            trigger: RunTrigger::Manual,
+        }
+    }
+
     #[test]
     fn window_label_short_id() {
         assert_eq!(window_label_for("abc"), "app-abc");
@@ -742,6 +882,31 @@ mod tests {
         let (mut child, pid) = result.unwrap();
         assert!(pid > 0);
         let _ = child.kill();
+    }
+
+    #[test]
+    fn format_log_timestamp_is_human_readable() {
+        let formatted = format_log_timestamp(now_millis());
+        assert!(formatted.contains('-'));
+        assert!(formatted.contains(':'));
+    }
+
+    #[test]
+    fn prune_run_records_keeps_latest_per_app_and_running_records() {
+        let mut records = vec![
+            test_run("app-1", "old", 1, RunStatus::Success),
+            test_run("app-1", "middle", 2, RunStatus::Failed),
+            test_run("app-1", "new", 3, RunStatus::Success),
+            test_run("app-1", "running", 4, RunStatus::Running),
+            test_run("app-2", "other", 1, RunStatus::Success),
+        ];
+
+        let removed = prune_run_records(&mut records, 2);
+
+        let kept_ids: HashSet<&str> = records.iter().map(|record| record.id.as_str()).collect();
+        let removed_ids: HashSet<&str> = removed.iter().map(|record| record.id.as_str()).collect();
+        assert_eq!(kept_ids, HashSet::from(["new", "running", "other"]));
+        assert_eq!(removed_ids, HashSet::from(["old", "middle"]));
     }
 
     #[test]

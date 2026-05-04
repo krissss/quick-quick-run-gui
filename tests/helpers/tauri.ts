@@ -13,6 +13,7 @@ interface MockOptions {
   runningApps?: RunningAppInfo[]
   recentRuns?: RunRecord[]
   logs?: Record<string, string[]>
+  runLogs?: Record<string, string[]>
   dialogSavePath?: string | null
   dialogOpenPath?: string | null
   files?: Record<string, string>
@@ -36,6 +37,7 @@ export function setupTauriMocks(options: MockOptions = {}) {
   const storeData: Record<string, unknown> = clone(options.store ?? {})
   const files: Record<string, string> = clone(options.files ?? {})
   const calls: CommandCall[] = []
+  let recentRuns = clone(options.recentRuns ?? [])
   let autostartEnabled = options.autostartEnabled ?? false
 
   mockIPC((cmd, payload = {}) => {
@@ -92,8 +94,26 @@ export function setupTauriMocks(options: MockOptions = {}) {
 
     if (cmd === 'notify_apps_updated') return null
     if (cmd === 'get_running_apps') return clone(options.runningApps ?? [])
-    if (cmd === 'get_recent_runs') return clone(options.recentRuns ?? [])
-    if (cmd === 'get_app_logs') return clone(options.logs?.[String(args.appId)] ?? [])
+    if (cmd === 'get_recent_runs') return clone(recentRuns)
+    if (cmd === 'get_app_log_runs') {
+      const appId = String(args.appId)
+      const limit = typeof args.limit === 'number' ? args.limit : 50
+      return clone(recentRuns.filter(run => run.app_id === appId).slice(0, limit))
+    }
+    if (cmd === 'get_app_logs') {
+      if (args.runId != null) return clone(options.runLogs?.[String(args.runId)] ?? [])
+      return clone(options.logs?.[String(args.appId)] ?? [])
+    }
+    if (cmd === 'clear_app_logs') {
+      const appId = String(args.appId)
+      const runIds = Array.isArray(args.runIds) ? new Set(args.runIds.map(String)) : null
+      const before = recentRuns.length
+      recentRuns = recentRuns.filter((run) => {
+        return run.app_id !== appId || run.status === 'running' || (runIds != null && !runIds.has(run.id))
+      })
+      return { removed: before - recentRuns.length }
+    }
+    if (cmd === 'prune_log_records') return { removed: 0 }
     if (cmd === 'launch_app_window') {
       return options.launchResult ?? { message: '已启动', pid: 1234, run_id: 'run-1' }
     }

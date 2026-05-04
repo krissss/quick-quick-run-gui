@@ -5,7 +5,16 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import { writeFile, readTextFile } from '@tauri-apps/plugin-fs'
 import { invoke } from '@tauri-apps/api/core'
-import { exportData, importData, loadHideDockOnClose, saveHideDockOnClose } from '@/lib/store'
+import {
+  DEFAULT_LOG_RETENTION_LIMIT,
+  exportData,
+  importData,
+  loadHideDockOnClose,
+  loadLogRetentionLimit,
+  normalizeLogRetentionLimit,
+  saveHideDockOnClose,
+  saveLogRetentionLimit,
+} from '@/lib/store'
 import { getErrorMessage } from './useMessage'
 
 export function useSettings(
@@ -15,6 +24,7 @@ export function useSettings(
   const showSettingsDialog = ref(false)
   const autostartEnabled = ref(false)
   const hideDockOnClose = ref(false)
+  const logRetentionLimit = ref(DEFAULT_LOG_RETENTION_LIMIT)
 
   // 主题
   const currentTheme = ref<Theme>(getTheme())
@@ -38,6 +48,11 @@ export function useSettings(
       hideDockOnClose.value = false
     }
     try {
+      logRetentionLimit.value = await loadLogRetentionLimit()
+    } catch {
+      logRetentionLimit.value = DEFAULT_LOG_RETENTION_LIMIT
+    }
+    try {
       autostartEnabled.value = await autostartIsEnabled()
     } catch {
       autostartEnabled.value = false
@@ -59,6 +74,17 @@ export function useSettings(
       hideDockOnClose.value = value
     } catch (e: unknown) {
       showMessage(`保存菜单栏模式失败: ${getErrorMessage(e)}`, 'error')
+    }
+  }
+
+  async function updateLogRetentionLimit(value: number) {
+    const next = normalizeLogRetentionLimit(value)
+    try {
+      await saveLogRetentionLimit(next)
+      try { await invoke('prune_log_records') } catch { /* ignore; next run will prune */ }
+      logRetentionLimit.value = next
+    } catch (e: unknown) {
+      showMessage(`保存日志保留数量失败: ${getErrorMessage(e)}`, 'error')
     }
   }
 
@@ -100,9 +126,9 @@ export function useSettings(
   }
 
   return {
-    showSettingsDialog, autostartEnabled, hideDockOnClose,
+    showSettingsDialog, autostartEnabled, hideDockOnClose, logRetentionLimit,
     currentTheme, themeIcon, themeLabel, toggleTheme,
-    openSettingsDialog, toggleAutostart, toggleHideDockOnClose, closeSettingsDialog,
+    openSettingsDialog, toggleAutostart, toggleHideDockOnClose, updateLogRetentionLimit, closeSettingsDialog,
     handleExport, handleImport,
   }
 }

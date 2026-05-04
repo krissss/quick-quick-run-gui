@@ -5,12 +5,15 @@ import {
   importData,
   loadApps,
   loadHideDockOnClose,
+  loadLogRetentionLimit,
   normalizeApp,
   normalizeApps,
+  normalizeLogRetentionLimit,
   parseCommandSignature,
   resolveAppProfile,
   saveApps,
   saveHideDockOnClose,
+  saveLogRetentionLimit,
 } from '@/lib/store'
 import { setupTauriMocks } from '../../helpers/tauri'
 
@@ -129,6 +132,21 @@ describe('store helpers', () => {
 
     expect(mock.storeData.hide_dock_on_close).toBe(false)
     expect(mock.getCalls('plugin:store|save')).toHaveLength(1)
+  })
+
+  it('loads, normalizes, and persists the log retention preference', async () => {
+    const mock = setupTauriMocks({
+      store: { log_retention_limit: 12 },
+    })
+
+    expect(normalizeLogRetentionLimit('bad')).toBe(20)
+    expect(normalizeLogRetentionLimit(0)).toBe(1)
+    expect(normalizeLogRetentionLimit(999)).toBe(200)
+    await expect(loadLogRetentionLimit()).resolves.toBe(12)
+
+    await saveLogRetentionLimit(30)
+
+    expect(mock.storeData.log_retention_limit).toBe(30)
   })
 
   it('sorts loaded apps by order and saves the current array order', async () => {

@@ -40,7 +40,7 @@ interface LaunchOptions {
 export function useLauncher(
   apps: { value: AppItem[] },
   showMessage: (msg: string, type?: 'success' | 'error' | 'info') => void,
-  openLogDialog: (app: AppItem) => void,
+  openLogDialog: (app: AppItem) => void | Promise<void>,
 ) {
   const loading = ref(false)
   const runningAppIds = ref<Set<string>>(new Set())
@@ -120,7 +120,7 @@ export function useLauncher(
       s.add(launchTarget.id)
       runningAppIds.value = s
       if (openLog && launchTarget.command.trim()) {
-        openLogDialog(launchTarget)
+        await openLogDialog(launchTarget)
       }
       await refreshRunningApps()
     } catch (e: unknown) {
@@ -213,13 +213,16 @@ export function useLauncher(
         await refreshRunningApps()
         await handleRunUpdated(e.payload)
       }),
+      await listen<string>('app-logs-cleared', () => {
+        refreshRunningApps()
+      }),
       await listen<string>('tray-launch-app', async (e) => {
         const app = apps.value.find(a => a.id === e.payload)
         if (app) await launchApp(app)
       }),
-      await listen<string>('tray-open-log', (e) => {
+      await listen<string>('tray-open-log', async (e) => {
         const app = apps.value.find(a => a.id === e.payload)
-        if (app) openLogDialog(app)
+        if (app) await openLogDialog(app)
       }),
     )
   })

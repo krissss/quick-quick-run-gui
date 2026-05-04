@@ -11,6 +11,8 @@ function mountLogDialog(props = {}) {
       appId: 'web-1',
       appName: 'qwenpaw',
       lines: ['ready'],
+      runs: [],
+      selectedRunId: null,
       launchFailed: false,
       launchFailedReason: '',
       windowOpened: false,
@@ -46,5 +48,39 @@ describe('LogDialog', () => {
     await buttonContaining(wrapper, '重新启动').trigger('click')
 
     expect(wrapper.emitted('relaunch')).toEqual([['web-1']])
+  })
+
+  it('shows recent runs with formatted time and emits selection changes', async () => {
+    const wrapper = mountLogDialog({
+      runs: [
+        {
+          id: 'run-1',
+          app_id: 'web-1',
+          app_name: 'qwenpaw',
+          item_type: 'task',
+          status: 'success',
+          pid: null,
+          exit_code: 0,
+          started_at: Date.UTC(2026, 4, 4, 6, 30, 0),
+          finished_at: Date.UTC(2026, 4, 4, 6, 30, 2),
+          log_path: '/tmp/run-1.log',
+          trigger: 'schedule',
+        },
+      ],
+      selectedRunId: 'run-1',
+    })
+
+    expect(document.body.textContent).toContain('最近运行')
+    expect(document.body.textContent).toContain('成功')
+    expect(document.body.textContent).toContain('定时')
+    expect(document.body.textContent).not.toContain('1746340200000')
+
+    await buttonContaining(wrapper, '成功').trigger('click')
+    await buttonContaining(wrapper, '清理当前').trigger('click')
+    await buttonContaining(wrapper, '清理全部').trigger('click')
+
+    expect(wrapper.emitted('selectRun')).toEqual([['run-1']])
+    expect(wrapper.emitted('clearSelected')).toHaveLength(1)
+    expect(wrapper.emitted('clearAll')).toHaveLength(1)
   })
 })
