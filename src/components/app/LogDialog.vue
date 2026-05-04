@@ -61,6 +61,7 @@ function runStatusClass(status: RunRecord['status']) {
 
 function triggerLabel(trigger: RunRecord['trigger']) {
   if (trigger === 'schedule') return '定时'
+  if (trigger === 'delayed') return '延迟'
   if (trigger === 'startup') return '启动'
   if (trigger === 'auto-restart') return '重启'
   if (trigger === 'retry') return '重试'

@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import AppCapabilityStack from '@/components/app/capabilities/AppCapabilityStack.vue'
+import LaunchActionGroup from '@/components/app/LaunchActionGroup.vue'
+import { formatDelayLabel, formatRunAtTime } from '@/lib/delay'
 import {
   iconGradient,
   itemTypeLabel,
@@ -10,7 +13,7 @@ import {
   statusDotClass,
 } from '@/lib/appDisplay'
 import type { AppItem, AppType, MissedPolicy, RestartConfig, RetryConfig, StartupConfig } from '@/lib/store'
-import type { RunRecord } from '@/composables/useLauncher'
+import type { LaunchOptions, PendingLaunch, RunRecord } from '@/composables/useLauncher'
 
 const editForm = defineModel<AppItem>({ required: true })
 
@@ -19,12 +22,14 @@ const props = defineProps<{
   runningAppIds: Set<string>
   runningPids: Map<string, number>
   latestRuns: Map<string, RunRecord>
+  pendingLaunches: Map<string, PendingLaunch>
 }>()
 
 const emit = defineEmits<{
   save: []
   duplicate: []
-  launch: [app: AppItem]
+  launch: [app: AppItem, options?: LaunchOptions]
+  cancelDelayedLaunch: [appId: string]
   delete: []
   setType: [type: AppType]
   setScheduleEnabled: [enabled: boolean]
@@ -38,6 +43,13 @@ const emit = defineEmits<{
   openLog: [app: AppItem]
   stop: [appId: string]
 }>()
+
+const pendingLaunch = computed(() => props.pendingLaunches.get(editForm.value.id) || null)
+
+function emitLaunch(delaySeconds?: number) {
+  if (delaySeconds) emit('launch', editForm.value, { delaySeconds })
+  else emit('launch', editForm.value)
+}
 </script>
 
 <template>
@@ -96,7 +108,7 @@ const emit = defineEmits<{
         />
       </div>
 
-      <div class="flex gap-2 rounded-lg bg-card p-3" style="box-shadow: var(--shadow-card)">
+      <div class="flex flex-wrap gap-2 rounded-lg bg-card p-3" style="box-shadow: var(--shadow-card)">
         <Button size="sm" @click="$emit('save')">{{ props.isNew ? '添加' : '保存' }}</Button>
         <Button
           v-if="!props.isNew"
@@ -110,14 +122,28 @@ const emit = defineEmits<{
           </svg>
           复制
         </Button>
-        <Button
+        <LaunchActionGroup
           v-if="!props.isNew"
-          size="sm"
-          @click="$emit('launch', editForm)"
+          :label="primaryActionLabel(editForm)"
+          @launch="emitLaunch"
+        />
+        <div
+          v-if="pendingLaunch"
+          class="flex items-center gap-2 rounded-md bg-secondary px-2 text-[11px] text-muted-foreground"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
-          {{ primaryActionLabel(editForm) }}
-        </Button>
+          <span>
+            {{ formatDelayLabel(pendingLaunch.delaySeconds) }}后 · {{ formatRunAtTime(pendingLaunch.runAt) }}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            class="h-6 px-1.5 text-[11px]"
+            @click="$emit('cancelDelayedLaunch', editForm.id)"
+          >
+            取消
+          </Button>
+        </div>
         <div class="flex-1" />
         <Button v-if="!props.isNew" variant="destructive" size="sm" @click="$emit('delete')">删除</Button>
       </div>

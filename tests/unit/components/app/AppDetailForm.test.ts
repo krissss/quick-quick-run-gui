@@ -5,7 +5,7 @@ import CronSchedulePicker from '@/components/schedule/CronSchedulePicker.vue'
 import { serviceApp, taskApp, taskSuccessRun, webApp } from '../../../fixtures/apps'
 import { buttonContaining, inputByPlaceholder } from '../../../helpers/dom'
 
-function mountDetail(app = webApp, options: { isNew?: boolean } = {}) {
+function mountDetail(app = webApp, options: { isNew?: boolean; pending?: boolean } = {}) {
   return mount(AppDetailForm, {
     attachTo: document.body,
     props: {
@@ -14,6 +14,12 @@ function mountDetail(app = webApp, options: { isNew?: boolean } = {}) {
       runningAppIds: new Set(app.id === 'web-1' ? ['web-1'] : []),
       runningPids: new Map(app.id === 'web-1' ? [['web-1', 4321]] : []),
       latestRuns: new Map([['task-1', taskSuccessRun]]),
+      pendingLaunches: new Map(options.pending ? [[app.id, {
+        appId: app.id,
+        appName: app.name,
+        delaySeconds: 60,
+        runAt: Date.UTC(2026, 4, 4, 6, 30, 0),
+      }]] : []),
       'onUpdate:modelValue': () => {},
     },
   })
@@ -39,6 +45,15 @@ describe('AppDetailForm', () => {
     expect(wrapper.emitted('launch')).toEqual([[expect.objectContaining({ id: 'web-1' })]])
     expect(wrapper.emitted('duplicate')).toHaveLength(1)
     expect(wrapper.emitted('delete')).toHaveLength(1)
+  })
+
+  it('shows pending delayed launch state and emits cancellation', async () => {
+    const wrapper = mountDetail(webApp, { pending: true })
+
+    expect(wrapper.text()).toContain('1 分钟后')
+    await buttonContaining(wrapper, '取消').trigger('click')
+
+    expect(wrapper.emitted('cancelDelayedLaunch')).toEqual([['web-1']])
   })
 
   it('emits form events for type, working directory, schedule, and save', async () => {

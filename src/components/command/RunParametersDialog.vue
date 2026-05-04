@@ -3,6 +3,8 @@ import { computed, ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import LaunchActionGroup from '@/components/app/LaunchActionGroup.vue'
+import type { LaunchOptions } from '@/composables/useLauncher'
 import {
   buildCommandWithProfile,
   parseCommandSignature,
@@ -16,12 +18,13 @@ type MessageType = 'success' | 'error' | 'info'
 const props = defineProps<{
   open: boolean
   app: AppItem | null
+  launchOptions?: LaunchOptions
   persistProfiles: (app: AppItem, profiles: AppProfile[], activeProfileId: string) => Promise<AppItem | void>
 }>()
 
 const emit = defineEmits<{
   close: []
-  launch: [app: AppItem]
+  launch: [app: AppItem, options?: LaunchOptions]
   message: [text: string, type?: MessageType]
 }>()
 
@@ -193,7 +196,7 @@ async function deleteSelectedProfile() {
   emit('message', '已删除运行方案', 'success')
 }
 
-function launchDraft() {
+function launchDraft(delaySeconds?: number) {
   const app = currentApp.value
   if (!app) return
   const draftProfileId = '__run-draft__'
@@ -209,8 +212,12 @@ function launchDraft() {
       },
     ],
   }
+  const options = delaySeconds
+    ? { ...(props.launchOptions || {}), delaySeconds }
+    : props.launchOptions
   emit('close')
-  emit('launch', launchTarget)
+  if (options) emit('launch', launchTarget, options)
+  else emit('launch', launchTarget)
 }
 </script>
 
@@ -347,12 +354,11 @@ function launchDraft() {
 
         <div class="flex items-center justify-end gap-2 pt-1">
           <Button variant="secondary" size="sm" @click="closeDialog">取消</Button>
-          <Button size="sm" @click="launchDraft">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-              <path d="M8 5v14l11-7z" />
-            </svg>
-            运行
-          </Button>
+          <LaunchActionGroup
+            label="运行"
+            :default-delay-seconds="launchOptions?.delaySeconds"
+            @launch="launchDraft"
+          />
         </div>
       </div>
     </div>

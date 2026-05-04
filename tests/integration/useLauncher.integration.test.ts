@@ -195,6 +195,41 @@ describe('useLauncher integration', () => {
     wrapper.unmount()
   })
 
+  it('schedules and cancels delayed manual launches in the current app session', async () => {
+    vi.useFakeTimers()
+    const { launcher, mock, openLogDialog, showMessage, wrapper } = await mountLauncher()
+
+    await launcher.launchApp(qwenpaw, { delaySeconds: 1 })
+
+    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
+    expect(launcher.pendingLaunches.value.get('qwenpaw-id')).toMatchObject({
+      appId: 'qwenpaw-id',
+      delaySeconds: 1,
+    })
+    expect(showMessage.mock.calls.at(-1)?.[0]).toContain('已安排 qwenpaw')
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      appId: 'qwenpaw-id',
+      launchTrigger: 'delayed',
+    })
+    expect(openLogDialog).not.toHaveBeenCalled()
+    expect(launcher.pendingLaunches.value.has('qwenpaw-id')).toBe(false)
+
+    await launcher.launchApp(qwenpaw, { delaySeconds: 10 })
+    launcher.cancelDelayedLaunch('qwenpaw-id')
+    await vi.advanceTimersByTimeAsync(10000)
+    await flushPromises()
+
+    expect(mock.getCalls('launch_app_window')).toHaveLength(1)
+    expect(showMessage.mock.calls.at(-1)).toEqual(['已取消延迟运行：qwenpaw', 'info'])
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
   it('reports launch and stop failures', async () => {
     const { launcher, showMessage, wrapper } = await mountLauncher({
       rejectCommands: {

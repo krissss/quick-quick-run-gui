@@ -1,6 +1,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { formatDelayLabel, formatRunAtTime, normalizeDelaySeconds } from '@/lib/delay'
 import { resolveAppProfile, type AppItem, type AppType } from '@/lib/store'
 import { getErrorMessage } from './useMessage'
 
@@ -24,7 +25,14 @@ export interface RunRecord {
   trigger: LaunchTrigger | 'schedule' | 'startup-recover'
 }
 
-export type LaunchTrigger = 'manual' | 'startup' | 'auto-restart' | 'retry'
+export type LaunchTrigger = 'manual' | 'startup' | 'auto-restart' | 'retry' | 'delayed'
+
+export interface PendingLaunch {
+  appId: string
+  appName: string
+  delaySeconds: number
+  runAt: number
+}
 
 interface RunUpdatedPayload {
   app_id: string
@@ -32,9 +40,10 @@ interface RunUpdatedPayload {
   status: RunRecord['status']
 }
 
-interface LaunchOptions {
+export interface LaunchOptions {
   trigger?: LaunchTrigger
   openLog?: boolean
+  delaySeconds?: number
 }
 
 export function useLauncher(
@@ -46,7 +55,9 @@ export function useLauncher(
   const runningAppIds = ref<Set<string>>(new Set())
   const runningPids = ref<Map<string, number>>(new Map())
   const latestRuns = ref<Map<string, RunRecord>>(new Map())
+  const pendingLaunches = ref<Map<string, PendingLaunch>>(new Map())
   const automationAttempts = new Map<string, number>()
+  const delayedLaunchTimers = new Map<string, number>()
 
   async function refreshRunningApps() {
     try {
@@ -82,10 +93,68 @@ export function useLauncher(
     automationAttempts.delete(automationKey('retry', appId))
   }
 
+  function setPendingLaunch(appId: string, pending: PendingLaunch | null) {
+    const next = new Map(pendingLaunches.value)
+    if (pending) next.set(appId, pending)
+    else next.delete(appId)
+    pendingLaunches.value = next
+  }
+
+  function cancelDelayedLaunch(appId: string, notify = true) {
+    const timer = delayedLaunchTimers.get(appId)
+    if (timer != null) {
+      window.clearTimeout(timer)
+      delayedLaunchTimers.delete(appId)
+    }
+    const pending = pendingLaunches.value.get(appId)
+    setPendingLaunch(appId, null)
+    if (notify && pending) showMessage(`已取消延迟运行：${pending.appName}`, 'info')
+  }
+
+  function scheduleDelayedLaunch(app: AppItem, options: LaunchOptions, delaySeconds: number) {
+    cancelDelayedLaunch(app.id, false)
+    resetAutomationAttempts(app.id)
+    const runAt = Date.now() + delaySeconds * 1000
+    setPendingLaunch(app.id, {
+      appId: app.id,
+      appName: app.name,
+      delaySeconds,
+      runAt,
+    })
+    showMessage(`已安排 ${app.name} ${formatDelayLabel(delaySeconds)}后运行（${formatRunAtTime(runAt)}）`, 'success')
+
+    const timer = window.setTimeout(async () => {
+      delayedLaunchTimers.delete(app.id)
+      setPendingLaunch(app.id, null)
+      await refreshRunningApps()
+      if (!apps.value.some(item => item.id === app.id)) {
+        showMessage(`已跳过延迟运行：${app.name} 已不存在`, 'info')
+        return
+      }
+      if (runningAppIds.value.has(app.id)) {
+        showMessage(`已跳过延迟运行：${app.name} 正在运行`, 'info')
+        return
+      }
+      await launchApp(app, {
+        ...options,
+        trigger: 'delayed',
+        openLog: false,
+        delaySeconds: undefined,
+      })
+    }, delaySeconds * 1000)
+    delayedLaunchTimers.set(app.id, timer)
+  }
+
   async function launchApp(app: AppItem, options: LaunchOptions = {}) {
+    const delaySeconds = normalizeDelaySeconds(options.delaySeconds)
+    if (delaySeconds) {
+      scheduleDelayedLaunch(app, options, delaySeconds)
+      return
+    }
     const trigger = options.trigger || 'manual'
     const openLog = options.openLog ?? true
-    if (trigger === 'manual') resetAutomationAttempts(app.id)
+    if (trigger === 'manual') cancelDelayedLaunch(app.id, false)
+    if (trigger === 'manual' || trigger === 'delayed') resetAutomationAttempts(app.id)
     loading.value = true
     try {
       const launchTarget = resolveAppProfile(app)
@@ -229,6 +298,8 @@ export function useLauncher(
 
   onUnmounted(() => {
     unlisteners.forEach(fn => fn())
+    for (const timer of delayedLaunchTimers.values()) window.clearTimeout(timer)
+    delayedLaunchTimers.clear()
   })
 
   async function stopApp(appId: string) {
@@ -245,5 +316,16 @@ export function useLauncher(
     } catch { /* ignore */ }
   }
 
-  return { loading, runningAppIds, runningPids, latestRuns, refreshRunningApps, launchApp, stopApp, showAppWindow }
+  return {
+    loading,
+    runningAppIds,
+    runningPids,
+    latestRuns,
+    pendingLaunches,
+    refreshRunningApps,
+    launchApp,
+    cancelDelayedLaunch,
+    stopApp,
+    showAppWindow,
+  }
 }

@@ -108,4 +108,23 @@ describe('RunParametersDialog', () => {
     )
     expect(wrapper.emitted('message')?.at(-1)).toEqual(['已删除运行方案', 'success'])
   })
+
+  it('passes an existing delayed launch request through after parameters are selected', async () => {
+    const wrapper = mount(RunParametersDialog, {
+      attachTo: document.body,
+      props: {
+        open: true,
+        app: profiledApp(),
+        launchOptions: { delaySeconds: 60 },
+        persistProfiles: vi.fn(),
+      },
+    })
+
+    await inputByPlaceholder(wrapper, '账号').setValue('demo')
+    await buttonContaining(wrapper, '1 分钟后运行', true).trigger('click')
+
+    const emitted = wrapper.emitted('launch')?.[0]
+    expect(emitted?.[0]).toMatchObject({ activeProfileId: '__run-draft__' })
+    expect(emitted?.[1]).toEqual({ delaySeconds: 60 })
+  })
 })

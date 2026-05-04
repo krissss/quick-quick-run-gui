@@ -8,7 +8,7 @@ import SettingsDialog from '@/components/app/SettingsDialog.vue'
 import ToastMessages from '@/components/app/ToastMessages.vue'
 import RunParametersDialog from '@/components/command/RunParametersDialog.vue'
 import { useApps } from '@/composables/useApps'
-import { useLauncher } from '@/composables/useLauncher'
+import { useLauncher, type LaunchOptions } from '@/composables/useLauncher'
 import { useLogs } from '@/composables/useLogs'
 import { useMessage } from '@/composables/useMessage'
 import { useSettings } from '@/composables/useSettings'
@@ -58,8 +58,10 @@ const {
   runningAppIds,
   runningPids,
   latestRuns,
+  pendingLaunches,
   refreshRunningApps,
   launchApp,
+  cancelDelayedLaunch,
   stopApp,
   showAppWindow,
 } = useLauncher(apps, showMessage, openLogDialog)
@@ -82,6 +84,7 @@ const {
 } = useSettings(apps, showMessage)
 
 const runDialogApp = ref<AppItem | null>(null)
+const runDialogLaunchOptions = ref<LaunchOptions>({})
 const startupTimers: number[] = []
 
 function commandParamsFor(app: AppItem) {
@@ -90,14 +93,16 @@ function commandParamsFor(app: AppItem) {
 
 function closeRunDialog() {
   runDialogApp.value = null
+  runDialogLaunchOptions.value = {}
 }
 
-async function requestLaunch(app: AppItem) {
+async function requestLaunch(app: AppItem, options: LaunchOptions = {}) {
   if (commandParamsFor(app).length > 0) {
     runDialogApp.value = app
+    runDialogLaunchOptions.value = options
     return
   }
-  await launchApp(app)
+  await launchApp(app, options)
 }
 
 function duplicateSelectedApp() {
@@ -157,7 +162,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex h-screen min-w-[920px] bg-background text-foreground font-sans">
+  <div class="flex h-screen min-w-[1040px] bg-background text-foreground font-sans">
     <ToastMessages
       :messages="messages"
       @dismiss="dismissMessage"
@@ -181,9 +186,11 @@ onUnmounted(() => {
       :running-app-ids="runningAppIds"
       :running-pids="runningPids"
       :latest-runs="latestRuns"
+      :pending-launches="pendingLaunches"
       @save="saveApp"
       @duplicate="duplicateSelectedApp"
       @launch="requestLaunch"
+      @cancel-delayed-launch="cancelDelayedLaunch"
       @delete="deleteApp"
       @set-type="setAppType"
       @set-schedule-enabled="setScheduleEnabled"
@@ -201,6 +208,7 @@ onUnmounted(() => {
     <RunParametersDialog
       :open="!!runDialogApp"
       :app="runDialogApp"
+      :launch-options="runDialogLaunchOptions"
       :persist-profiles="updateAppProfiles"
       @close="closeRunDialog"
       @launch="launchApp"

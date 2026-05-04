@@ -66,6 +66,7 @@ pub enum RunStatus {
 #[serde(rename_all = "kebab-case")]
 pub enum RunTrigger {
     Manual,
+    Delayed,
     Schedule,
     StartupRecover,
     Startup,
