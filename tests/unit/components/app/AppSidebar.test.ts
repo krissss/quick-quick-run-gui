@@ -41,6 +41,11 @@ describe('AppSidebar', () => {
     expect(wrapper.text()).toContain('任务1')
     expect(wrapper.text()).toContain('运行中')
     expect(wrapper.text()).toContain('上次失败')
+    expect(appRow(wrapper, 'web-1').text()).not.toContain('网页')
+    expect(appRow(wrapper, 'web-1').text()).toContain('运行中')
+    expect(appRow(wrapper, 'web-1').text()).toContain('localhost:3000')
+    expect(appRow(wrapper, 'service-1').text()).toContain('上次失败')
+    expect(appRow(wrapper, 'service-1').text()).toContain('pnpm worker')
 
     await inputByPlaceholder(wrapper, '搜索名称、命令或 URL').setValue('worker')
     expect(visibleAppIds()).toEqual(['service-1'])

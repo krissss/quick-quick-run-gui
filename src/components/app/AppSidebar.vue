@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { iconGradient, itemTypeLabel, runStatusLabel, statusDotClass } from '@/lib/appDisplay'
+import { iconGradient, itemTypeLabel, runStatusClass, runStatusLabel } from '@/lib/appDisplay'
 import type { AppItem, AppType } from '@/lib/store'
 import type { RunRecord } from '@/composables/useLauncher'
 
@@ -135,6 +135,13 @@ function handleAppClick(event: MouseEvent, app: AppItem) {
     return
   }
   emit('select', app)
+}
+
+function sidebarSubtitle(app: AppItem) {
+  const value = app.type === 'web'
+    ? app.url || app.command || app.workingDirectory
+    : app.command || app.workingDirectory || app.url
+  return value.replace(/^https?:\/\//, '')
 }
 </script>
 
@@ -287,19 +294,20 @@ function handleAppClick(event: MouseEvent, app: AppItem) {
                 >
                   {{ app.name.charAt(0).toUpperCase() }}
                 </div>
-                <div
-                  v-if="runningAppIds.has(app.id)"
-                  class="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500"
-                />
               </div>
               <div class="min-w-0 flex-1">
-                <div class="truncate text-sm">{{ app.name }}</div>
-                <div class="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                  <span>{{ itemTypeLabel(app.type) }}</span>
-                  <span v-if="runStatusLabel(app, runningAppIds, latestRuns)" class="inline-flex items-center gap-1">
-                    <span class="h-1 w-1 rounded-full" :class="statusDotClass(app, runningAppIds, latestRuns)" />
+                <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                  <div class="truncate text-sm">{{ app.name }}</div>
+                  <span
+                    v-if="runStatusLabel(app, runningAppIds, latestRuns)"
+                    class="rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none"
+                    :class="runStatusClass(app, runningAppIds, latestRuns)"
+                  >
                     {{ runStatusLabel(app, runningAppIds, latestRuns) }}
                   </span>
+                </div>
+                <div class="mt-0.5 truncate text-[10px] text-muted-foreground">
+                  {{ sidebarSubtitle(app) || '未配置命令' }}
                 </div>
               </div>
             </Button>
