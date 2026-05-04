@@ -137,7 +137,7 @@ test('restores a running web app and can reopen its window', async ({ page }) =>
 
   await page.goto('/')
   await expect(page.getByRole('button', { name: /qwenpaw/ })).toBeVisible()
-  await expect(page.getByText('运行中')).toBeVisible()
+  await expect(page.locator('[data-testid="app-detail-panel"]').getByText('运行中')).toBeVisible()
 
   await page.getByRole('button', { name: /qwenpaw/ }).click()
   await page.getByRole('button', { name: '窗口' }).click()

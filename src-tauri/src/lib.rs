@@ -892,6 +892,7 @@ fn read_scheduled_items(app: &tauri::AppHandle) -> Vec<StoredRunItem> {
     let Ok(store) = app.store("qqr-store.json") else {
         return Vec::new();
     };
+    let _ = store.reload();
     store
         .get("apps")
         .and_then(|value| serde_json::from_value::<Vec<StoredRunItem>>(value).ok())
@@ -907,6 +908,7 @@ fn set_schedule_last_run_at(app: &tauri::AppHandle, app_id: &str, due_at: u64) {
     };
     let mut state = read_schedule_state(app);
     state.insert(app_id.to_string(), due_at);
+    let _ = store.reload();
     let _ = store.set(
         "schedule_state",
         serde_json::to_value(state).unwrap_or_default(),
@@ -918,6 +920,7 @@ fn read_schedule_state(app: &tauri::AppHandle) -> HashMap<String, u64> {
     let Ok(store) = app.store("qqr-store.json") else {
         return HashMap::new();
     };
+    let _ = store.reload();
     store
         .get("schedule_state")
         .and_then(|value| serde_json::from_value::<HashMap<String, u64>>(value).ok())
@@ -1428,6 +1431,7 @@ fn save_window_state(app: &tauri::AppHandle, app_id: &str, window: &tauri::Webvi
             height: size.height as f64 / scale,
         };
         if let Ok(store) = app.store("qqr-store.json") {
+            let _ = store.reload();
             let _ = store.set(&key, serde_json::to_value(state).unwrap());
             let _ = store.save();
         }
@@ -1438,6 +1442,7 @@ fn save_window_state(app: &tauri::AppHandle, app_id: &str, window: &tauri::Webvi
 fn load_window_state(app: &tauri::AppHandle, app_id: &str) -> Option<WindowState> {
     let key = format!("window_pos:{}", app_id);
     if let Ok(store) = app.store("qqr-store.json") {
+        let _ = store.reload();
         if let Some(value) = store.get(&key) {
             if let Ok(state) = serde_json::from_value::<WindowState>(value) {
                 return Some(state);
@@ -1450,7 +1455,10 @@ fn load_window_state(app: &tauri::AppHandle, app_id: &str) -> Option<WindowState
 fn hide_dock_on_close_enabled(app: &tauri::AppHandle) -> bool {
     app.store("qqr-store.json")
         .ok()
-        .and_then(|store| store.get("hide_dock_on_close"))
+        .and_then(|store| {
+            let _ = store.reload();
+            store.get("hide_dock_on_close")
+        })
         .and_then(|value| serde_json::from_value::<bool>(value).ok())
         .unwrap_or(false)
 }

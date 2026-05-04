@@ -120,12 +120,15 @@ function openExistingLogDialog(app: AppItem) {
 
 onMounted(async () => {
   await refreshApps()
+  if (apps.value.length > 0 && isNew.value) {
+    selectApp(apps.value[0])
+  }
   refreshRunningApps()
 })
 </script>
 
 <template>
-  <div class="h-screen flex bg-background text-foreground font-sans">
+  <div class="flex h-screen min-w-[920px] bg-background text-foreground font-sans">
     <ToastMessages
       :messages="messages"
       @dismiss="dismissMessage"

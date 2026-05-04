@@ -14,6 +14,12 @@ async function getStore(): Promise<Store> {
   return _store
 }
 
+async function getFreshStore(): Promise<Store> {
+  const store = await getStore()
+  await store.reload()
+  return store
+}
+
 export interface AppItem {
   id: string
   name: string
@@ -229,7 +235,7 @@ export function normalizeApps(apps: Partial<AppItem>[], sortByOrder = true): App
 }
 
 export async function loadApps(): Promise<AppItem[]> {
-  const store = await getStore()
+  const store = await getFreshStore()
 
   // 尝试从 store 读取
   const apps = await store.get<AppItem[]>(APPS_KEY)
@@ -252,24 +258,24 @@ export async function loadApps(): Promise<AppItem[]> {
 }
 
 export async function saveApps(apps: AppItem[]): Promise<void> {
-  const store = await getStore()
+  const store = await getFreshStore()
   await store.set(APPS_KEY, normalizeApps(apps, false))
   await store.save()
 }
 
 export async function loadHideDockOnClose(): Promise<boolean> {
-  const store = await getStore()
+  const store = await getFreshStore()
   return (await store.get<boolean>(HIDE_DOCK_ON_CLOSE_KEY)) || false
 }
 
 export async function saveHideDockOnClose(enabled: boolean): Promise<void> {
-  const store = await getStore()
+  const store = await getFreshStore()
   await store.set(HIDE_DOCK_ON_CLOSE_KEY, enabled)
   await store.save()
 }
 
 export async function exportData(): Promise<string> {
-  const store = await getStore()
+  const store = await getFreshStore()
   const apps = normalizeApps(await store.get<AppItem[]>(APPS_KEY) || [])
   return JSON.stringify(apps, null, 2)
 }

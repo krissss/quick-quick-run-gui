@@ -177,6 +177,29 @@ describe('store helpers', () => {
     expect(mock.storeData.apps).toMatchObject([{ id: 'task-1', type: 'task', workingDirectory: '' }])
   })
 
+  it('reloads the store before saving app configuration', async () => {
+    const mock = setupTauriMocks({
+      store: {
+        running_sessions: [{ app_id: 'web-1', pid: 1234 }],
+      },
+    })
+    const app = normalizeApp({ id: 'web-1', name: 'Web', url: 'http://localhost:3000' })
+
+    await saveApps([app])
+
+    let reloadIndex = -1
+    mock.calls.forEach((call, index) => {
+      if (call.cmd === 'plugin:store|reload') reloadIndex = index
+    })
+    const setAppsIndex = mock.calls.findIndex(call =>
+      call.cmd === 'plugin:store|set'
+      && (call.payload as { key?: string }).key === 'apps',
+    )
+    expect(reloadIndex).toBeGreaterThanOrEqual(0)
+    expect(reloadIndex).toBeLessThan(setAppsIndex)
+    expect(mock.storeData.running_sessions).toEqual([{ app_id: 'web-1', pid: 1234 }])
+  })
+
   it('normalizes app arrays with stable contiguous order values', () => {
     expect(normalizeApps([
       { id: 'third', name: 'Third', url: 'http://localhost:3003', order: 10 },

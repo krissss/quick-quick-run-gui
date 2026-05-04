@@ -31,6 +31,7 @@ fn read_apps_from_store(app: &AppHandle) -> Vec<AppEntry> {
         Err(_) => return Vec::new(),
     };
 
+    let _ = store.reload();
     store
         .get("apps")
         .and_then(|v| serde_json::from_value::<Vec<AppEntry>>(v.clone()).ok())

@@ -221,7 +221,7 @@ function launchDraft() {
       class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
       @click.self="closeDialog"
     >
-      <div class="bg-card rounded-lg p-5 w-full max-w-xl max-h-[88vh] overflow-y-auto space-y-5" style="box-shadow: var(--shadow-card)">
+      <div class="bg-card rounded-lg p-6 w-full max-w-2xl max-h-[88vh] overflow-y-auto space-y-5" style="box-shadow: var(--shadow-card)">
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
             <div class="text-xs font-medium text-muted-foreground">{{ itemTypeLabel(currentApp.type) }} / 运行参数</div>
@@ -293,7 +293,7 @@ function launchDraft() {
           </div>
         </div>
 
-        <div class="space-y-2 rounded-lg bg-secondary/60 p-3" style="box-shadow: var(--shadow-border)">
+        <div class="space-y-2 rounded-md bg-secondary/60 p-3" style="box-shadow: var(--shadow-border)">
           <div class="flex items-center justify-between gap-3">
             <label class="text-xs font-medium text-muted-foreground">方案名称</label>
             <Button

@@ -298,7 +298,13 @@ pub fn spawn_process_monitor(app: &tauri::AppHandle, app_id: &str) {
                             match child.try_wait() {
                                 Ok(Some(status)) => Some(Some(status)),
                                 Ok(None) => None,
-                                Err(_) => Some(None),
+                                Err(_) => {
+                                    if should_keep_monitoring_after_wait_error(info.pid) {
+                                        None
+                                    } else {
+                                        Some(None)
+                                    }
+                                }
                             }
                         } else {
                             None
@@ -530,6 +536,7 @@ fn read_persisted_sessions(handle: &tauri::AppHandle) -> Vec<PersistedSession> {
     let Ok(store) = handle.store(STORE_FILE) else {
         return Vec::new();
     };
+    let _ = store.reload();
     store
         .get(SESSIONS_KEY)
         .and_then(|value| serde_json::from_value::<Vec<PersistedSession>>(value).ok())
@@ -538,6 +545,7 @@ fn read_persisted_sessions(handle: &tauri::AppHandle) -> Vec<PersistedSession> {
 
 fn save_persisted_sessions(handle: &tauri::AppHandle, sessions: &[PersistedSession]) {
     if let Ok(store) = handle.store(STORE_FILE) {
+        let _ = store.reload();
         let _ = store.set(
             SESSIONS_KEY,
             serde_json::to_value(sessions).unwrap_or_default(),
@@ -550,6 +558,7 @@ fn read_run_records(handle: &tauri::AppHandle) -> Vec<RunRecord> {
     let Ok(store) = handle.store(STORE_FILE) else {
         return Vec::new();
     };
+    let _ = store.reload();
     store
         .get(RUN_RECORDS_KEY)
         .and_then(|value| serde_json::from_value::<Vec<RunRecord>>(value).ok())
@@ -558,6 +567,7 @@ fn read_run_records(handle: &tauri::AppHandle) -> Vec<RunRecord> {
 
 fn save_run_records(handle: &tauri::AppHandle, records: &[RunRecord]) {
     if let Ok(store) = handle.store(STORE_FILE) {
+        let _ = store.reload();
         let _ = store.set(
             RUN_RECORDS_KEY,
             serde_json::to_value(records).unwrap_or_default(),
@@ -654,6 +664,10 @@ fn is_process_alive(pid: u32) -> bool {
     }
 }
 
+fn should_keep_monitoring_after_wait_error(pid: Option<u32>) -> bool {
+    pid.map(is_process_alive).unwrap_or(false)
+}
+
 pub fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -725,6 +739,18 @@ mod tests {
         let (mut child, pid) = result.unwrap();
         assert!(pid > 0);
         let _ = child.kill();
+    }
+
+    #[test]
+    fn wait_error_for_live_pid_keeps_monitoring() {
+        assert!(should_keep_monitoring_after_wait_error(Some(
+            std::process::id()
+        )));
+    }
+
+    #[test]
+    fn wait_error_without_pid_marks_process_lost() {
+        assert!(!should_keep_monitoring_after_wait_error(None));
     }
 
     #[test]

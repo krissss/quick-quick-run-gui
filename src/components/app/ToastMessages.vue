@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Button } from '@/components/ui/button'
 import type { MessageItem } from '@/composables/useMessage'
 
 defineProps<{
@@ -73,9 +74,11 @@ defineEmits<{
       <p class="min-w-0 flex-1 break-words text-sm leading-5 text-foreground">
         {{ item.text }}
       </p>
-      <button
-        class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
+      <Button
         type="button"
+        variant="ghost"
+        size="icon"
+        class="h-6 w-6 shrink-0 text-muted-foreground"
         title="关闭通知"
         aria-label="关闭通知"
         @click="$emit('dismiss', item.id)"
@@ -84,7 +87,7 @@ defineEmits<{
           <path d="M18 6 6 18" />
           <path d="m6 6 12 12" />
         </svg>
-      </button>
+      </Button>
     </div>
   </div>
 </template>

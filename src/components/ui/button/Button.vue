@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ClassValue } from 'clsx'
 import { computed } from 'vue'
 import { cn } from '@/lib/utils'
 import { buttonVariants } from './variants'
@@ -6,7 +7,7 @@ import { buttonVariants } from './variants'
 const props = withDefaults(defineProps<{
   variant?: 'default' | 'secondary' | 'destructive' | 'ghost' | 'outline'
   size?: 'default' | 'sm' | 'lg' | 'icon'
-  class?: string
+  class?: ClassValue
   disabled?: boolean
 }>(), {
   variant: 'default',

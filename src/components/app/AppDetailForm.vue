@@ -60,7 +60,8 @@ function updateMissedPolicy(value: string | string[]) {
 
 <template>
   <div class="flex-1 overflow-y-auto">
-    <div class="max-w-md mx-auto py-12 px-6 space-y-6">
+    <div data-testid="app-detail-panel" class="mx-auto max-w-[760px] px-8 py-8 space-y-5">
+      <div class="rounded-lg bg-card p-4" style="box-shadow: var(--shadow-card)">
       <div class="flex items-center gap-4">
         <div
           v-if="!props.isNew && editForm.name"
@@ -82,23 +83,25 @@ function updateMissedPolicy(value: string | string[]) {
               {{ runStatusLabel(editForm, props.runningAppIds, props.latestRuns) || itemTypeLabel(editForm.type) }}
             </span>
             <span v-if="props.runningPids.has(editForm.id)" class="text-[11px] text-muted-foreground font-mono">PID {{ props.runningPids.get(editForm.id) }}</span>
-            <button v-if="editForm.type === 'web' && props.runningAppIds.has(editForm.id)" class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-muted-foreground bg-secondary hover:text-foreground transition-colors cursor-pointer" @click="$emit('showWindow', editForm.id)">
+            <Button v-if="editForm.type === 'web' && props.runningAppIds.has(editForm.id)" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" @click="$emit('showWindow', editForm.id)">
               <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
               窗口
-            </button>
-            <button v-if="editForm.command" class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-muted-foreground bg-secondary hover:text-foreground transition-colors cursor-pointer" @click="$emit('openLog', editForm)">
+            </Button>
+            <Button v-if="editForm.command" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" @click="$emit('openLog', editForm)">
               <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
               日志
-            </button>
-            <button v-if="props.runningAppIds.has(editForm.id)" class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-muted-foreground bg-secondary hover:text-destructive transition-colors cursor-pointer" @click="$emit('stop', editForm.id)">
+            </Button>
+            <Button v-if="props.runningAppIds.has(editForm.id)" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-destructive" @click="$emit('stop', editForm.id)">
               <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"/></svg>
               停止
-            </button>
+            </Button>
           </div>
         </div>
       </div>
+      </div>
 
-      <div class="space-y-4">
+      <div class="rounded-lg bg-card p-4 space-y-4" style="box-shadow: var(--shadow-card)">
+        <div class="grid gap-4 sm:grid-cols-[180px_minmax(0,1fr)]">
         <div class="space-y-1.5">
           <label class="text-xs font-medium text-muted-foreground">类型</label>
           <ToggleGroup
@@ -122,6 +125,7 @@ function updateMissedPolicy(value: string | string[]) {
         <div v-if="editForm.type === 'web'" class="space-y-1.5">
           <label class="text-xs font-medium text-muted-foreground">目标 URL</label>
           <Input v-model="editForm.url" placeholder="http://localhost:3000" />
+        </div>
         </div>
         <div class="space-y-1.5">
           <label class="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -153,7 +157,7 @@ function updateMissedPolicy(value: string | string[]) {
             </Button>
           </div>
         </div>
-        <div v-if="editForm.type === 'task'" class="space-y-3 rounded-lg bg-card p-3" style="box-shadow: var(--shadow-border)">
+        <div v-if="editForm.type === 'task'" class="space-y-3 rounded-md bg-secondary/60 p-3" style="box-shadow: var(--shadow-border)">
           <div class="flex items-center justify-between gap-3">
             <div>
               <div class="text-sm font-medium">定时执行</div>
@@ -192,7 +196,7 @@ function updateMissedPolicy(value: string | string[]) {
           </label>
           <Input v-model="editForm.name" :placeholder="namePlaceholder()" />
         </div>
-        <div v-if="editForm.type === 'web'" class="flex gap-4">
+        <div v-if="editForm.type === 'web'" class="grid grid-cols-2 gap-4">
           <div class="flex-1 space-y-1.5">
             <label class="text-xs font-medium text-muted-foreground">宽度</label>
             <Input v-model.number="editForm.width" type="number" />
@@ -204,7 +208,7 @@ function updateMissedPolicy(value: string | string[]) {
         </div>
       </div>
 
-      <div class="flex gap-2 pt-2">
+      <div class="flex gap-2 rounded-lg bg-card p-3" style="box-shadow: var(--shadow-card)">
         <Button size="sm" @click="$emit('save')">{{ props.isNew ? '添加' : '保存' }}</Button>
         <Button
           v-if="!props.isNew"

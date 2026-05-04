@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 </script>
 
@@ -6,13 +7,15 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
   <TooltipProvider :delay-duration="150">
     <Tooltip>
       <TooltipTrigger as-child>
-        <button
+        <Button
           type="button"
-          class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-secondary text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--ring)]"
+          variant="secondary"
+          size="icon"
+          class="h-4 w-4 rounded-full text-[10px] text-muted-foreground hover:text-foreground"
           aria-label="查看命令模板说明"
         >
           ?
-        </button>
+        </Button>
       </TooltipTrigger>
       <TooltipContent side="top" align="start" class="max-w-[300px]">
         <div class="space-y-1.5">

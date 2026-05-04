@@ -27,7 +27,7 @@ defineEmits<{
       class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
       @click.self="$emit('close')"
     >
-      <div class="bg-card rounded-lg p-6 w-full max-w-sm space-y-5" style="box-shadow: var(--shadow-card)">
+      <div class="bg-card rounded-lg p-6 w-full max-w-md space-y-5" style="box-shadow: var(--shadow-card)">
         <h2 class="text-base font-semibold tracking-[-0.32px]">设置</h2>
 
         <div class="space-y-1">
@@ -39,7 +39,7 @@ defineEmits<{
             <Switch :model-value="autostartEnabled" @update:model-value="$emit('toggleAutostart', $event)" />
           </div>
 
-          <div style="box-shadow: 0 -1px 0 0 var(--border)" />
+          <div class="h-px shadow-[0_-1px_0_0_var(--border)]" />
 
           <div class="flex items-center justify-between py-3">
             <div>
@@ -49,7 +49,7 @@ defineEmits<{
             <Switch :model-value="hideDockOnClose" @update:model-value="$emit('toggleHideDockOnClose', $event)" />
           </div>
 
-          <div style="box-shadow: 0 -1px 0 0 var(--border)" />
+          <div class="h-px shadow-[0_-1px_0_0_var(--border)]" />
 
           <div class="flex items-center justify-between py-3">
             <div>
@@ -119,7 +119,7 @@ defineEmits<{
             </Button>
           </div>
 
-          <div style="box-shadow: 0 -1px 0 0 var(--border)" />
+          <div class="h-px shadow-[0_-1px_0_0_var(--border)]" />
 
           <div class="flex items-center justify-between py-3">
             <div>

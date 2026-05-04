@@ -14,7 +14,7 @@ async function mountApp(options: Parameters<typeof setupTauriMocks>[0] = {}) {
 }
 
 function detailPanel(wrapper: ReturnType<typeof mount>) {
-  const panel = wrapper.find('.max-w-md')
+  const panel = wrapper.find('[data-testid="app-detail-panel"]')
   if (!panel.exists()) throw new Error('Detail panel not found')
   return panel
 }

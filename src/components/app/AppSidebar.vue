@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { iconGradient, itemTypeLabel, runStatusLabel, statusDotClass } from '@/lib/appDisplay'
@@ -45,6 +46,10 @@ const groupedApps = computed(() => APP_TYPES
     apps: filteredApps.value.filter((app) => app.type === type),
   }))
   .filter(group => group.apps.length > 0))
+
+const runningCount = computed(() =>
+  props.apps.filter(app => props.runningAppIds.has(app.id)).length,
+)
 
 const draggedAppId = ref<string | null>(null)
 const dragOverAppId = ref<string | null>(null)
@@ -134,8 +139,17 @@ function handleAppClick(event: MouseEvent, app: AppItem) {
 </script>
 
 <template>
-  <div class="w-56 shrink-0 flex flex-col border-r border-border">
-    <div class="space-y-2 border-b border-border p-2">
+  <div class="flex w-72 shrink-0 flex-col bg-background shadow-[inset_-1px_0_0_0_var(--border)]">
+    <div class="space-y-3 p-3 shadow-[inset_0_-1px_0_0_var(--border)]">
+      <div class="flex items-start justify-between gap-3 px-1">
+        <div class="min-w-0">
+          <div class="truncate text-sm font-semibold tracking-[-0.28px]">QQRun</div>
+          <div class="mt-0.5 text-xs text-muted-foreground">
+            {{ apps.length }} 个条目 · {{ runningCount }} 个运行中
+          </div>
+        </div>
+      </div>
+
       <div class="relative">
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -159,10 +173,12 @@ function handleAppClick(event: MouseEvent, app: AppItem) {
           placeholder="搜索名称、命令或 URL"
           aria-label="搜索应用"
         />
-        <button
+        <Button
           v-if="sidebarSearch"
           type="button"
-          class="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          variant="ghost"
+          size="icon"
+          class="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 text-muted-foreground"
           aria-label="清空搜索"
           title="清空搜索"
           @click="clearSidebarSearch"
@@ -171,7 +187,7 @@ function handleAppClick(event: MouseEvent, app: AppItem) {
             <path d="M18 6 6 18" />
             <path d="m6 6 12 12" />
           </svg>
-        </button>
+        </Button>
       </div>
 
       <ToggleGroup
@@ -213,16 +229,18 @@ function handleAppClick(event: MouseEvent, app: AppItem) {
         </ToggleGroupItem>
       </ToggleGroup>
 
-      <button
-        class="w-full flex items-center gap-2.5 rounded-md px-2 py-2 transition-colors cursor-pointer"
-        :class="isNew ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'"
+      <Button
+        type="button"
+        variant="ghost"
+        class="h-9 w-full justify-start gap-2.5 px-2"
+        :class="isNew ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'"
         @click="$emit('add')"
       >
         <div class="w-7 h-7 rounded-md flex items-center justify-center">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
         </div>
         <span class="text-sm">添加应用</span>
-      </button>
+      </Button>
     </div>
 
     <div class="flex-1 overflow-y-auto py-2">
@@ -245,9 +263,10 @@ function handleAppClick(event: MouseEvent, app: AppItem) {
             v-for="app in group.apps"
             :key="app.id"
           >
-            <button
+            <Button
               type="button"
-              class="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors cursor-grab select-none touch-none active:cursor-grabbing"
+              variant="ghost"
+              class="h-auto w-full justify-start gap-2.5 px-2 py-2 text-left cursor-grab select-none touch-none active:cursor-grabbing"
               :class="[
                 selectedAppId === app.id && !isNew ? 'bg-accent text-foreground' : 'text-foreground hover:bg-accent/50',
                 draggedAppId === app.id ? 'opacity-50' : '',
@@ -283,20 +302,22 @@ function handleAppClick(event: MouseEvent, app: AppItem) {
                   </span>
                 </div>
               </div>
-            </button>
+            </Button>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="border-t border-border p-2">
-      <button
-        class="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+    <div class="p-3 shadow-[inset_0_1px_0_0_var(--border)]">
+      <Button
+        type="button"
+        variant="ghost"
+        class="h-8 w-full justify-start gap-2.5 px-2 text-muted-foreground hover:text-foreground"
         @click="$emit('openSettings')"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
         <span class="text-xs">设置</span>
-      </button>
+      </Button>
     </div>
   </div>
 </template>
