@@ -3,10 +3,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { useLauncher } from '@/composables/useLauncher'
-import type { AppItem } from '@/lib/store'
+import { normalizeApp, type AppItem } from '@/lib/store'
+import { serviceApp, taskApp } from '../fixtures/apps'
 import { setupTauriMocks } from '../helpers/tauri'
 
-const qwenpaw: AppItem = {
+const qwenpaw: AppItem = normalizeApp({
   id: 'qwenpaw-id',
   name: 'qwenpaw',
   type: 'web',
@@ -23,11 +24,11 @@ const qwenpaw: AppItem = {
     timezone: 'Asia/Shanghai',
     missedPolicy: 'skip',
   },
-}
+})
 
-async function mountLauncher(options: Parameters<typeof setupTauriMocks>[0] = {}) {
+async function mountLauncher(options: Parameters<typeof setupTauriMocks>[0] = {}, initialApps: AppItem[] = [qwenpaw]) {
   const mock = setupTauriMocks(options)
-  const apps = ref<AppItem[]>([qwenpaw])
+  const apps = ref<AppItem[]>(initialApps)
   const showMessage = vi.fn()
   const openLogDialog = vi.fn()
   let launcher!: ReturnType<typeof useLauncher>
@@ -40,7 +41,7 @@ async function mountLauncher(options: Parameters<typeof setupTauriMocks>[0] = {}
   }))
   await flushPromises()
 
-  return { launcher, mock, openLogDialog, showMessage, wrapper }
+  return { apps, launcher, mock, openLogDialog, showMessage, wrapper }
 }
 
 describe('useLauncher integration', () => {
@@ -151,6 +152,7 @@ describe('useLauncher integration', () => {
     expect(fallback.showMessage.mock.calls.length).toBeGreaterThan(0)
     expect(fallback.mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
       workingDirectory: '/Users/kriss/project',
+      launchTrigger: 'manual',
       bgR: 255,
       bgG: 255,
       bgB: 255,
@@ -209,6 +211,121 @@ describe('useLauncher integration', () => {
     expect(showMessage).toHaveBeenCalledWith('停止失败: cannot stop', 'error')
     expect(launcher.loading.value).toBe(false)
     wrapper.unmount()
+  })
+
+  it('automatically restarts failed services within the configured attempt limit', async () => {
+    vi.useFakeTimers()
+    const service = normalizeApp({
+      ...serviceApp,
+      restart: { enabled: true, mode: 'on-failure', maxAttempts: 2, delaySeconds: 1 },
+    })
+    const { launcher, mock, openLogDialog, wrapper } = await mountLauncher({}, [service])
+
+    await emit('app-run-updated', { app_id: service.id, run_id: 'run-1', status: 'failed' })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      appId: service.id,
+      itemType: 'service',
+      launchTrigger: 'auto-restart',
+    })
+    expect(openLogDialog).not.toHaveBeenCalled()
+    expect(launcher.loading.value).toBe(false)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('does not restart deleted services after the configured delay', async () => {
+    vi.useFakeTimers()
+    const service = normalizeApp({
+      ...serviceApp,
+      restart: { enabled: true, mode: 'on-failure', maxAttempts: 2, delaySeconds: 1 },
+    })
+    const { apps, mock, wrapper } = await mountLauncher({}, [service])
+
+    await emit('app-run-updated', { app_id: service.id, run_id: 'run-1', status: 'failed' })
+    await flushPromises()
+    apps.value = []
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('does not restart services when restart is disabled before the delay finishes', async () => {
+    vi.useFakeTimers()
+    const service = normalizeApp({
+      ...serviceApp,
+      restart: { enabled: true, mode: 'on-failure', maxAttempts: 2, delaySeconds: 1 },
+    })
+    const { apps, mock, wrapper } = await mountLauncher({}, [service])
+
+    await emit('app-run-updated', { app_id: service.id, run_id: 'run-1', status: 'failed' })
+    await flushPromises()
+    apps.value = [
+      normalizeApp({
+        ...service,
+        restart: { ...service.restart, enabled: false },
+      }),
+    ]
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('automatically retries failed tasks', async () => {
+    vi.useFakeTimers()
+    const task = normalizeApp({
+      ...taskApp,
+      retry: { enabled: true, maxAttempts: 2, delaySeconds: 1 },
+    })
+    const { launcher, mock, openLogDialog, wrapper } = await mountLauncher({}, [task])
+
+    await emit('app-run-updated', { app_id: task.id, run_id: 'run-1', status: 'failed' })
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      appId: task.id,
+      itemType: 'task',
+      launchTrigger: 'retry',
+    })
+    expect(openLogDialog).not.toHaveBeenCalled()
+    expect(launcher.loading.value).toBe(false)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('does not retry tasks when retry is disabled before the delay finishes', async () => {
+    vi.useFakeTimers()
+    const task = normalizeApp({
+      ...taskApp,
+      retry: { enabled: true, maxAttempts: 2, delaySeconds: 1 },
+    })
+    const { apps, mock, wrapper } = await mountLauncher({}, [task])
+
+    await emit('app-run-updated', { app_id: task.id, run_id: 'run-1', status: 'failed' })
+    await flushPromises()
+    apps.value = [
+      normalizeApp({
+        ...task,
+        retry: { ...task.retry, enabled: false },
+      }),
+    ]
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('reacts to process lifecycle and tray launch events', async () => {

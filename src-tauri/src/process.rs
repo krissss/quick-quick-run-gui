@@ -64,6 +64,9 @@ pub enum RunTrigger {
     Manual,
     Schedule,
     StartupRecover,
+    Startup,
+    AutoRestart,
+    Retry,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]

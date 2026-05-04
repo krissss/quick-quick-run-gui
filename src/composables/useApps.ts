@@ -1,7 +1,22 @@
 import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { validateCronExpression } from '@/lib/cron'
-import { defaultSchedule, loadApps, normalizeApp, saveApps, type AppItem, type AppProfile, type AppType, type MissedPolicy } from '@/lib/store'
+import {
+  defaultRestart,
+  defaultRetry,
+  defaultSchedule,
+  defaultStartup,
+  loadApps,
+  normalizeApp,
+  saveApps,
+  type AppItem,
+  type AppProfile,
+  type AppType,
+  type MissedPolicy,
+  type RestartConfig,
+  type RetryConfig,
+  type StartupConfig,
+} from '@/lib/store'
 
 export function emptyApp(): AppItem {
   return {
@@ -16,6 +31,9 @@ export function emptyApp(): AppItem {
     profiles: [],
     activeProfileId: '',
     schedule: defaultSchedule(),
+    startup: defaultStartup(),
+    restart: defaultRestart(),
+    retry: defaultRetry(),
   }
 }
 
@@ -150,6 +168,18 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
     editForm.value = normalizeApp({ ...editForm.value, schedule })
   }
 
+  function setStartup(startup: StartupConfig) {
+    editForm.value = normalizeApp({ ...editForm.value, startup })
+  }
+
+  function setRestart(restart: RestartConfig) {
+    editForm.value = normalizeApp({ ...editForm.value, restart })
+  }
+
+  function setRetry(retry: RetryConfig) {
+    editForm.value = normalizeApp({ ...editForm.value, retry })
+  }
+
   function touchSchedule() {
     const schedule = { ...(editForm.value.schedule || defaultSchedule()), lastRunAt: Date.now() }
     editForm.value = normalizeApp({ ...editForm.value, schedule })
@@ -208,6 +238,6 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
     apps, editForm, isNew,
     selectApp, openAddForm, duplicateApp, refreshApps, persistApps, saveApp, deleteApp,
     reorderApps, updateAppProfiles,
-    setAppType, setScheduleEnabled, setMissedPolicy, setScheduleCron, touchSchedule,
+    setAppType, setScheduleEnabled, setMissedPolicy, setScheduleCron, setStartup, setRestart, setRetry, touchSchedule,
   }
 }

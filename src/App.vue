@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import AppDetailForm from '@/components/app/AppDetailForm.vue'
 import AppSidebar from '@/components/app/AppSidebar.vue'
@@ -44,6 +44,9 @@ const {
   setScheduleEnabled,
   setMissedPolicy,
   setScheduleCron,
+  setStartup,
+  setRestart,
+  setRetry,
 } = useApps(showMessage)
 
 const {
@@ -72,6 +75,7 @@ const {
 } = useSettings(apps, showMessage)
 
 const runDialogApp = ref<AppItem | null>(null)
+const startupTimers: number[] = []
 
 function commandParamsFor(app: AppItem) {
   return parseCommandSignature(app.command).params
@@ -118,12 +122,30 @@ function openExistingLogDialog(app: AppItem) {
   openLogDialog(app, true)
 }
 
+function scheduleStartupLaunches() {
+  for (const app of apps.value) {
+    if (!app.startup.enabled) continue
+    const timer = window.setTimeout(async () => {
+      await refreshRunningApps()
+      const currentApp = apps.value.find(item => item.id === app.id)
+      if (!currentApp || !currentApp.startup.enabled || runningAppIds.value.has(currentApp.id)) return
+      await launchApp(currentApp, { trigger: 'startup', openLog: false })
+    }, Math.max(0, app.startup.delaySeconds) * 1000)
+    startupTimers.push(timer)
+  }
+}
+
 onMounted(async () => {
   await refreshApps()
   if (apps.value.length > 0 && isNew.value) {
     selectApp(apps.value[0])
   }
-  refreshRunningApps()
+  await refreshRunningApps()
+  scheduleStartupLaunches()
+})
+
+onUnmounted(() => {
+  for (const timer of startupTimers) window.clearTimeout(timer)
 })
 </script>
 
@@ -160,6 +182,9 @@ onMounted(async () => {
       @set-schedule-enabled="setScheduleEnabled"
       @set-missed-policy="setMissedPolicy"
       @set-schedule-cron="setScheduleCron"
+      @set-startup="setStartup"
+      @set-restart="setRestart"
+      @set-retry="setRetry"
       @choose-working-directory="chooseWorkingDirectory"
       @show-window="showAppWindow"
       @open-log="openExistingLogDialog"

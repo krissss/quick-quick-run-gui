@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { useSettings } from '@/composables/useSettings'
-import type { AppItem } from '@/lib/store'
+import { normalizeApp, type AppItem } from '@/lib/store'
 import { setupTauriMocks } from '../../helpers/tauri'
 
-const importedApp: AppItem = {
+const importedApp: AppItem = normalizeApp({
   id: 'imported',
   name: 'Imported',
   type: 'service',
@@ -21,7 +21,7 @@ const importedApp: AppItem = {
     timezone: 'Asia/Shanghai',
     missedPolicy: 'skip',
   },
-}
+})
 
 function makeSettings(options: Parameters<typeof setupTauriMocks>[0] = {}) {
   const mock = setupTauriMocks(options)

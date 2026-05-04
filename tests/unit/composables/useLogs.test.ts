@@ -3,10 +3,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useLogs } from '@/composables/useLogs'
-import type { AppItem } from '@/lib/store'
+import { normalizeApp, type AppItem } from '@/lib/store'
 import { setupTauriMocks } from '../../helpers/tauri'
 
-const app: AppItem = {
+const app: AppItem = normalizeApp({
   id: 'app-1',
   name: 'Web App',
   type: 'web',
@@ -23,7 +23,7 @@ const app: AppItem = {
     timezone: 'Asia/Shanghai',
     missedPolicy: 'skip',
   },
-}
+})
 
 function mountLogs() {
   let api!: ReturnType<typeof useLogs>

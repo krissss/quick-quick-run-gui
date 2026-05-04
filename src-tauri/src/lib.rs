@@ -154,11 +154,13 @@ async fn launch_app_window(
     height: f64,
     app_name: String,
     item_type: Option<ItemType>,
+    launch_trigger: Option<RunTrigger>,
     bg_r: u8,
     bg_g: u8,
     bg_b: u8,
 ) -> Result<LaunchResult, String> {
     let item_type = item_type.unwrap_or_default();
+    let launch_trigger = launch_trigger.unwrap_or(RunTrigger::Manual);
     if item_type == ItemType::Service || item_type == ItemType::Task {
         return launch_command_item(
             &app,
@@ -167,7 +169,7 @@ async fn launch_app_window(
             app_name,
             command,
             working_directory,
-            RunTrigger::Manual,
+            launch_trigger,
         );
     }
 
@@ -258,7 +260,7 @@ async fn launch_app_window(
             started_at,
             finished_at: None,
             log_path: log_path.to_string_lossy().to_string(),
-            trigger: RunTrigger::Manual,
+            trigger: launch_trigger,
         },
     );
     persist_session(

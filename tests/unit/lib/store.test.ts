@@ -47,6 +47,21 @@ describe('store helpers', () => {
         timezone: 'Asia/Shanghai',
         missedPolicy: 'skip',
       },
+      startup: {
+        enabled: false,
+        delaySeconds: 0,
+      },
+      restart: {
+        enabled: false,
+        mode: 'on-failure',
+        maxAttempts: 3,
+        delaySeconds: 3,
+      },
+      retry: {
+        enabled: false,
+        maxAttempts: 2,
+        delaySeconds: 3,
+      },
     })
   })
 

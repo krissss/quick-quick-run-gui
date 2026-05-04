@@ -153,7 +153,7 @@ test('shows a validation error for invalid custom task cron', async ({ page }) =
   await page.goto('/')
   await page.getByText('任务', { exact: true }).click()
   await page.getByPlaceholder('pnpm report').fill('pnpm report')
-  await page.getByRole('switch').click()
+  await page.getByRole('switch', { name: '定时执行' }).click()
   await page.getByText('自定义', { exact: true }).click()
   await page.getByPlaceholder('*/15 * * * *').fill('abc')
   await page.getByRole('button', { name: '添加', exact: true }).click()
@@ -167,7 +167,7 @@ test('persists menu bar mode from settings', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: '设置' }).click()
   await expect(page.getByText('菜单栏模式')).toBeVisible()
-  await page.getByRole('switch').nth(1).click()
+  await page.getByRole('switch', { name: '菜单栏模式' }).click()
 
   await expect.poll(async () => page.evaluate(() => {
     return window.__qqrTest.storeData.hide_dock_on_close

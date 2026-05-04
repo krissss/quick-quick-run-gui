@@ -24,6 +24,8 @@ describe('AppDetailForm', () => {
     const wrapper = mountDetail()
 
     expect(wrapper.text()).toContain('PID 4321')
+    expect(wrapper.get('button[aria-label="查看类型目标说明"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('类型目标')
     await buttonContaining(wrapper, '窗口').trigger('click')
     await buttonContaining(wrapper, '日志').trigger('click')
     await buttonContaining(wrapper, '停止').trigger('click')

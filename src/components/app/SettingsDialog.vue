@@ -36,7 +36,7 @@ defineEmits<{
               <div class="text-sm font-medium">开机自启动</div>
               <div class="text-xs text-muted-foreground mt-0.5">登录时自动启动应用</div>
             </div>
-            <Switch :model-value="autostartEnabled" @update:model-value="$emit('toggleAutostart', $event)" />
+            <Switch aria-label="开机自启动" :model-value="autostartEnabled" @update:model-value="$emit('toggleAutostart', $event)" />
           </div>
 
           <div class="h-px shadow-[0_-1px_0_0_var(--border)]" />
@@ -46,7 +46,7 @@ defineEmits<{
               <div class="text-sm font-medium">菜单栏模式</div>
               <div class="text-xs text-muted-foreground mt-0.5">关闭主窗口时隐藏 Dock 图标</div>
             </div>
-            <Switch :model-value="hideDockOnClose" @update:model-value="$emit('toggleHideDockOnClose', $event)" />
+            <Switch aria-label="菜单栏模式" :model-value="hideDockOnClose" @update:model-value="$emit('toggleHideDockOnClose', $event)" />
           </div>
 
           <div class="h-px shadow-[0_-1px_0_0_var(--border)]" />

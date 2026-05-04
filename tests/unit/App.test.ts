@@ -74,6 +74,48 @@ describe('App', () => {
     ])
   })
 
+  it('launches startup-enabled apps after the configured delay', async () => {
+    vi.useFakeTimers()
+    const startupWeb = {
+      ...webApp,
+      startup: { enabled: true, delaySeconds: 1 },
+    }
+    const { mock, wrapper } = await mountApp({
+      store: { apps: [startupWeb] },
+      runningApps: [],
+    })
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      appId: 'web-1',
+      launchTrigger: 'startup',
+    })
+    wrapper.unmount()
+  })
+
+  it('does not launch startup apps when startup is disabled before the delay finishes', async () => {
+    vi.useFakeTimers()
+    const startupWeb = {
+      ...webApp,
+      startup: { enabled: true, delaySeconds: 1 },
+    }
+    const { mock, wrapper } = await mountApp({
+      store: { apps: [startupWeb] },
+      runningApps: [],
+    })
+
+    await wrapper.find('[role="switch"]').trigger('click')
+    await buttonContaining(wrapper, '保存', true).trigger('click')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
   it('creates parameter profiles from the run dialog and launches with selected values', async () => {
     const { mock, wrapper } = await mountApp({
       store: { apps: [webApp] },
@@ -87,7 +129,7 @@ describe('App', () => {
     await buttonContaining(wrapper, '启动', true).trigger('click')
     await flushPromises()
     await inputByPlaceholder(wrapper, '账号').setValue('demo')
-    const headlessSwitch = document.querySelector('[role="switch"]')
+    const headlessSwitch = Array.from(document.querySelectorAll('[role="switch"]')).at(-1)
     expect(headlessSwitch).toBeTruthy()
     await new DOMWrapper(headlessSwitch as Element).trigger('click')
     await inputByPlaceholder(wrapper, '保存为方案名称').setValue('账号 1')
@@ -126,7 +168,7 @@ describe('App', () => {
     await buttonContaining(wrapper, '任务', true).trigger('click')
     await inputByPlaceholder(wrapper, 'pnpm report').setValue('pnpm report')
     await inputByPlaceholder(wrapper, '~/repo').setValue('/Users/kriss/reports')
-    await wrapper.get('[role="switch"]').trigger('click')
+    await wrapper.findAll('[role="switch"]')[1].trigger('click')
     await buttonContaining(wrapper, '自定义', true).trigger('click')
     await inputByPlaceholder(wrapper, '*/15 * * * *').setValue('bad')
     await buttonContaining(wrapper, '添加', true).trigger('click')
@@ -157,8 +199,8 @@ describe('App', () => {
 
     await buttonContaining(wrapper, '设置').trigger('click')
     const switches = Array.from(document.querySelectorAll('[role="switch"]')).map((item) => new DOMWrapper(item as HTMLElement))
-    await switches[0].trigger('click')
-    await switches[1].trigger('click')
+    await switches.at(-2)?.trigger('click')
+    await switches.at(-1)?.trigger('click')
     await buttonContaining(wrapper, '导出').trigger('click')
     await buttonContaining(wrapper, '导入').trigger('click')
     await flushPromises()

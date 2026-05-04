@@ -21,7 +21,20 @@ export interface RunRecord {
   started_at: number
   finished_at: number | null
   log_path: string
-  trigger: 'manual' | 'schedule' | 'startup-recover'
+  trigger: LaunchTrigger | 'schedule' | 'startup-recover'
+}
+
+export type LaunchTrigger = 'manual' | 'startup' | 'auto-restart' | 'retry'
+
+interface RunUpdatedPayload {
+  app_id: string
+  run_id: string
+  status: RunRecord['status']
+}
+
+interface LaunchOptions {
+  trigger?: LaunchTrigger
+  openLog?: boolean
 }
 
 export function useLauncher(
@@ -33,6 +46,7 @@ export function useLauncher(
   const runningAppIds = ref<Set<string>>(new Set())
   const runningPids = ref<Map<string, number>>(new Map())
   const latestRuns = ref<Map<string, RunRecord>>(new Map())
+  const automationAttempts = new Map<string, number>()
 
   async function refreshRunningApps() {
     try {
@@ -59,7 +73,19 @@ export function useLauncher(
     return [255, 255, 255]
   }
 
-  async function launchApp(app: AppItem) {
+  function automationKey(kind: 'restart' | 'retry', appId: string) {
+    return `${kind}:${appId}`
+  }
+
+  function resetAutomationAttempts(appId: string) {
+    automationAttempts.delete(automationKey('restart', appId))
+    automationAttempts.delete(automationKey('retry', appId))
+  }
+
+  async function launchApp(app: AppItem, options: LaunchOptions = {}) {
+    const trigger = options.trigger || 'manual'
+    const openLog = options.openLog ?? true
+    if (trigger === 'manual') resetAutomationAttempts(app.id)
     loading.value = true
     try {
       const launchTarget = resolveAppProfile(app)
@@ -73,6 +99,7 @@ export function useLauncher(
         height: launchTarget.height,
         appName: launchTarget.name,
         itemType: launchTarget.type || 'web',
+        launchTrigger: trigger,
         bgR,
         bgG,
         bgB,
@@ -92,7 +119,7 @@ export function useLauncher(
       const s = new Set(runningAppIds.value)
       s.add(launchTarget.id)
       runningAppIds.value = s
-      if (launchTarget.command.trim()) {
+      if (openLog && launchTarget.command.trim()) {
         openLogDialog(launchTarget)
       }
       await refreshRunningApps()
@@ -100,6 +127,60 @@ export function useLauncher(
       showMessage(`启动失败: ${getErrorMessage(e)}`, 'error')
     }
     loading.value = false
+  }
+
+  function shouldRestart(app: AppItem, status: RunRecord['status']) {
+    if (app.type !== 'service' || !app.restart.enabled) return false
+    if (status === 'killed') return false
+    if (app.restart.mode === 'always') return ['success', 'failed', 'lost'].includes(status)
+    return ['failed', 'lost'].includes(status)
+  }
+
+  function shouldRetry(app: AppItem, status: RunRecord['status']) {
+    return app.type === 'task'
+      && app.retry.enabled
+      && ['failed', 'lost'].includes(status)
+  }
+
+  function scheduleAutomatedLaunch(
+    app: AppItem,
+    kind: 'restart' | 'retry',
+    trigger: LaunchTrigger,
+    maxAttempts: number,
+    delaySeconds: number,
+  ) {
+    const key = automationKey(kind, app.id)
+    const nextAttempt = (automationAttempts.get(key) || 0) + 1
+    if (nextAttempt > maxAttempts) {
+      showMessage(kind === 'restart' ? '重启次数已达上限' : '重试次数已达上限', 'error')
+      return
+    }
+    automationAttempts.set(key, nextAttempt)
+    window.setTimeout(async () => {
+      await refreshRunningApps()
+      const currentApp = apps.value.find(item => item.id === app.id)
+      if (!currentApp || runningAppIds.value.has(currentApp.id)) return
+      if (kind === 'restart' && !currentApp.restart.enabled) return
+      if (kind === 'retry' && !currentApp.retry.enabled) return
+      await launchApp(currentApp, { trigger, openLog: false })
+    }, Math.max(0, delaySeconds) * 1000)
+  }
+
+  async function handleRunUpdated(payload: RunUpdatedPayload) {
+    if (payload.status === 'running') return
+    const app = apps.value.find(item => item.id === payload.app_id)
+    if (!app) return
+    if (shouldRestart(app, payload.status)) {
+      scheduleAutomatedLaunch(app, 'restart', 'auto-restart', app.restart.maxAttempts, app.restart.delaySeconds)
+      return
+    }
+    if (shouldRetry(app, payload.status)) {
+      scheduleAutomatedLaunch(app, 'retry', 'retry', app.retry.maxAttempts, app.retry.delaySeconds)
+      return
+    }
+    if (payload.status === 'success' || payload.status === 'killed') {
+      resetAutomationAttempts(app.id)
+    }
   }
 
   // 事件监听
@@ -128,8 +209,9 @@ export function useLauncher(
         runningPids.value = m
         refreshRunningApps()
       }),
-      await listen<{ app_id: string }>('app-run-updated', () => {
-        refreshRunningApps()
+      await listen<RunUpdatedPayload>('app-run-updated', async (e) => {
+        await refreshRunningApps()
+        await handleRunUpdated(e.payload)
       }),
       await listen<string>('tray-launch-app', async (e) => {
         const app = apps.value.find(a => a.id === e.payload)

@@ -33,10 +33,14 @@ export interface AppItem {
   profiles: AppProfile[]
   activeProfileId: string
   schedule: ScheduleConfig
+  startup: StartupConfig
+  restart: RestartConfig
+  retry: RetryConfig
 }
 
 export type AppType = 'web' | 'service' | 'task'
 export type MissedPolicy = 'skip' | 'run-once'
+export type RestartMode = 'on-failure' | 'always'
 export type CommandParamType = 'text' | 'bool'
 export type CommandParamKind = 'option' | 'argument'
 
@@ -62,6 +66,24 @@ export interface ScheduleConfig {
   lastRunAt?: number
 }
 
+export interface StartupConfig {
+  enabled: boolean
+  delaySeconds: number
+}
+
+export interface RestartConfig {
+  enabled: boolean
+  mode: RestartMode
+  maxAttempts: number
+  delaySeconds: number
+}
+
+export interface RetryConfig {
+  enabled: boolean
+  maxAttempts: number
+  delaySeconds: number
+}
+
 export function defaultSchedule(): ScheduleConfig {
   return {
     enabled: false,
@@ -70,6 +92,38 @@ export function defaultSchedule(): ScheduleConfig {
     missedPolicy: 'skip',
     lastRunAt: Date.now(),
   }
+}
+
+export function defaultStartup(): StartupConfig {
+  return {
+    enabled: false,
+    delaySeconds: 0,
+  }
+}
+
+export function defaultRestart(): RestartConfig {
+  return {
+    enabled: false,
+    mode: 'on-failure',
+    maxAttempts: 3,
+    delaySeconds: 3,
+  }
+}
+
+export function defaultRetry(): RetryConfig {
+  return {
+    enabled: false,
+    maxAttempts: 2,
+    delaySeconds: 3,
+  }
+}
+
+function nonNegativeNumber(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback
+}
+
+function positiveNumber(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 function normalizeProfiles(profiles: Partial<AppProfile>[] | undefined): AppProfile[] {
@@ -98,6 +152,9 @@ export function normalizeApp(app: Partial<AppItem>): AppItem {
   const order = typeof app.order === 'number' && Number.isFinite(app.order) ? app.order : undefined
   const profiles = normalizeProfiles(Array.isArray(app.profiles) ? app.profiles.filter(isAppProfile) : undefined)
   const activeProfileId = profiles.some(profile => profile.id === app.activeProfileId) ? app.activeProfileId || '' : ''
+  const startup = { ...defaultStartup(), ...(app.startup || {}) }
+  const restart = { ...defaultRestart(), ...(app.restart || {}) }
+  const retry = { ...defaultRetry(), ...(app.retry || {}) }
   return {
     id: app.id || '',
     name: app.name || '',
@@ -115,6 +172,21 @@ export function normalizeApp(app: Partial<AppItem>): AppItem {
       ...(app.schedule || {}),
       missedPolicy: app.schedule?.missedPolicy || 'skip',
       timezone: app.schedule?.timezone || 'Asia/Shanghai',
+    },
+    startup: {
+      enabled: !!startup.enabled,
+      delaySeconds: nonNegativeNumber(startup.delaySeconds, 0),
+    },
+    restart: {
+      enabled: !!restart.enabled,
+      mode: restart.mode === 'always' ? 'always' : 'on-failure',
+      maxAttempts: positiveNumber(restart.maxAttempts, 3),
+      delaySeconds: nonNegativeNumber(restart.delaySeconds, 3),
+    },
+    retry: {
+      enabled: !!retry.enabled,
+      maxAttempts: positiveNumber(retry.maxAttempts, 2),
+      delaySeconds: nonNegativeNumber(retry.delaySeconds, 3),
     },
   }
 }

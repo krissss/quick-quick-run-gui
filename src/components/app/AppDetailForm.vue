@@ -1,20 +1,15 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Switch } from '@/components/ui/switch'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import CommandTemplateTooltip from '@/components/command/CommandTemplateTooltip.vue'
-import CronSchedulePicker from '@/components/schedule/CronSchedulePicker.vue'
+import AppCapabilityStack from '@/components/app/capabilities/AppCapabilityStack.vue'
 import {
   iconGradient,
   itemTypeLabel,
   primaryActionLabel,
   runStatusClass,
   runStatusLabel,
-  schedulePolicyLabel,
   statusDotClass,
 } from '@/lib/appDisplay'
-import type { AppItem, AppType, MissedPolicy } from '@/lib/store'
+import type { AppItem, AppType, MissedPolicy, RestartConfig, RetryConfig, StartupConfig } from '@/lib/store'
 import type { RunRecord } from '@/composables/useLauncher'
 
 const editForm = defineModel<AppItem>({ required: true })
@@ -35,27 +30,14 @@ const emit = defineEmits<{
   setScheduleEnabled: [enabled: boolean]
   setMissedPolicy: [missedPolicy: MissedPolicy]
   setScheduleCron: [cron: string]
+  setStartup: [startup: StartupConfig]
+  setRestart: [restart: RestartConfig]
+  setRetry: [retry: RetryConfig]
   chooseWorkingDirectory: []
   showWindow: [appId: string]
   openLog: [app: AppItem]
   stop: [appId: string]
 }>()
-
-function namePlaceholder() {
-  const command = editForm.value.command.trim()
-  if (command) return command
-  const url = editForm.value.url.trim()
-  if (editForm.value.type === 'web' && url) return url
-  return editForm.value.type === 'web' ? '默认使用启动命令或 URL' : '默认使用执行命令'
-}
-
-function updateType(value: string | string[]) {
-  if (typeof value === 'string' && value) emit('setType', value as AppType)
-}
-
-function updateMissedPolicy(value: string | string[]) {
-  if (typeof value === 'string' && value) emit('setMissedPolicy', value as MissedPolicy)
-}
 </script>
 
 <template>
@@ -101,111 +83,17 @@ function updateMissedPolicy(value: string | string[]) {
       </div>
 
       <div class="rounded-lg bg-card p-4 space-y-4" style="box-shadow: var(--shadow-card)">
-        <div class="grid gap-4 sm:grid-cols-[180px_minmax(0,1fr)]">
-        <div class="space-y-1.5">
-          <label class="text-xs font-medium text-muted-foreground">类型</label>
-          <ToggleGroup
-            class="grid w-full grid-cols-3 gap-1"
-            :model-value="editForm.type"
-            type="single"
-            @update:model-value="updateType"
-          >
-            <ToggleGroupItem value="web">
-              网页
-            </ToggleGroupItem>
-            <ToggleGroupItem value="service">
-              服务
-            </ToggleGroupItem>
-            <ToggleGroupItem value="task">
-              任务
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </div>
-
-        <div v-if="editForm.type === 'web'" class="space-y-1.5">
-          <label class="text-xs font-medium text-muted-foreground">目标 URL</label>
-          <Input v-model="editForm.url" placeholder="http://localhost:3000" />
-        </div>
-        </div>
-        <div class="space-y-1.5">
-          <label class="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-            <span>{{ editForm.type === 'task' ? '执行命令' : '启动命令' }}</span>
-            <span v-if="editForm.type === 'web'" class="font-normal opacity-40">(可选)</span>
-            <CommandTemplateTooltip />
-          </label>
-          <Input v-model="editForm.command" :placeholder="editForm.type === 'task' ? 'pnpm report' : 'npm run dev'" />
-        </div>
-        <div class="space-y-1.5">
-          <label class="text-xs font-medium text-muted-foreground">
-            工作目录
-            <span class="font-normal opacity-40">(可选)</span>
-          </label>
-          <div class="flex rounded-md shadow-[var(--shadow-border)] focus-within:shadow-[inset_0_0_0_1px_var(--ring)]">
-            <Input v-model="editForm.workingDirectory" class="min-w-0 flex-1 rounded-r-none shadow-none focus-visible:shadow-none" placeholder="~/repo" />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              class="shrink-0 rounded-l-none shadow-[inset_1px_0_0_0_var(--border)]"
-              title="选择工作目录"
-              aria-label="选择工作目录"
-              @click="$emit('chooseWorkingDirectory')"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
-              </svg>
-            </Button>
-          </div>
-        </div>
-        <div v-if="editForm.type === 'task'" class="space-y-3 rounded-md bg-secondary/60 p-3" style="box-shadow: var(--shadow-border)">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <div class="text-sm font-medium">定时执行</div>
-              <div class="text-xs text-muted-foreground mt-0.5">运行期间按 cron 触发</div>
-            </div>
-            <Switch :model-value="editForm.schedule.enabled" @update:model-value="$emit('setScheduleEnabled', $event)" />
-          </div>
-          <div v-if="editForm.schedule.enabled" class="space-y-3">
-            <CronSchedulePicker
-              :model-value="editForm.schedule.cron"
-              @update:model-value="$emit('setScheduleCron', $event)"
-            />
-            <div class="space-y-1.5">
-              <label class="text-xs font-medium text-muted-foreground">错过执行</label>
-              <ToggleGroup
-                class="grid w-full grid-cols-2 gap-1"
-                :model-value="editForm.schedule.missedPolicy"
-                type="single"
-                aria-label="错过执行方式"
-                @update:model-value="updateMissedPolicy"
-              >
-                <ToggleGroupItem value="skip">
-                  {{ schedulePolicyLabel('skip') }}
-                </ToggleGroupItem>
-                <ToggleGroupItem value="run-once">
-                  {{ schedulePolicyLabel('run-once') }}
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </div>
-          </div>
-        </div>
-        <div class="space-y-1.5">
-          <label class="text-xs font-medium text-muted-foreground">
-            名称
-            <span class="font-normal opacity-40">(可选)</span>
-          </label>
-          <Input v-model="editForm.name" :placeholder="namePlaceholder()" />
-        </div>
-        <div v-if="editForm.type === 'web'" class="grid grid-cols-2 gap-4">
-          <div class="flex-1 space-y-1.5">
-            <label class="text-xs font-medium text-muted-foreground">宽度</label>
-            <Input v-model.number="editForm.width" type="number" />
-          </div>
-          <div class="flex-1 space-y-1.5">
-            <label class="text-xs font-medium text-muted-foreground">高度</label>
-            <Input v-model.number="editForm.height" type="number" />
-          </div>
-        </div>
+        <AppCapabilityStack
+          v-model="editForm"
+          @set-type="$emit('setType', $event)"
+          @set-schedule-enabled="$emit('setScheduleEnabled', $event)"
+          @set-schedule-cron="$emit('setScheduleCron', $event)"
+          @set-missed-policy="$emit('setMissedPolicy', $event)"
+          @set-startup="$emit('setStartup', $event)"
+          @set-restart="$emit('setRestart', $event)"
+          @set-retry="$emit('setRetry', $event)"
+          @choose-working-directory="$emit('chooseWorkingDirectory')"
+        />
       </div>
 
       <div class="flex gap-2 rounded-lg bg-card p-3" style="box-shadow: var(--shadow-card)">

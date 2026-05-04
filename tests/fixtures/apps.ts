@@ -8,6 +8,24 @@ export const baseSchedule = {
   missedPolicy: 'skip' as const,
 }
 
+export const baseStartup = {
+  enabled: false,
+  delaySeconds: 0,
+}
+
+export const baseRestart = {
+  enabled: false,
+  mode: 'on-failure' as const,
+  maxAttempts: 3,
+  delaySeconds: 3,
+}
+
+export const baseRetry = {
+  enabled: false,
+  maxAttempts: 2,
+  delaySeconds: 3,
+}
+
 export const webApp: AppItem = {
   id: 'web-1',
   name: 'qwenpaw',
@@ -20,6 +38,9 @@ export const webApp: AppItem = {
   profiles: [],
   activeProfileId: '',
   schedule: baseSchedule,
+  startup: baseStartup,
+  restart: baseRestart,
+  retry: baseRetry,
 }
 
 export const serviceApp: AppItem = {
@@ -34,6 +55,9 @@ export const serviceApp: AppItem = {
   profiles: [],
   activeProfileId: '',
   schedule: baseSchedule,
+  startup: baseStartup,
+  restart: baseRestart,
+  retry: baseRetry,
 }
 
 export const taskApp: AppItem = {
@@ -48,6 +72,9 @@ export const taskApp: AppItem = {
   profiles: [],
   activeProfileId: '',
   schedule: { ...baseSchedule, enabled: true, cron: '0 9 * * *', missedPolicy: 'run-once' },
+  startup: baseStartup,
+  restart: baseRestart,
+  retry: baseRetry,
 }
 
 export const serviceFailedRun: RunRecord = {
