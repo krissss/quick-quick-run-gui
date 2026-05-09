@@ -147,6 +147,8 @@ jobs:
   build:
     needs: test
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -208,11 +210,53 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
+      - name: Resolve release version
+        id: release-version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog notes
+        id: changelog
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('node:fs')
+            const version = process.env.GITHUB_REF_NAME.replace(/^v/, '')
+            let notes = `See CHANGELOG.md for ${process.env.GITHUB_REF_NAME}.`
+
+            if (fs.existsSync('CHANGELOG.md')) {
+              const changelog = fs.readFileSync('CHANGELOG.md', 'utf8')
+              const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+              const heading = new RegExp(`^##\\s+\\[?v?${escaped}\\]?.*$`, 'm').exec(changelog)
+
+              if (heading) {
+                const start = heading.index + heading[0].length
+                const rest = changelog.slice(start)
+                const nextHeading = rest.search(/^##\s+/m)
+                const linkRefs = rest.search(/^\[[^\]]+\]:\s+/m)
+                const candidates = [nextHeading, linkRefs].filter(index => index >= 0)
+                const end = candidates.length > 0 ? Math.min(...candidates) : rest.length
+                const extracted = rest.slice(0, end).trim()
+                if (extracted) notes = extracted
+              }
+            }
+
+            core.setOutput('notes', notes)
+
       - name: Build the app
         uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tauriScript: pnpm tauri
           args: ${{ matrix.args }}
+          appVersion: ${{ steps.release-version.outputs.version }}
+          tagName: ${{ github.ref_name }}
+          releaseBody: ${{ steps.changelog.outputs.notes }}
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -224,27 +268,13 @@ jobs:
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.deb
             src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.tar.gz
+            src-tauri/target/release/bundle/**/*.sig
             src-tauri/target/**/release/bundle/**/*.dmg
             src-tauri/target/**/release/bundle/**/*.msi
             src-tauri/target/**/release/bundle/**/*.exe
             src-tauri/target/**/release/bundle/**/*.deb
             src-tauri/target/**/release/bundle/**/*.AppImage
+            src-tauri/target/**/release/bundle/**/*.tar.gz
+            src-tauri/target/**/release/bundle/**/*.sig
           if-no-files-found: error
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/**
-          generate_release_notes: true

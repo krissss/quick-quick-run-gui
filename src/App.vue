@@ -71,6 +71,7 @@ const {
   autostartEnabled,
   hideDockOnClose,
   logRetentionLimit,
+  checkingForUpdates,
   themeIcon,
   themeLabel,
   toggleTheme,
@@ -79,6 +80,7 @@ const {
   toggleHideDockOnClose,
   updateLogRetentionLimit,
   closeSettingsDialog,
+  checkForUpdates,
   handleExport,
   handleImport,
 } = useSettings(apps, showMessage)
@@ -238,12 +240,14 @@ onUnmounted(() => {
       :autostart-enabled="autostartEnabled"
       :hide-dock-on-close="hideDockOnClose"
       :log-retention-limit="logRetentionLimit"
+      :checking-for-updates="checkingForUpdates"
       :theme-icon="themeIcon"
       :theme-label="themeLabel"
       @close="closeSettingsDialog"
       @toggle-autostart="toggleAutostart"
       @toggle-hide-dock-on-close="toggleHideDockOnClose"
       @update-log-retention-limit="updateLogRetentionLimit"
+      @check-updates="checkForUpdates"
       @toggle-theme="toggleTheme"
       @import-data="handleImport"
       @export-data="handleExport"

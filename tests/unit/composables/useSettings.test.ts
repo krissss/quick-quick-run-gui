@@ -99,6 +99,30 @@ describe('useSettings', () => {
     expect(messages.at(-1)).toEqual({ text: '已导入 1 个应用', type: 'success' })
   })
 
+  it('checks, installs, and relaunches when an update is available', async () => {
+    const { messages, mock, settings } = makeSettings({
+      update: { rid: 7, version: '0.2.0', currentVersion: '0.1.0' },
+    })
+
+    await settings.checkForUpdates()
+
+    expect(mock.getCalls('plugin:updater|check')).toHaveLength(1)
+    expect(mock.getCalls('plugin:updater|download_and_install')[0].payload).toMatchObject({ rid: 7 })
+    expect(mock.getCalls('plugin:process|restart')).toHaveLength(1)
+    expect(messages).toEqual([
+      { text: '发现新版本 0.2.0，正在下载并安装', type: 'info' },
+      { text: '更新已安装，正在重启应用', type: 'success' },
+    ])
+  })
+
+  it('reports when no update is available', async () => {
+    const { messages, settings } = makeSettings({ update: null })
+
+    await settings.checkForUpdates()
+
+    expect(messages.at(-1)).toEqual({ text: '当前已是最新版本', type: 'info' })
+  })
+
   it('handles cancellation and plugin failures without mutating state unexpectedly', async () => {
     const cancelled = makeSettings({ dialogSavePath: null, dialogOpenPath: null })
     await cancelled.settings.handleExport()
@@ -112,6 +136,7 @@ describe('useSettings', () => {
         'plugin:autostart|enable': new Error('enable failed'),
         'plugin:dialog|save': new Error('save failed'),
         'plugin:dialog|open': new Error('open failed'),
+        'plugin:updater|check': new Error('network failed'),
       },
     })
 
@@ -123,8 +148,10 @@ describe('useSettings', () => {
     await failing.settings.updateLogRetentionLimit(30)
     await failing.settings.handleExport()
     await failing.settings.handleImport()
+    await failing.settings.checkForUpdates()
 
-    expect(failing.messages.map((item) => item.type)).toEqual(['error', 'error', 'error'])
+    expect(failing.messages.map((item) => item.type)).toEqual(['error', 'error', 'error', 'error'])
+    expect(failing.messages.at(-1)).toEqual({ text: '检查更新失败: network failed', type: 'error' })
   })
 
   it('reports dock preference save failures', async () => {

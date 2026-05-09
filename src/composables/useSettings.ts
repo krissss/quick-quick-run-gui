@@ -5,6 +5,8 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import { writeFile, readTextFile } from '@tauri-apps/plugin-fs'
 import { invoke } from '@tauri-apps/api/core'
+import { relaunch } from '@tauri-apps/plugin-process'
+import { check } from '@tauri-apps/plugin-updater'
 import {
   DEFAULT_LOG_RETENTION_LIMIT,
   exportData,
@@ -25,6 +27,7 @@ export function useSettings(
   const autostartEnabled = ref(false)
   const hideDockOnClose = ref(false)
   const logRetentionLimit = ref(DEFAULT_LOG_RETENTION_LIMIT)
+  const checkingForUpdates = ref(false)
 
   // 主题
   const currentTheme = ref<Theme>(getTheme())
@@ -92,6 +95,27 @@ export function useSettings(
     showSettingsDialog.value = false
   }
 
+  async function checkForUpdates() {
+    if (checkingForUpdates.value) return
+    checkingForUpdates.value = true
+    try {
+      const update = await check()
+      if (!update) {
+        showMessage('当前已是最新版本', 'info')
+        return
+      }
+
+      showMessage(`发现新版本 ${update.version}，正在下载并安装`, 'info')
+      await update.downloadAndInstall()
+      showMessage('更新已安装，正在重启应用', 'success')
+      await relaunch()
+    } catch (e: unknown) {
+      showMessage(`检查更新失败: ${getErrorMessage(e)}`, 'error')
+    } finally {
+      checkingForUpdates.value = false
+    }
+  }
+
   // 导入/导出
   async function handleExport() {
     try {
@@ -126,9 +150,10 @@ export function useSettings(
   }
 
   return {
-    showSettingsDialog, autostartEnabled, hideDockOnClose, logRetentionLimit,
+    showSettingsDialog, autostartEnabled, hideDockOnClose, logRetentionLimit, checkingForUpdates,
     currentTheme, themeIcon, themeLabel, toggleTheme,
     openSettingsDialog, toggleAutostart, toggleHideDockOnClose, updateLogRetentionLimit, closeSettingsDialog,
+    checkForUpdates,
     handleExport, handleImport,
   }
 }

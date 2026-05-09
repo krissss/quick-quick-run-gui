@@ -17,6 +17,7 @@ QQRun keeps common local run targets in one desktop control panel: web apps that
 - **Parameter profiles**: save reusable values for command templates.
 - **Lifecycle controls**: delayed launch, startup recovery, retry, and restart policies.
 - **Configuration management**: import, export, and back up run target configurations.
+- **Auto update**: check, download, and install new versions from GitHub Releases.
 - **macOS integration**: menu bar, Dock behavior, and tray shortcuts.
 
 ## Tech Stack
@@ -48,6 +49,10 @@ pnpm run build    # Type-check and build the frontend
 pnpm test         # Run tests
 pnpm tauri:build  # Build the desktop app
 ```
+
+## Release
+
+Tags starting with `v` trigger GitHub Actions to build desktop installers, sign updater artifacts, and publish `latest.json`. Before the first release, configure `TAURI_SIGNING_PRIVATE_KEY` in GitHub Secrets; if the signing key has a password, also configure `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 ## Project Structure
 

@@ -11,6 +11,7 @@ function mountSettingsDialog() {
       autostartEnabled: false,
       hideDockOnClose: false,
       logRetentionLimit: 20,
+      checkingForUpdates: false,
       themeIcon: 'system',
       themeLabel: '跟随系统',
     },
@@ -24,6 +25,7 @@ describe('SettingsDialog', () => {
     expect(document.body.textContent).toContain('开机自启动')
     expect(document.body.textContent).toContain('菜单栏模式')
     expect(document.body.textContent).toContain('日志保留')
+    expect(document.body.textContent).toContain('软件更新')
 
     const switches = Array.from(document.querySelectorAll('[role="switch"]')).map((item) => new DOMWrapper(item as HTMLElement))
     await switches[0].trigger('click')
@@ -34,6 +36,7 @@ describe('SettingsDialog', () => {
     const themeButton = document.querySelector('button[aria-label="切换主题"]')
     if (!themeButton) throw new Error('Theme button not found')
     await new DOMWrapper(themeButton as HTMLElement).trigger('click')
+    await buttonContaining(wrapper, '检查更新').trigger('click')
     await buttonContaining(wrapper, '导出').trigger('click')
     await buttonContaining(wrapper, '导入').trigger('click')
     await buttonContaining(wrapper, '关闭').trigger('click')
@@ -42,6 +45,7 @@ describe('SettingsDialog', () => {
     expect(wrapper.emitted('toggleHideDockOnClose')).toEqual([[true]])
     expect(wrapper.emitted('updateLogRetentionLimit')).toEqual([[30]])
     expect(wrapper.emitted('toggleTheme')).toHaveLength(1)
+    expect(wrapper.emitted('checkUpdates')).toHaveLength(1)
     expect(wrapper.emitted('exportData')).toHaveLength(1)
     expect(wrapper.emitted('importData')).toHaveLength(1)
     expect(wrapper.emitted('close')).toHaveLength(1)

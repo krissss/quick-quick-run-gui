@@ -19,6 +19,7 @@ interface MockOptions {
   files?: Record<string, string>
   autostartEnabled?: boolean
   launchResult?: { message: string; pid: number | null; run_id: string | null }
+  update?: null | { rid?: number; version: string; currentVersion?: string; date?: string; body?: string; rawJson?: Record<string, unknown> }
   rejectCommands?: Record<string, unknown>
 }
 
@@ -84,6 +85,20 @@ export function setupTauriMocks(options: MockOptions = {}) {
       autostartEnabled = false
       return null
     }
+
+    if (cmd === 'plugin:updater|check') {
+      if (!options.update) return null
+      return {
+        rid: options.update.rid ?? 1,
+        currentVersion: options.update.currentVersion ?? '0.1.0',
+        version: options.update.version,
+        date: options.update.date,
+        body: options.update.body,
+        rawJson: options.update.rawJson ?? {},
+      }
+    }
+    if (cmd === 'plugin:updater|download_and_install') return null
+    if (cmd === 'plugin:process|restart') return null
 
     if (cmd === 'plugin:dialog|save') return options.dialogSavePath ?? null
     if (cmd === 'plugin:dialog|open') return options.dialogOpenPath ?? null

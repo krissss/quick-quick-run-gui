@@ -21,6 +21,8 @@
     "fs:default",
     "fs:allow-write-file",
     "fs:allow-read-text-file",
+    "process:default",
+    "updater:default",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"

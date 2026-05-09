@@ -8,6 +8,7 @@ defineProps<{
   autostartEnabled: boolean
   hideDockOnClose: boolean
   logRetentionLimit: number
+  checkingForUpdates: boolean
   themeIcon: 'light' | 'dark' | 'system'
   themeLabel: string
 }>()
@@ -17,6 +18,7 @@ defineEmits<{
   toggleAutostart: [enabled: boolean]
   toggleHideDockOnClose: [enabled: boolean]
   updateLogRetentionLimit: [limit: number]
+  checkUpdates: []
   toggleTheme: []
   importData: []
   exportData: []
@@ -137,6 +139,24 @@ defineEmits<{
                 <path d="M8 21h8" />
                 <path d="M12 17v4" />
               </svg>
+            </Button>
+          </div>
+
+          <div class="h-px shadow-[0_-1px_0_0_var(--border)]" />
+
+          <div class="flex items-center justify-between gap-4 py-3">
+            <div>
+              <div class="text-sm font-medium">软件更新</div>
+              <div class="text-xs text-muted-foreground mt-0.5">检查 GitHub Release 新版本</div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="text-xs"
+              :disabled="checkingForUpdates"
+              @click="$emit('checkUpdates')"
+            >
+              {{ checkingForUpdates ? '检查中' : '检查更新' }}
             </Button>
           </div>
 
