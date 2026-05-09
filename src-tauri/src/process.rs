@@ -138,6 +138,7 @@ pub fn kill_app_process(handle: &tauri::AppHandle, app_id: &str) {
 }
 
 /// 强制杀掉所有子进程
+#[cfg(target_os = "macos")]
 pub fn force_kill_all(handle: &tauri::AppHandle) {
     let (app_ids, infos): (HashSet<String>, Vec<ProcessInfo>) = {
         if let Some(state) = handle.try_state::<AppState>() {
@@ -519,7 +520,7 @@ pub fn get_run_records(
         .into_iter()
         .filter(|record| app_id.map(|id| record.app_id == id).unwrap_or(true))
         .collect();
-    records.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    records.sort_by_key(|record| std::cmp::Reverse(record.started_at));
     if records.len() > limit {
         records.truncate(limit);
     }

@@ -2,6 +2,7 @@
 mod dock;
 mod html_title;
 mod process;
+#[cfg(target_os = "macos")]
 mod tray;
 mod url_check;
 
@@ -566,11 +567,9 @@ fn show_app_window(app: tauri::AppHandle, app_id: String) -> Result<(), String> 
     show_or_create_app_window(&app, &app_id)
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn show_main_window(app: &tauri::AppHandle) {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = dock::show_dock_icon();
-    }
+    let _ = dock::show_dock_icon();
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.unminimize();
@@ -1510,6 +1509,7 @@ fn load_window_state(app: &tauri::AppHandle, app_id: &str) -> Option<WindowState
     None
 }
 
+#[cfg(target_os = "macos")]
 fn hide_dock_on_close_enabled(app: &tauri::AppHandle) -> bool {
     app.store("qqr-store.json")
         .ok()
