@@ -88,7 +88,7 @@ pub fn run() {
 
             // 恢复主窗口保存的位置（逻辑坐标）
             if let Some(window) = app.get_webview_window("main") {
-                if let Some(state) = load_window_state(&app.handle(), "main") {
+                if let Some(state) = load_window_state(app.handle(), "main") {
                     let pos =
                         tauri::Position::Logical(tauri::LogicalPosition::new(state.x, state.y));
                     let size =
@@ -98,13 +98,13 @@ pub fn run() {
                 }
             }
 
-            restore_persisted_sessions(&app.handle());
-            start_scheduler(&app.handle());
+            restore_persisted_sessions(app.handle());
+            start_scheduler(app.handle());
 
             // 设置系统托盘（macOS 菜单栏图标）
             #[cfg(target_os = "macos")]
             {
-                tray::setup_tray(&app.handle());
+                tray::setup_tray(app.handle());
 
                 // 监听事件以刷新托盘菜单
                 let h1 = app.handle().clone();
@@ -152,6 +152,7 @@ struct ClearLogsResult {
 
 /// 启动应用并在新窗口中运行
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn launch_app_window(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -964,7 +965,7 @@ fn set_schedule_last_run_at(app: &tauri::AppHandle, app_id: &str, due_at: u64) {
     let mut state = read_schedule_state(app);
     state.insert(app_id.to_string(), due_at);
     let _ = store.reload();
-    let _ = store.set(
+    store.set(
         "schedule_state",
         serde_json::to_value(state).unwrap_or_default(),
     );
@@ -1045,9 +1046,9 @@ fn find_last_due_since(spec: &CronSpec, last_run_at: u64, now_minute: DateTime<T
         .timestamp_millis_opt(last_run_at as i64)
         .single()
         .map(minute_start)
-        .unwrap_or_else(|| now_minute.clone());
+        .unwrap_or(now_minute);
     let mut cursor = now_minute;
-    let max_lookback = cursor.clone() - ChronoDuration::days(32);
+    let max_lookback = cursor - ChronoDuration::days(32);
     while cursor > lower && cursor >= max_lookback {
         if spec.matches(cursor) {
             let due_at = cursor.timestamp_millis() as u64;
@@ -1487,7 +1488,7 @@ fn save_window_state(app: &tauri::AppHandle, app_id: &str, window: &tauri::Webvi
         };
         if let Ok(store) = app.store("qqr-store.json") {
             let _ = store.reload();
-            let _ = store.set(&key, serde_json::to_value(state).unwrap());
+            store.set(&key, serde_json::to_value(state).unwrap());
             let _ = store.save();
         }
     }

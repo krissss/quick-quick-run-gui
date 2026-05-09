@@ -38,18 +38,13 @@ pub struct AppWindowInfo {
     pub bg_b: u8,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ItemType {
+    #[default]
     Web,
     Service,
     Task,
-}
-
-impl Default for ItemType {
-    fn default() -> Self {
-        Self::Web
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -268,9 +263,7 @@ fn resolve_working_directory(working_directory: Option<&str>) -> Result<Option<P
         let home = std::env::var_os("HOME")
             .or_else(|| std::env::var_os("USERPROFILE"))
             .ok_or_else(|| "无法展开工作目录中的 ~".to_string())?;
-        let suffix = raw
-            .trim_start_matches('~')
-            .trim_start_matches(|c| c == '/' || c == '\\');
+        let suffix = raw.trim_start_matches('~').trim_start_matches(['/', '\\']);
         if suffix.is_empty() {
             PathBuf::from(home)
         } else {
@@ -618,7 +611,7 @@ fn read_persisted_sessions(handle: &tauri::AppHandle) -> Vec<PersistedSession> {
 fn save_persisted_sessions(handle: &tauri::AppHandle, sessions: &[PersistedSession]) {
     if let Ok(store) = handle.store(STORE_FILE) {
         let _ = store.reload();
-        let _ = store.set(
+        store.set(
             SESSIONS_KEY,
             serde_json::to_value(sessions).unwrap_or_default(),
         );
@@ -640,7 +633,7 @@ fn read_run_records(handle: &tauri::AppHandle) -> Vec<RunRecord> {
 fn save_run_records(handle: &tauri::AppHandle, records: &[RunRecord]) {
     if let Ok(store) = handle.store(STORE_FILE) {
         let _ = store.reload();
-        let _ = store.set(
+        store.set(
             RUN_RECORDS_KEY,
             serde_json::to_value(records).unwrap_or_default(),
         );
