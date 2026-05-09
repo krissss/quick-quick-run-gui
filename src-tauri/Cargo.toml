@@ -2,7 +2,11 @@
 name = "quick-quick-run-gui"
 version = "0.1.0"
 description = "通用 Web App GUI 包装器"
-authors = ["you"]
+authors = ["kriss"]
+license = "MIT"
+repository = "https://github.com/krissss/quick-quick-run-gui"
+homepage = "https://github.com/krissss/quick-quick-run-gui"
+readme = "../README.md"
 edition = "2021"
 
 [lib]

@@ -9,7 +9,7 @@ function mountLogDialog(props = {}) {
     props: {
       open: true,
       appId: 'web-1',
-      appName: 'qwenpaw',
+      appName: 'demo-web',
       lines: ['ready'],
       runs: [],
       selectedRunId: null,
@@ -26,7 +26,7 @@ describe('LogDialog', () => {
   it('shows startup state, log lines, and closes from the overlay', async () => {
     const wrapper = mountLogDialog()
 
-    expect(document.body.textContent).toContain('qwenpaw — 日志')
+    expect(document.body.textContent).toContain('demo-web — 日志')
     expect(document.body.textContent).toContain('启动中')
     expect(document.body.textContent).toContain('ready')
 
@@ -56,7 +56,7 @@ describe('LogDialog', () => {
         {
           id: 'run-1',
           app_id: 'web-1',
-          app_name: 'qwenpaw',
+          app_name: 'demo-web',
           item_type: 'task',
           status: 'success',
           pid: null,

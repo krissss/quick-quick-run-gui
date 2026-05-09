@@ -127,8 +127,8 @@ test('restores a running web app and can reopen its window', async ({ page }) =>
     storeData: {
       apps: [
         {
-          id: 'qwenpaw-id',
-          name: 'qwenpaw',
+          id: 'demo-web-id',
+          name: 'demo-web',
           type: 'web',
           command: 'pnpm dev',
           url: 'http://localhost:3000',
@@ -138,14 +138,14 @@ test('restores a running web app and can reopen its window', async ({ page }) =>
         },
       ],
     },
-    runningApps: [{ app_id: 'qwenpaw-id', pid: 4321, item_type: 'web' }],
+    runningApps: [{ app_id: 'demo-web-id', pid: 4321, item_type: 'web' }],
   })
 
   await page.goto('/')
-  await expect(page.getByRole('button', { name: /qwenpaw/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /demo-web/ })).toBeVisible()
   await expect(page.locator('[data-testid="app-detail-panel"]').getByText('运行中')).toBeVisible()
 
-  await page.getByRole('button', { name: /qwenpaw/ }).click()
+  await page.getByRole('button', { name: /demo-web/ }).click()
   await page.getByRole('button', { name: '窗口' }).click()
 
   await expect.poll(async () => page.evaluate(() => {

@@ -1,7 +1,17 @@
 {
   "name": "quick-quick-run-gui",
-  "private": true,
   "version": "0.1.0",
+  "description": "Tauri desktop runner for local web apps, services, and scheduled tasks.",
+  "author": "kriss",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/krissss/quick-quick-run-gui.git"
+  },
+  "bugs": {
+    "url": "https://github.com/krissss/quick-quick-run-gui/issues"
+  },
+  "homepage": "https://github.com/krissss/quick-quick-run-gui#readme",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "scripts": {

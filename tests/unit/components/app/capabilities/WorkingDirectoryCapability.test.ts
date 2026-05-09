@@ -13,10 +13,10 @@ describe('WorkingDirectoryCapability', () => {
       },
     })
 
-    await wrapper.get('input').setValue('/Users/kriss/app')
+    await wrapper.get('input').setValue('/Users/demo/app')
     await wrapper.get('button[aria-label="选择工作目录"]').trigger('click')
 
-    expect(app.workingDirectory).toBe('/Users/kriss/app')
+    expect(app.workingDirectory).toBe('/Users/demo/app')
     expect(wrapper.emitted('chooseWorkingDirectory')).toHaveLength(1)
   })
 })

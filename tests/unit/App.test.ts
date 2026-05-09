@@ -33,7 +33,7 @@ describe('App', () => {
       recentRuns: [serviceFailedRun, taskSuccessRun],
     })
 
-    await buttonContaining(wrapper, 'qwenpaw').trigger('click')
+    await buttonContaining(wrapper, 'demo-web').trigger('click')
     expect(detailPanel(wrapper).text()).toContain('PID 4321')
 
     await buttonContaining(wrapper, '窗口').trigger('click')
@@ -43,7 +43,7 @@ describe('App', () => {
 
     await buttonContaining(wrapper, '日志').trigger('click')
     await flushPromises()
-    expect(document.body.textContent).toContain('qwenpaw — 日志')
+    expect(document.body.textContent).toContain('demo-web — 日志')
     expect(document.body.textContent).toContain('ready')
 
     await emit('app-launch-failed', { app_id: 'web-1', reason: 'process_exited' })
@@ -57,20 +57,20 @@ describe('App', () => {
       store: { apps: [webApp] },
     })
 
-    await buttonContaining(wrapper, 'qwenpaw').trigger('click')
+    await buttonContaining(wrapper, 'demo-web').trigger('click')
     await buttonContaining(wrapper, '复制').trigger('click')
     await flushPromises()
 
     expect(document.body.textContent).toContain('添加应用')
-    expect((inputByValue(wrapper, 'qwenpaw 副本').element as HTMLInputElement).value).toBe('qwenpaw 副本')
-    expect((inputByPlaceholder(wrapper, '~/repo').element as HTMLInputElement).value).toBe('/Users/kriss/qwenpaw')
+    expect((inputByValue(wrapper, 'demo-web 副本').element as HTMLInputElement).value).toBe('demo-web 副本')
+    expect((inputByPlaceholder(wrapper, '~/repo').element as HTMLInputElement).value).toBe('/Users/demo/demo-web')
 
     await buttonContaining(wrapper, '添加', true).trigger('click')
     await flushPromises()
 
     expect(mock.storeData.apps).toMatchObject([
-      { id: 'web-1', name: 'qwenpaw', order: 0 },
-      { name: 'qwenpaw 副本', workingDirectory: '/Users/kriss/qwenpaw', url: 'http://localhost:3000', order: 1 },
+      { id: 'web-1', name: 'demo-web', order: 0 },
+      { name: 'demo-web 副本', workingDirectory: '/Users/demo/demo-web', url: 'http://localhost:3000', order: 1 },
     ])
   })
 
@@ -121,7 +121,7 @@ describe('App', () => {
       store: { apps: [webApp] },
     })
 
-    await buttonContaining(wrapper, 'qwenpaw').trigger('click')
+    await buttonContaining(wrapper, 'demo-web').trigger('click')
     await inputByPlaceholder(wrapper, 'npm run dev').setValue('pnpm dev {account= : 账号} {--headless}')
     await buttonContaining(wrapper, '保存', true).trigger('click')
     await flushPromises()
@@ -153,7 +153,7 @@ describe('App', () => {
     await flushPromises()
     expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
       command: 'pnpm dev demo --headless',
-      workingDirectory: '/Users/kriss/qwenpaw',
+      workingDirectory: '/Users/demo/demo-web',
       url: 'http://localhost:3000',
     })
   })
@@ -167,7 +167,7 @@ describe('App', () => {
 
     await buttonContaining(wrapper, '任务', true).trigger('click')
     await inputByPlaceholder(wrapper, 'pnpm report').setValue('pnpm report')
-    await inputByPlaceholder(wrapper, '~/repo').setValue('/Users/kriss/reports')
+    await inputByPlaceholder(wrapper, '~/repo').setValue('/Users/demo/reports')
     await wrapper.findAll('[role="switch"]')[1].trigger('click')
     await buttonContaining(wrapper, '自定义', true).trigger('click')
     await inputByPlaceholder(wrapper, '*/15 * * * *').setValue('bad')
@@ -181,7 +181,7 @@ describe('App', () => {
     await flushPromises()
 
     expect(mock.storeData.apps).toMatchObject([
-      { id: 'new-task', name: 'pnpm report', type: 'task', workingDirectory: '/Users/kriss/reports', schedule: { cron: '*/10 * * * *', missedPolicy: 'run-once' } },
+      { id: 'new-task', name: 'pnpm report', type: 'task', workingDirectory: '/Users/demo/reports', schedule: { cron: '*/10 * * * *', missedPolicy: 'run-once' } },
     ])
 
     await buttonContaining(wrapper, '删除').trigger('click')

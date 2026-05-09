@@ -7,12 +7,12 @@ import { normalizeApp, type AppItem } from '@/lib/store'
 import { serviceApp, taskApp } from '../fixtures/apps'
 import { setupTauriMocks } from '../helpers/tauri'
 
-const qwenpaw: AppItem = normalizeApp({
-  id: 'qwenpaw-id',
-  name: 'qwenpaw',
+const demoWeb: AppItem = normalizeApp({
+  id: 'demo-web-id',
+  name: 'demo-web',
   type: 'web',
   command: 'pnpm dev',
-  workingDirectory: '/Users/kriss/project',
+  workingDirectory: '/Users/demo/project',
   url: 'http://localhost:3000',
   width: 1200,
   height: 800,
@@ -26,7 +26,7 @@ const qwenpaw: AppItem = normalizeApp({
   },
 })
 
-async function mountLauncher(options: Parameters<typeof setupTauriMocks>[0] = {}, initialApps: AppItem[] = [qwenpaw]) {
+async function mountLauncher(options: Parameters<typeof setupTauriMocks>[0] = {}, initialApps: AppItem[] = [demoWeb]) {
   const mock = setupTauriMocks(options)
   const apps = ref<AppItem[]>(initialApps)
   const showMessage = vi.fn()
@@ -47,12 +47,12 @@ async function mountLauncher(options: Parameters<typeof setupTauriMocks>[0] = {}
 describe('useLauncher integration', () => {
   it('loads latest run history sorted by newest run per app', async () => {
     const { launcher, wrapper } = await mountLauncher({
-      runningApps: [{ app_id: 'qwenpaw-id', pid: null, item_type: 'web' }],
+      runningApps: [{ app_id: 'demo-web-id', pid: null, item_type: 'web' }],
       recentRuns: [
         {
           id: 'old',
-          app_id: 'qwenpaw-id',
-          app_name: 'qwenpaw',
+          app_id: 'demo-web-id',
+          app_name: 'demo-web',
           item_type: 'web',
           status: 'failed',
           pid: null,
@@ -64,8 +64,8 @@ describe('useLauncher integration', () => {
         },
         {
           id: 'new',
-          app_id: 'qwenpaw-id',
-          app_name: 'qwenpaw',
+          app_id: 'demo-web-id',
+          app_name: 'demo-web',
           item_type: 'web',
           status: 'success',
           pid: null,
@@ -80,33 +80,33 @@ describe('useLauncher integration', () => {
 
     await launcher.refreshRunningApps()
 
-    expect(launcher.runningAppIds.value.has('qwenpaw-id')).toBe(true)
+    expect(launcher.runningAppIds.value.has('demo-web-id')).toBe(true)
     expect(launcher.runningPids.value.size).toBe(0)
-    expect(launcher.latestRuns.value.get('qwenpaw-id')?.id).toBe('new')
+    expect(launcher.latestRuns.value.get('demo-web-id')?.id).toBe('new')
     wrapper.unmount()
   })
 
   it('keeps running state even when recent run history cannot be loaded', async () => {
     const { launcher, wrapper } = await mountLauncher({
-      runningApps: [{ app_id: 'qwenpaw-id', pid: 4321, item_type: 'web' }],
+      runningApps: [{ app_id: 'demo-web-id', pid: 4321, item_type: 'web' }],
       rejectCommands: { get_recent_runs: new Error('store unavailable') },
     })
 
     await launcher.refreshRunningApps()
 
-    expect(launcher.runningAppIds.value.has('qwenpaw-id')).toBe(true)
-    expect(launcher.runningPids.value.get('qwenpaw-id')).toBe(4321)
+    expect(launcher.runningAppIds.value.has('demo-web-id')).toBe(true)
+    expect(launcher.runningPids.value.get('demo-web-id')).toBe(4321)
     wrapper.unmount()
   })
 
   it('opens the matching app log from tray events', async () => {
     const { openLogDialog, wrapper } = await mountLauncher()
 
-    await emit('tray-open-log', 'qwenpaw-id')
+    await emit('tray-open-log', 'demo-web-id')
     await emit('tray-open-log', 'missing-id')
     await flushPromises()
 
-    expect(openLogDialog).toHaveBeenCalledWith(qwenpaw)
+    expect(openLogDialog).toHaveBeenCalledWith(demoWeb)
     wrapper.unmount()
   })
 
@@ -115,7 +115,7 @@ describe('useLauncher integration', () => {
     const { launcher, openLogDialog, showMessage, wrapper } = await mountLauncher({
       launchResult: { message: '窗口已打开', pid: null, run_id: null },
     })
-    const noCommand = { ...qwenpaw, command: '' }
+    const noCommand = { ...demoWeb, command: '' }
 
     await launcher.launchApp(noCommand)
 
@@ -128,18 +128,18 @@ describe('useLauncher integration', () => {
     const commandCase = await mountLauncher({
       launchResult: { message: '任务已启动', pid: 2468, run_id: 'run-2' },
     })
-    await commandCase.launcher.launchApp(qwenpaw)
+    await commandCase.launcher.launchApp(demoWeb)
 
-    expect(commandCase.openLogDialog).toHaveBeenCalledWith(qwenpaw)
+    expect(commandCase.openLogDialog).toHaveBeenCalledWith(demoWeb)
     expect(commandCase.launcher.loading.value).toBe(false)
     commandCase.wrapper.unmount()
 
     const commandWithoutPid = await mountLauncher({
       launchResult: { message: '任务正在运行', pid: null, run_id: null },
     })
-    await commandWithoutPid.launcher.launchApp(qwenpaw)
+    await commandWithoutPid.launcher.launchApp(demoWeb)
     expect(commandWithoutPid.showMessage).toHaveBeenCalledWith('任务正在运行', 'success')
-    expect(commandWithoutPid.openLogDialog).toHaveBeenCalledWith(qwenpaw)
+    expect(commandWithoutPid.openLogDialog).toHaveBeenCalledWith(demoWeb)
     commandWithoutPid.wrapper.unmount()
 
     const fallback = await mountLauncher({
@@ -148,10 +148,10 @@ describe('useLauncher integration', () => {
     const styleSpy = vi.spyOn(window, 'getComputedStyle').mockReturnValue({
       backgroundColor: 'not-a-color',
     } as CSSStyleDeclaration)
-    await fallback.launcher.launchApp({ ...qwenpaw, command: '' })
+    await fallback.launcher.launchApp({ ...demoWeb, command: '' })
     expect(fallback.showMessage.mock.calls.length).toBeGreaterThan(0)
     expect(fallback.mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
-      workingDirectory: '/Users/kriss/project',
+      workingDirectory: '/Users/demo/project',
       launchTrigger: 'manual',
       bgR: 255,
       bgG: 255,
@@ -165,7 +165,7 @@ describe('useLauncher integration', () => {
   it('resolves the active profile before launching', async () => {
     const { launcher, mock, openLogDialog, wrapper } = await mountLauncher()
     const profiledApp: AppItem = {
-      ...qwenpaw,
+      ...demoWeb,
       command: 'pnpm dev {account= : 账号} {--headless}',
       activeProfileId: 'profile-1',
       profiles: [
@@ -184,13 +184,13 @@ describe('useLauncher integration', () => {
 
     expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
       command: 'pnpm dev demo --headless',
-      workingDirectory: '/Users/kriss/project',
+      workingDirectory: '/Users/demo/project',
       url: 'http://localhost:3000',
     })
     expect(openLogDialog).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'qwenpaw-id',
+      id: 'demo-web-id',
       command: 'pnpm dev demo --headless',
-      workingDirectory: '/Users/kriss/project',
+      workingDirectory: '/Users/demo/project',
     }))
     wrapper.unmount()
   })
@@ -199,32 +199,32 @@ describe('useLauncher integration', () => {
     vi.useFakeTimers()
     const { launcher, mock, openLogDialog, showMessage, wrapper } = await mountLauncher()
 
-    await launcher.launchApp(qwenpaw, { delaySeconds: 1 })
+    await launcher.launchApp(demoWeb, { delaySeconds: 1 })
 
     expect(mock.getCalls('launch_app_window')).toHaveLength(0)
-    expect(launcher.pendingLaunches.value.get('qwenpaw-id')).toMatchObject({
-      appId: 'qwenpaw-id',
+    expect(launcher.pendingLaunches.value.get('demo-web-id')).toMatchObject({
+      appId: 'demo-web-id',
       delaySeconds: 1,
     })
-    expect(showMessage.mock.calls.at(-1)?.[0]).toContain('已安排 qwenpaw')
+    expect(showMessage.mock.calls.at(-1)?.[0]).toContain('已安排 demo-web')
 
     await vi.advanceTimersByTimeAsync(1000)
     await flushPromises()
 
     expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
-      appId: 'qwenpaw-id',
+      appId: 'demo-web-id',
       launchTrigger: 'delayed',
     })
     expect(openLogDialog).not.toHaveBeenCalled()
-    expect(launcher.pendingLaunches.value.has('qwenpaw-id')).toBe(false)
+    expect(launcher.pendingLaunches.value.has('demo-web-id')).toBe(false)
 
-    await launcher.launchApp(qwenpaw, { delaySeconds: 10 })
-    launcher.cancelDelayedLaunch('qwenpaw-id')
+    await launcher.launchApp(demoWeb, { delaySeconds: 10 })
+    launcher.cancelDelayedLaunch('demo-web-id')
     await vi.advanceTimersByTimeAsync(10000)
     await flushPromises()
 
     expect(mock.getCalls('launch_app_window')).toHaveLength(1)
-    expect(showMessage.mock.calls.at(-1)).toEqual(['已取消延迟运行：qwenpaw', 'info'])
+    expect(showMessage.mock.calls.at(-1)).toEqual(['已取消延迟运行：demo-web', 'info'])
 
     wrapper.unmount()
     vi.useRealTimers()
@@ -238,9 +238,9 @@ describe('useLauncher integration', () => {
       },
     })
 
-    await launcher.launchApp(qwenpaw)
-    await launcher.stopApp('qwenpaw-id')
-    await expect(launcher.showAppWindow('qwenpaw-id')).resolves.toBeUndefined()
+    await launcher.launchApp(demoWeb)
+    await launcher.stopApp('demo-web-id')
+    await expect(launcher.showAppWindow('demo-web-id')).resolves.toBeUndefined()
 
     expect(showMessage).toHaveBeenCalledWith('启动失败: boom', 'error')
     expect(showMessage).toHaveBeenCalledWith('停止失败: cannot stop', 'error')
@@ -364,28 +364,28 @@ describe('useLauncher integration', () => {
   })
 
   it('reacts to process lifecycle and tray launch events', async () => {
-    const runningApps = [{ app_id: 'qwenpaw-id', pid: 4321, item_type: 'web' as const }]
+    const runningApps = [{ app_id: 'demo-web-id', pid: 4321, item_type: 'web' as const }]
     const { launcher, openLogDialog, wrapper } = await mountLauncher({
       runningApps,
     })
 
-    await emit('app-launched', 'qwenpaw-id')
+    await emit('app-launched', 'demo-web-id')
     await flushPromises()
-    expect(launcher.runningAppIds.value.has('qwenpaw-id')).toBe(true)
+    expect(launcher.runningAppIds.value.has('demo-web-id')).toBe(true)
 
     runningApps.length = 0
-    await emit('app-process-stopped', 'qwenpaw-id')
+    await emit('app-process-stopped', 'demo-web-id')
     await flushPromises()
-    expect(launcher.runningPids.value.has('qwenpaw-id')).toBe(false)
+    expect(launcher.runningPids.value.has('demo-web-id')).toBe(false)
 
-    await emit('app-stopped', 'qwenpaw-id')
+    await emit('app-stopped', 'demo-web-id')
     await flushPromises()
-    expect(launcher.runningAppIds.value.has('qwenpaw-id')).toBe(false)
+    expect(launcher.runningAppIds.value.has('demo-web-id')).toBe(false)
 
-    await emit('app-run-updated', { app_id: 'qwenpaw-id' })
-    await emit('tray-launch-app', 'qwenpaw-id')
+    await emit('app-run-updated', { app_id: 'demo-web-id' })
+    await emit('tray-launch-app', 'demo-web-id')
     await flushPromises()
-    expect(openLogDialog).toHaveBeenCalledWith(qwenpaw)
+    expect(openLogDialog).toHaveBeenCalledWith(demoWeb)
 
     wrapper.unmount()
   })
