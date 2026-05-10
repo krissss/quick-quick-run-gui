@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-05-10
+
+### Added
+
+- 优化自动更新确认和进度展示
+- 优化应用界面和弹窗体验
+- 优化侧栏应用图标展示
+
+### Fixed
+
+- 稳定生成全平台更新元数据
+- 修复网页重复启动状态丢失
+
 ## [0.2.2] - 2026-05-10
 
 ### Fixed
@@ -85,7 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 为 macOS 专属代码添加条件编译守卫，修复跨平台构建
 
-[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/krissss/quick-quick-run-gui/compare/v0.1.0...v0.2.0
