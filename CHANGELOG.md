@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-10
+
+### Changed
+
+- 优化发布工作流，拆分 CI 与 Release 打包流程
+
 ## [0.2.0] - 2026-05-09
 
 ### Added
@@ -73,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 为 macOS 专属代码添加条件编译守卫，修复跨平台构建
 
-[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/krissss/quick-quick-run-gui/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/krissss/quick-quick-run-gui/releases/tag/v0.1.0
