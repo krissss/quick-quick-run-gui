@@ -16,10 +16,18 @@ interface MockOptions {
   runLogs?: Record<string, string[]>
   dialogSavePath?: string | null
   dialogOpenPath?: string | null
+  dialogConfirm?: boolean
   files?: Record<string, string>
   autostartEnabled?: boolean
   launchResult?: { message: string; pid: number | null; run_id: string | null }
   update?: null | { rid?: number; version: string; currentVersion?: string; date?: string; body?: string; rawJson?: Record<string, unknown> }
+  updateDownloadEvents?: Array<
+    | { event: 'Started'; data: { contentLength?: number } }
+    | { event: 'Progress'; data: { chunkLength: number } }
+    | { event: 'Finished' }
+  >
+  holdUpdateDownload?: boolean
+  appVersion?: string
   rejectCommands?: Record<string, unknown>
 }
 
@@ -40,6 +48,7 @@ export function setupTauriMocks(options: MockOptions = {}) {
   const calls: CommandCall[] = []
   let recentRuns = clone(options.recentRuns ?? [])
   let autostartEnabled = options.autostartEnabled ?? false
+  let resolveUpdateDownload: ((rid: number) => void) | null = null
 
   mockIPC((cmd, payload = {}) => {
     const args = payload as Record<string, unknown>
@@ -85,6 +94,7 @@ export function setupTauriMocks(options: MockOptions = {}) {
       autostartEnabled = false
       return null
     }
+    if (cmd === 'plugin:app|version') return options.appVersion ?? '0.0.0-test'
 
     if (cmd === 'plugin:updater|check') {
       if (!options.update) return null
@@ -98,10 +108,46 @@ export function setupTauriMocks(options: MockOptions = {}) {
       }
     }
     if (cmd === 'plugin:updater|download_and_install') return null
+    if (cmd === 'plugin:updater|download') {
+      const channelId = typeof args.onEvent === 'object' && args.onEvent != null && 'id' in args.onEvent
+        ? Number(args.onEvent.id)
+        : Number(String(args.onEvent).replace('__CHANNEL__:', ''))
+      const events = options.updateDownloadEvents ?? [
+        { event: 'Started' as const, data: { contentLength: 100 } },
+        { event: 'Progress' as const, data: { chunkLength: 40 } },
+        { event: 'Progress' as const, data: { chunkLength: 60 } },
+        { event: 'Finished' as const },
+      ]
+      const tauriInternals = window as unknown as {
+        __TAURI_INTERNALS__?: {
+          runCallback?: (id: number, data: unknown) => void
+        }
+      }
+      events.forEach((event, index) => {
+        tauriInternals.__TAURI_INTERNALS__?.runCallback?.(channelId, { index, message: event })
+      })
+      tauriInternals.__TAURI_INTERNALS__?.runCallback?.(channelId, { index: events.length, end: true })
+      if (options.holdUpdateDownload) {
+        return new Promise((resolve) => {
+          resolveUpdateDownload = resolve
+        })
+      }
+      return 1
+    }
+    if (cmd === 'plugin:updater|install') return null
+    if (cmd === 'plugin:resources|close') return null
     if (cmd === 'plugin:process|restart') return null
 
     if (cmd === 'plugin:dialog|save') return options.dialogSavePath ?? null
     if (cmd === 'plugin:dialog|open') return options.dialogOpenPath ?? null
+    if (cmd === 'plugin:dialog|message') {
+      const buttons = args.buttons as Record<string, [string, string]> | string | undefined
+      if (buttons && typeof buttons === 'object' && 'OkCancelCustom' in buttons) {
+        const [okLabel, cancelLabel] = buttons.OkCancelCustom
+        return options.dialogConfirm ?? true ? okLabel : cancelLabel
+      }
+      return 'Ok'
+    }
     if (cmd === 'plugin:fs|read_text_file') {
       return Array.from(new TextEncoder().encode(files[String(args.path)] ?? ''))
     }
@@ -152,6 +198,7 @@ export function setupTauriMocks(options: MockOptions = {}) {
     calls,
     files,
     storeData,
+    resolveUpdateDownload: () => resolveUpdateDownload?.(1),
     getCalls: (cmd: string) => calls.filter((call) => call.cmd === cmd),
   }
 }

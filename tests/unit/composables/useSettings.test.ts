@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { ref } from 'vue'
 import { useSettings } from '@/composables/useSettings'
 import { normalizeApp, type AppItem } from '@/lib/store'
@@ -37,6 +38,7 @@ describe('useSettings', () => {
     const { mock, settings } = makeSettings({
       store: { hide_dock_on_close: true, log_retention_limit: 12 },
       autostartEnabled: true,
+      appVersion: '0.2.2',
     })
 
     await settings.openSettingsDialog()
@@ -45,6 +47,7 @@ describe('useSettings', () => {
     expect(settings.hideDockOnClose.value).toBe(true)
     expect(settings.logRetentionLimit.value).toBe(12)
     expect(settings.autostartEnabled.value).toBe(true)
+    expect(settings.appVersion.value).toBe('0.2.2')
     expect(settings.themeLabel.value).toBe('亮色')
 
     settings.toggleTheme()
@@ -99,27 +102,131 @@ describe('useSettings', () => {
     expect(messages.at(-1)).toEqual({ text: '已导入 1 个应用', type: 'success' })
   })
 
-  it('checks, installs, and relaunches when an update is available', async () => {
+  it('checks, downloads, installs, and relaunches when an update is available', async () => {
     const { messages, mock, settings } = makeSettings({
-      update: { rid: 7, version: '0.2.0', currentVersion: '0.1.0' },
+      update: {
+        rid: 7,
+        version: '0.2.0',
+        currentVersion: '0.1.0',
+        body: '## 更新内容\n\n- **修复** [更新体验](https://example.com)\n- `确认后` 再安装',
+      },
+      updateDownloadEvents: [
+        { event: 'Started', data: { contentLength: 100 } },
+        { event: 'Progress', data: { chunkLength: 40 } },
+        { event: 'Progress', data: { chunkLength: 60 } },
+        { event: 'Finished' },
+      ],
+      holdUpdateDownload: true,
     })
 
     await settings.checkForUpdates()
 
     expect(mock.getCalls('plugin:updater|check')).toHaveLength(1)
-    expect(mock.getCalls('plugin:updater|download_and_install')[0].payload).toMatchObject({ rid: 7 })
+    expect(settings.availableUpdateVersion.value).toBe('0.2.0')
+    expect(settings.updateReleaseNotes.value).toContain('更新内容')
+    expect(settings.updateReleaseNotes.value).toContain('- 修复 更新体验')
+    expect(settings.updateReleaseNotes.value).toContain('- 确认后 再安装')
+    expect(settings.updateReleaseNotes.value).not.toContain('##')
+    expect(settings.updateReleaseNotes.value).not.toContain('https://example.com')
+    expect(messages).toEqual([{ text: '发现新版本 0.2.0', type: 'info' }])
+
+    const installing = settings.installAvailableUpdate()
+    await nextTick()
+    expect(settings.updateInProgress.value).toBe(true)
+    expect(settings.updateProgressLabel.value).toBe('正在下载 100%')
+    mock.resolveUpdateDownload()
+    await installing
+
+    expect(mock.getCalls('plugin:updater|download')[0].payload).toMatchObject({ rid: 7 })
+    expect(mock.getCalls('plugin:updater|install')[0].payload).toMatchObject({ updateRid: 7, bytesRid: 1 })
+    expect(mock.getCalls('plugin:updater|download_and_install')).toHaveLength(0)
     expect(mock.getCalls('plugin:process|restart')).toHaveLength(1)
     expect(messages).toEqual([
-      { text: '发现新版本 0.2.0，正在下载并安装', type: 'info' },
+      { text: '发现新版本 0.2.0', type: 'info' },
+      { text: '正在下载并安装 0.2.0', type: 'info' },
       { text: '更新已安装，正在重启应用', type: 'success' },
     ])
   })
 
-  it('reports when no update is available', async () => {
-    const { messages, settings } = makeSettings({ update: null })
+  it('keeps the update available until the install action is clicked', async () => {
+    const { messages, mock, settings } = makeSettings({
+      update: { rid: 8, version: '0.3.0', currentVersion: '0.2.0' },
+    })
 
     await settings.checkForUpdates()
 
+    expect(mock.getCalls('plugin:updater|check')).toHaveLength(1)
+    expect(mock.getCalls('plugin:dialog|message')).toHaveLength(0)
+    expect(mock.getCalls('plugin:updater|download_and_install')).toHaveLength(0)
+    expect(mock.getCalls('plugin:updater|download')).toHaveLength(0)
+    expect(mock.getCalls('plugin:updater|install')).toHaveLength(0)
+    expect(mock.getCalls('plugin:process|restart')).toHaveLength(0)
+    expect(settings.availableUpdateVersion.value).toBe('0.3.0')
+    expect(messages).toEqual([{ text: '发现新版本 0.3.0', type: 'info' }])
+  })
+
+  it('closes the previous update resource before replacing it', async () => {
+    const { mock, settings } = makeSettings({
+      update: { rid: 8, version: '0.3.0', currentVersion: '0.2.0' },
+    })
+
+    await settings.checkForUpdates()
+    await settings.checkForUpdates()
+
+    expect(mock.getCalls('plugin:updater|check')).toHaveLength(2)
+    expect(mock.getCalls('plugin:resources|close')).toHaveLength(1)
+    expect(mock.getCalls('plugin:resources|close')[0].payload).toMatchObject({ rid: 8 })
+    expect(settings.availableUpdateVersion.value).toBe('0.3.0')
+  })
+
+  it('closes update resources when installation fails', async () => {
+    const { messages, mock, settings } = makeSettings({
+      update: { rid: 9, version: '0.3.0', currentVersion: '0.2.0' },
+      rejectCommands: { 'plugin:updater|install': new Error('install failed') },
+    })
+
+    await settings.checkForUpdates()
+    await settings.installAvailableUpdate()
+
+    expect(mock.getCalls('plugin:updater|download')[0].payload).toMatchObject({ rid: 9 })
+    expect(mock.getCalls('plugin:updater|install')[0].payload).toMatchObject({ updateRid: 9, bytesRid: 1 })
+    expect(mock.getCalls('plugin:resources|close').map((call) => call.payload)).toEqual([{ rid: 1 }, { rid: 9 }])
+    expect(mock.getCalls('plugin:process|restart')).toHaveLength(0)
+    expect(settings.availableUpdateVersion.value).toBe('')
+    expect(settings.updateProgressLabel.value).toBe('')
+    expect(messages.at(-1)).toEqual({ text: '更新失败: install failed', type: 'error' })
+  })
+
+  it('reports a manual restart hint when relaunch fails after installation', async () => {
+    const { messages, mock, settings } = makeSettings({
+      update: { rid: 10, version: '0.3.0', currentVersion: '0.2.0' },
+      rejectCommands: { 'plugin:process|restart': new Error('restart failed') },
+    })
+
+    await settings.checkForUpdates()
+    await settings.installAvailableUpdate()
+
+    expect(mock.getCalls('plugin:updater|install')[0].payload).toMatchObject({ updateRid: 10, bytesRid: 1 })
+    expect(mock.getCalls('plugin:process|restart')).toHaveLength(1)
+    expect(messages).toContainEqual({ text: '更新已安装，正在重启应用', type: 'success' })
+    expect(messages.at(-1)).toEqual({ text: '更新已安装，请手动重启应用: restart failed', type: 'error' })
+    expect(messages.some((message) => message.text.startsWith('更新失败'))).toBe(false)
+  })
+
+  it('reports when no update is available', async () => {
+    const { messages, mock, settings } = makeSettings({ update: null })
+
+    await settings.checkForUpdates()
+
+    expect(mock.getCalls('plugin:updater|check')).toHaveLength(1)
+    expect(mock.getCalls('plugin:updater|download')).toHaveLength(0)
+    expect(mock.getCalls('plugin:updater|install')).toHaveLength(0)
+    expect(mock.getCalls('plugin:process|restart')).toHaveLength(0)
+    expect(settings.availableUpdateVersion.value).toBe('')
+    expect(settings.updateReleaseNotes.value).toBe('')
+    expect(settings.updateInProgress.value).toBe(false)
+    expect(settings.updateProgressPercent.value).toBeNull()
+    expect(settings.updateProgressLabel.value).toBe('')
     expect(messages.at(-1)).toEqual({ text: '当前已是最新版本', type: 'info' })
   })
 
@@ -132,6 +239,7 @@ describe('useSettings', () => {
     const failing = makeSettings({
       rejectCommands: {
         'plugin:autostart|is_enabled': new Error('autostart failed'),
+        'plugin:app|version': new Error('version failed'),
         'plugin:store|get': new Error('store failed'),
         'plugin:autostart|enable': new Error('enable failed'),
         'plugin:dialog|save': new Error('save failed'),
@@ -143,6 +251,7 @@ describe('useSettings', () => {
     await failing.settings.openSettingsDialog()
     expect(failing.settings.hideDockOnClose.value).toBe(false)
     expect(failing.settings.autostartEnabled.value).toBe(false)
+    expect(failing.settings.appVersion.value).toBe('')
 
     await failing.settings.toggleAutostart(true)
     await failing.settings.updateLogRetentionLimit(30)
@@ -150,6 +259,15 @@ describe('useSettings', () => {
     await failing.settings.handleImport()
     await failing.settings.checkForUpdates()
 
+    expect(failing.mock.getCalls('plugin:updater|check')).toHaveLength(1)
+    expect(failing.mock.getCalls('plugin:updater|download')).toHaveLength(0)
+    expect(failing.mock.getCalls('plugin:updater|install')).toHaveLength(0)
+    expect(failing.mock.getCalls('plugin:process|restart')).toHaveLength(0)
+    expect(failing.settings.availableUpdateVersion.value).toBe('')
+    expect(failing.settings.updateReleaseNotes.value).toBe('')
+    expect(failing.settings.updateInProgress.value).toBe(false)
+    expect(failing.settings.updateProgressPercent.value).toBeNull()
+    expect(failing.settings.updateProgressLabel.value).toBe('')
     expect(failing.messages.map((item) => item.type)).toEqual(['error', 'error', 'error', 'error'])
     expect(failing.messages.at(-1)).toEqual({ text: '检查更新失败: network failed', type: 'error' })
   })

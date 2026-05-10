@@ -12,7 +12,7 @@ defineEmits<{
 </script>
 
 <template>
-  <div class="pointer-events-none fixed right-4 top-4 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
+  <div class="pointer-events-none fixed right-4 top-4 z-[80] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
     <div
       v-for="item in messages"
       :key="item.id"

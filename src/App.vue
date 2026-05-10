@@ -72,6 +72,12 @@ const {
   hideDockOnClose,
   logRetentionLimit,
   checkingForUpdates,
+  appVersion,
+  availableUpdateVersion,
+  updateReleaseNotes,
+  updateInProgress,
+  updateProgressPercent,
+  updateProgressLabel,
   themeIcon,
   themeLabel,
   toggleTheme,
@@ -81,6 +87,7 @@ const {
   updateLogRetentionLimit,
   closeSettingsDialog,
   checkForUpdates,
+  installAvailableUpdate,
   handleExport,
   handleImport,
 } = useSettings(apps, showMessage)
@@ -241,6 +248,12 @@ onUnmounted(() => {
       :hide-dock-on-close="hideDockOnClose"
       :log-retention-limit="logRetentionLimit"
       :checking-for-updates="checkingForUpdates"
+      :app-version="appVersion"
+      :available-update-version="availableUpdateVersion"
+      :update-release-notes="updateReleaseNotes"
+      :update-in-progress="updateInProgress"
+      :update-progress-percent="updateProgressPercent"
+      :update-progress-label="updateProgressLabel"
       :theme-icon="themeIcon"
       :theme-label="themeLabel"
       @close="closeSettingsDialog"
@@ -248,6 +261,7 @@ onUnmounted(() => {
       @toggle-hide-dock-on-close="toggleHideDockOnClose"
       @update-log-retention-limit="updateLogRetentionLimit"
       @check-updates="checkForUpdates"
+      @install-update="installAvailableUpdate"
       @toggle-theme="toggleTheme"
       @import-data="handleImport"
       @export-data="handleExport"

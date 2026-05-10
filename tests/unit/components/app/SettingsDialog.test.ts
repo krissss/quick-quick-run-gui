@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import SettingsDialog from '@/components/app/SettingsDialog.vue'
 import { buttonContaining } from '../../../helpers/dom'
 
-function mountSettingsDialog() {
+function mountSettingsDialog(props = {}) {
   return mount(SettingsDialog, {
     attachTo: document.body,
     props: {
@@ -12,8 +12,15 @@ function mountSettingsDialog() {
       hideDockOnClose: false,
       logRetentionLimit: 20,
       checkingForUpdates: false,
+      appVersion: '0.2.2',
+      availableUpdateVersion: '',
+      updateReleaseNotes: '',
+      updateInProgress: false,
+      updateProgressPercent: null,
+      updateProgressLabel: '',
       themeIcon: 'system',
       themeLabel: '跟随系统',
+      ...props,
     },
   })
 }
@@ -26,6 +33,7 @@ describe('SettingsDialog', () => {
     expect(document.body.textContent).toContain('菜单栏模式')
     expect(document.body.textContent).toContain('日志保留')
     expect(document.body.textContent).toContain('软件更新')
+    expect(document.body.textContent).toContain('当前版本 v0.2.2')
 
     const switches = Array.from(document.querySelectorAll('[role="switch"]')).map((item) => new DOMWrapper(item as HTMLElement))
     await switches[0].trigger('click')
@@ -46,8 +54,33 @@ describe('SettingsDialog', () => {
     expect(wrapper.emitted('updateLogRetentionLimit')).toEqual([[30]])
     expect(wrapper.emitted('toggleTheme')).toHaveLength(1)
     expect(wrapper.emitted('checkUpdates')).toHaveLength(1)
+    expect(wrapper.emitted('installUpdate')).toBeUndefined()
     expect(wrapper.emitted('exportData')).toHaveLength(1)
     expect(wrapper.emitted('importData')).toHaveLength(1)
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('shows available update details and install progress', async () => {
+    const wrapper = mountSettingsDialog({
+      availableUpdateVersion: '0.3.0',
+      updateReleaseNotes: '- 修复更新体验\n- 增加下载进度',
+      updateProgressLabel: '发现新版本 v0.3.0',
+    })
+
+    expect(document.body.textContent).toContain('发现新版本 v0.3.0')
+    expect(document.body.textContent).toContain('修复更新体验')
+    await buttonContaining(wrapper, '下载并安装').trigger('click')
+    expect(wrapper.emitted('installUpdate')).toHaveLength(1)
+
+    await wrapper.setProps({
+      updateInProgress: true,
+      updateProgressPercent: 42,
+      updateProgressLabel: '正在下载 42%',
+    })
+
+    const progress = document.querySelector('[role="progressbar"]')
+    expect(progress?.getAttribute('aria-valuenow')).toBe('42')
+    expect(document.body.textContent).toContain('正在下载 42%')
+    expect((buttonContaining(wrapper, '更新中').element as HTMLButtonElement).disabled).toBe(true)
   })
 })

@@ -14,6 +14,7 @@ describe('ToastMessages', () => {
     })
 
     expect(wrapper.text()).toContain('已保存')
+    expect(wrapper.classes()).toContain('z-[80]')
     expect(wrapper.find('[role="alert"]').text()).toContain('失败')
 
     await wrapper.get('button[aria-label="关闭通知"]').trigger('click')
