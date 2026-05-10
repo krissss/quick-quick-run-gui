@@ -29,6 +29,7 @@ describe('LogDialog', () => {
     expect(document.body.textContent).toContain('demo-web — 日志')
     expect(document.body.textContent).toContain('启动中')
     expect(document.body.textContent).toContain('ready')
+    expect(document.querySelector('button[aria-label="关闭日志"]')).toBeTruthy()
 
     const overlay = document.querySelector('.fixed.inset-0')
     if (!overlay) throw new Error('Overlay not found')

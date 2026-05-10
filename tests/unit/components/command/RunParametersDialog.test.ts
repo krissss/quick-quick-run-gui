@@ -42,6 +42,7 @@ describe('RunParametersDialog', () => {
     }))
     const wrapper = mountDialog(profiledApp(), persistProfiles)
 
+    expect(document.querySelector('button[aria-label="关闭运行参数"]')).toBeTruthy()
     await inputByPlaceholder(wrapper, '账号').setValue('demo')
     const headlessSwitch = document.querySelector('[role="switch"]')
     expect(headlessSwitch).toBeTruthy()

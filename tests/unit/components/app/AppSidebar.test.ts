@@ -29,16 +29,17 @@ function appRow(wrapper: ReturnType<typeof mountSidebar>, appId: string) {
 }
 
 describe('AppSidebar', () => {
-  it('groups apps, filters by search/type, and emits navigation actions', async () => {
+  it('renders one ordered list, filters by search/type, and emits navigation actions', async () => {
     const wrapper = mountSidebar({
       selectedAppId: 'web-1',
       runningAppIds: new Set(['web-1']),
       latestRuns: new Map([['service-1', serviceFailedRun]]),
     })
 
-    expect(wrapper.text()).toContain('网页1')
-    expect(wrapper.text()).toContain('服务1')
-    expect(wrapper.text()).toContain('任务1')
+    expect(wrapper.text()).toContain('demo-web')
+    expect(wrapper.text()).toContain('worker')
+    expect(wrapper.text()).toContain('daily')
+    expect(visibleAppIds()).toEqual(['web-1', 'service-1', 'task-1'])
     expect(wrapper.text()).toContain('运行中')
     expect(wrapper.text()).toContain('上次失败')
     expect(appRow(wrapper, 'web-1').text()).not.toContain('网页')

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'
+import { DialogFrame } from '@/components/ui/dialog-frame'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import LaunchActionGroup from '@/components/app/LaunchActionGroup.vue'
@@ -222,27 +223,20 @@ function launchDraft(delaySeconds?: number) {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div
-      v-if="open && currentApp"
-      class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
-      @click.self="closeDialog"
-    >
-      <div class="bg-card rounded-lg p-6 w-full max-w-2xl max-h-[88vh] overflow-y-auto space-y-5" style="box-shadow: var(--shadow-card)">
-        <div class="flex items-start justify-between gap-4">
-          <div class="min-w-0">
-            <div class="text-xs font-medium text-muted-foreground">{{ itemTypeLabel(currentApp.type) }} / 运行参数</div>
-            <h2 class="mt-1 truncate text-base font-semibold tracking-[-0.32px]">{{ currentApp.name }}</h2>
-          </div>
-          <Button variant="ghost" size="sm" class="h-8 w-8 px-0 shrink-0" aria-label="关闭运行参数" @click="closeDialog">
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          </Button>
-        </div>
+  <DialogFrame
+    :open="open && !!currentApp"
+    :title="currentApp?.name || ''"
+    close-label="关闭运行参数"
+    panel-class="max-w-2xl"
+    content-class="space-y-5"
+    @close="closeDialog"
+  >
+    <template #subtitle>
+      <div v-if="currentApp" class="mb-1 text-xs font-medium text-muted-foreground">{{ itemTypeLabel(currentApp.type) }} / 运行参数</div>
+    </template>
 
-        <div class="space-y-2">
+    <template v-if="currentApp">
+      <div class="space-y-2">
           <div class="flex items-center justify-between gap-3">
             <label class="text-xs font-medium text-muted-foreground">方案</label>
             <span class="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
@@ -271,9 +265,9 @@ function launchDraft(delaySeconds?: number) {
               {{ profile.name || '未命名方案' }}
             </Button>
           </div>
-        </div>
+      </div>
 
-        <div class="space-y-1">
+      <div class="space-y-1">
           <div
             v-for="param in commandParams"
             :key="param.key"
@@ -298,9 +292,9 @@ function launchDraft(delaySeconds?: number) {
               @update:model-value="setRunParamValue(param, String($event ?? ''))"
             />
           </div>
-        </div>
+      </div>
 
-        <div class="space-y-2 rounded-md bg-secondary/60 p-3" style="box-shadow: var(--shadow-border)">
+      <div class="space-y-2 rounded-md bg-secondary/60 p-3" style="box-shadow: var(--shadow-border)">
           <div class="flex items-center justify-between gap-3">
             <label class="text-xs font-medium text-muted-foreground">方案名称</label>
             <Button
@@ -343,24 +337,23 @@ function launchDraft(delaySeconds?: number) {
               {{ selectedProfile ? '另存为新方案' : '保存方案' }}
             </Button>
           </div>
-        </div>
+      </div>
 
-        <div class="space-y-1.5">
+      <div class="space-y-1.5">
           <div class="text-xs font-medium text-muted-foreground">最终命令</div>
           <div class="max-h-24 overflow-y-auto rounded-md bg-secondary px-2.5 py-2 font-mono text-[11px] leading-5 text-foreground break-all">
             {{ previewCommand || '空命令' }}
           </div>
-        </div>
-
-        <div class="flex items-center justify-end gap-2 pt-1">
-          <Button variant="secondary" size="sm" @click="closeDialog">取消</Button>
-          <LaunchActionGroup
-            label="运行"
-            :default-delay-seconds="launchOptions?.delaySeconds"
-            @launch="launchDraft"
-          />
-        </div>
       </div>
-    </div>
-  </Teleport>
+    </template>
+
+    <template #footer>
+      <Button variant="secondary" size="sm" @click="closeDialog">取消</Button>
+      <LaunchActionGroup
+        label="运行"
+        :default-delay-seconds="launchOptions?.delaySeconds"
+        @launch="launchDraft"
+      />
+    </template>
+  </DialogFrame>
 </template>

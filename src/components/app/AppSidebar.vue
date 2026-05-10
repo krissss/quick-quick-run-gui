@@ -22,7 +22,6 @@ const emit = defineEmits<{
   openSettings: []
 }>()
 
-const APP_TYPES: AppType[] = ['web', 'service', 'task']
 const sidebarSearch = ref('')
 const sidebarFilter = ref<'all' | AppType>('all')
 
@@ -38,14 +37,6 @@ const filteredApps = computed(() => {
     return haystack.includes(query)
   })
 })
-
-const groupedApps = computed(() => APP_TYPES
-  .map((type) => ({
-    type,
-    label: itemTypeLabel(type),
-    apps: filteredApps.value.filter((app) => app.type === type),
-  }))
-  .filter(group => group.apps.length > 0))
 
 const runningCount = computed(() =>
   props.apps.filter(app => props.runningAppIds.has(app.id)).length,
@@ -240,10 +231,10 @@ function sidebarSubtitle(app: AppItem) {
         type="button"
         variant="ghost"
         class="h-9 w-full justify-start gap-2.5 px-2"
-        :class="isNew ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'"
+        :class="isNew ? 'bg-card text-foreground shadow-[var(--shadow-border)]' : 'text-muted-foreground hover:text-foreground'"
         @click="$emit('add')"
       >
-        <div class="w-7 h-7 rounded-md flex items-center justify-center">
+        <div class="flex h-7 w-7 items-center justify-center rounded-md bg-secondary text-muted-foreground shadow-[var(--shadow-border)]">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
         </div>
         <span class="text-sm">添加应用</span>
@@ -255,63 +246,75 @@ function sidebarSubtitle(app: AppItem) {
         没有匹配的应用
       </div>
 
-      <div
-        v-for="group in groupedApps"
-        :key="group.type"
-        class="space-y-1.5 px-2 pb-3"
-      >
-        <div class="flex items-center justify-between px-2 text-[10px] font-medium text-muted-foreground">
-          <span>{{ group.label }}</span>
-          <span>{{ group.apps.length }}</span>
-        </div>
-
-        <div class="space-y-0.5">
-          <div
-            v-for="app in group.apps"
-            :key="app.id"
+      <div class="space-y-0.5 px-2">
+        <div
+          v-for="app in filteredApps"
+          :key="app.id"
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            class="relative h-auto w-full justify-start gap-2.5 px-2 py-2 text-left cursor-grab select-none touch-none active:cursor-grabbing"
+            :class="[
+              selectedAppId === app.id && !isNew ? 'bg-card text-foreground shadow-[var(--shadow-border)]' : 'text-foreground hover:bg-accent/50',
+              draggedAppId === app.id ? 'opacity-50' : '',
+              dragOverAppId === app.id ? 'bg-accent/70 shadow-[inset_0_0_0_1px_var(--ring)]' : '',
+            ]"
+            :data-app-id="app.id"
+            :title="`拖动排序：${app.name}`"
+            @pointerdown="handleAppPointerDown($event, app.id)"
+            @pointermove="handleAppPointerMove"
+            @pointerup="handleAppPointerUp"
+            @pointercancel="resetAppDrag"
+            @click="handleAppClick($event, app)"
           >
-            <Button
-              type="button"
-              variant="ghost"
-              class="h-auto w-full justify-start gap-2.5 px-2 py-2 text-left cursor-grab select-none touch-none active:cursor-grabbing"
-              :class="[
-                selectedAppId === app.id && !isNew ? 'bg-accent text-foreground' : 'text-foreground hover:bg-accent/50',
-                draggedAppId === app.id ? 'opacity-50' : '',
-                dragOverAppId === app.id ? 'bg-accent/70 shadow-[inset_0_0_0_1px_var(--ring)]' : '',
-              ]"
-              :data-app-id="app.id"
-              :title="`拖动排序：${app.name}`"
-              @pointerdown="handleAppPointerDown($event, app.id)"
-              @pointermove="handleAppPointerMove"
-              @pointerup="handleAppPointerUp"
-              @pointercancel="resetAppDrag"
-              @click="handleAppClick($event, app)"
-            >
-              <div class="relative shrink-0">
-                <div
-                  class="w-7 h-7 rounded-md flex items-center justify-center text-xs font-medium"
-                  :class="iconGradient(app.name)"
+            <span
+              v-if="selectedAppId === app.id && !isNew"
+              class="absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-foreground/70"
+              aria-hidden="true"
+            />
+            <div class="relative shrink-0">
+              <div
+                class="flex h-8 w-8 items-center justify-center rounded-md text-xs font-medium shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)]"
+                :class="iconGradient(app.name)"
+              >
+                {{ app.name.charAt(0).toUpperCase() }}
+              </div>
+              <span class="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-[4px] bg-card text-muted-foreground shadow-[var(--shadow-border)]">
+                <svg v-if="app.type === 'web'" xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M3 12h18" />
+                  <path d="M12 3a15 15 0 0 1 0 18" />
+                  <path d="M12 3a15 15 0 0 0 0 18" />
+                </svg>
+                <svg v-else-if="app.type === 'service'" xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M4 7h16" />
+                  <path d="M4 12h16" />
+                  <path d="M4 17h16" />
+                  <path d="M7 7v10" />
+                </svg>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8" />
+                  <path d="M12 8v4l3 2" />
+                </svg>
+              </span>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                <div class="truncate text-sm">{{ app.name }}</div>
+                <span
+                  v-if="runStatusLabel(app, runningAppIds, latestRuns)"
+                  class="rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none"
+                  :class="runStatusClass(app, runningAppIds, latestRuns)"
                 >
-                  {{ app.name.charAt(0).toUpperCase() }}
-                </div>
+                  {{ runStatusLabel(app, runningAppIds, latestRuns) }}
+                </span>
               </div>
-              <div class="min-w-0 flex-1">
-                <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                  <div class="truncate text-sm">{{ app.name }}</div>
-                  <span
-                    v-if="runStatusLabel(app, runningAppIds, latestRuns)"
-                    class="rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none"
-                    :class="runStatusClass(app, runningAppIds, latestRuns)"
-                  >
-                    {{ runStatusLabel(app, runningAppIds, latestRuns) }}
-                  </span>
-                </div>
-                <div class="mt-0.5 truncate text-[10px] text-muted-foreground">
-                  {{ sidebarSubtitle(app) || '未配置命令' }}
-                </div>
+              <div class="mt-0.5 truncate text-[10px] text-muted-foreground">
+                {{ sidebarSubtitle(app) || '未配置命令' }}
               </div>
-            </Button>
-          </div>
+            </div>
+          </Button>
         </div>
       </div>
     </div>
