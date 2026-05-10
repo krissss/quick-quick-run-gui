@@ -172,8 +172,7 @@ jobs:
           args: ${{ matrix.args }}
           appVersion: ${{ needs.prepare.outputs.version }}
           tagName: ${{ github.event.release.tag_name }}
-          releaseBody: ${{ needs.prepare.outputs.notes }}
-          includeUpdaterJson: true
+          includeUpdaterJson: false
           updaterJsonPreferNsis: true
           retryAttempts: 2
 
@@ -183,3 +182,31 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.upload_path }}
           if-no-files-found: error
+
+  publish-updater-json:
+    name: Publish updater JSON
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Generate and upload latest.json
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_NOTES: ${{ needs.prepare.outputs.notes }}
+          REPO: ${{ github.repository }}
+        run: |
+          node .github/scripts/generate-updater-json.mjs
+          gh release upload "$RELEASE_TAG" latest.json --repo "$REPO" --clobber
