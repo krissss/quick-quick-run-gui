@@ -1,6 +1,6 @@
 {
   "name": "quick-quick-run-gui",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Tauri desktop runner for local web apps, services, and scheduled tasks.",
   "author": "kriss",
   "license": "MIT",

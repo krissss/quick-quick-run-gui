@@ -78,7 +78,9 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: '--target aarch64-apple-darwin --bundles dmg'
+            # macOS updater metadata is generated from the app bundle artifact;
+            # dmg is still kept as the human-facing installer.
+            args: '--target aarch64-apple-darwin --bundles app,dmg'
             artifact: macos-aarch64
             cache_key: macos-aarch64
             upload_path: |
@@ -86,7 +88,7 @@ jobs:
               src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
               src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
           - platform: macos-latest
-            args: '--target x86_64-apple-darwin --bundles dmg'
+            args: '--target x86_64-apple-darwin --bundles app,dmg'
             artifact: macos-x86_64
             cache_key: macos-x86_64
             upload_path: |

@@ -1,6 +1,6 @@
 [package]
 name = "quick-quick-run-gui"
-version = "0.2.1"
+version = "0.2.2"
 description = "通用 Web App GUI 包装器"
 authors = ["kriss"]
 license = "MIT"
