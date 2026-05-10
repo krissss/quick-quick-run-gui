@@ -208,10 +208,29 @@ async fn launch_app_window(
         });
     }
 
+    let has_command = !command.trim().is_empty();
+
+    let running_web = {
+        let processes = recover_lock(&state.processes);
+        processes
+            .get(&app_id)
+            .filter(|info| info.item_type == ItemType::Web)
+            .map(|info| (info.pid, info.run_id.clone()))
+    };
+    if let Some((pid, run_id)) = running_web {
+        return Ok(LaunchResult {
+            message: if has_command {
+                "应用正在启动，已保留当前进程".into()
+            } else {
+                "窗口已打开".into()
+            },
+            pid,
+            run_id,
+        });
+    }
+
     // 先杀掉同 app_id 的旧进程
     kill_app_process(&app, &app_id);
-
-    let has_command = !command.trim().is_empty();
 
     if !has_command {
         // 无命令：直接创建窗口

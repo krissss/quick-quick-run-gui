@@ -155,9 +155,17 @@ export function useLauncher(
     const openLog = options.openLog ?? true
     if (trigger === 'manual') cancelDelayedLaunch(app.id, false)
     if (trigger === 'manual' || trigger === 'delayed') resetAutomationAttempts(app.id)
+    const launchTarget = resolveAppProfile(app)
+    if (launchTarget.type === 'web') {
+      await refreshRunningApps()
+      if (runningAppIds.value.has(launchTarget.id)) {
+        await showAppWindow(launchTarget.id)
+        showMessage(`${launchTarget.name} 正在运行，已打开窗口`, 'info')
+        return
+      }
+    }
     loading.value = true
     try {
-      const launchTarget = resolveAppProfile(app)
       const [bgR, bgG, bgB] = getBackgroundRGB()
       const result = await invoke<{ message: string; pid: number | null; run_id: string | null }>('launch_app_window', {
         appId: launchTarget.id,

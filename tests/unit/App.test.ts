@@ -26,10 +26,11 @@ describe('App', () => {
   })
 
   it('wires restored apps to launcher, log dialog, and running controls', async () => {
+    const runningApps = [{ app_id: 'web-1', pid: 4321, item_type: 'web' as const }]
     const { mock, wrapper } = await mountApp({
       store: { apps: [webApp, serviceApp, taskApp] },
       logs: { 'web-1': ['ready'] },
-      runningApps: [{ app_id: 'web-1', pid: 4321, item_type: 'web' }],
+      runningApps,
       recentRuns: [serviceFailedRun, taskSuccessRun],
     })
 
@@ -47,8 +48,11 @@ describe('App', () => {
     expect(document.body.textContent).toContain('ready')
 
     await emit('app-launch-failed', { app_id: 'web-1', reason: 'process_exited' })
+    runningApps.length = 0
+    await emit('app-stopped', 'web-1')
     await flushPromises()
     await buttonContaining(wrapper, '重新启动').trigger('click')
+    await flushPromises()
     expect(mock.getCalls('launch_app_window')).toHaveLength(1)
   })
 

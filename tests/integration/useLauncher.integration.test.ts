@@ -110,6 +110,21 @@ describe('useLauncher integration', () => {
     wrapper.unmount()
   })
 
+  it('focuses an already running web app instead of launching it again', async () => {
+    const { launcher, mock, openLogDialog, showMessage, wrapper } = await mountLauncher({
+      runningApps: [{ app_id: 'demo-web-id', pid: 4321, item_type: 'web' }],
+    })
+
+    await launcher.launchApp(demoWeb)
+
+    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
+    expect(mock.getCalls('show_app_window').at(-1)?.payload).toEqual({ appId: 'demo-web-id' })
+    expect(openLogDialog).not.toHaveBeenCalled()
+    expect(showMessage).toHaveBeenCalledWith('demo-web 正在运行，已打开窗口', 'info')
+    expect(launcher.loading.value).toBe(false)
+    wrapper.unmount()
+  })
+
   it('launches apps, captures background color, opens logs for command apps, and handles no-command windows', async () => {
     document.body.style.backgroundColor = 'rgb(10, 20, 30)'
     const { launcher, openLogDialog, showMessage, wrapper } = await mountLauncher({
