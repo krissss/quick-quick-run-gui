@@ -16,7 +16,7 @@ use tauri::{Emitter, Manager};
 use tauri::{Listener, RunEvent};
 use tauri_plugin_store::StoreExt;
 
-use html_title::extract_html_title;
+use html_title::{extract_favicon_href, extract_html_title};
 use process::{
     append_run_record, clear_run_records, create_log_path, create_run_id, get_run_records,
     kill_app_process, latest_log_path_for_app, now_millis, persist_session,
@@ -55,6 +55,7 @@ pub fn run() {
             clear_app_logs,
             prune_log_records,
             get_recent_runs,
+            get_web_favicon,
             stop_app,
             show_app_window,
             notify_apps_updated,
@@ -564,6 +565,12 @@ fn prune_log_records(app: tauri::AppHandle) -> Result<ClearLogsResult, String> {
 #[tauri::command]
 fn get_recent_runs(app: tauri::AppHandle) -> Result<Vec<RunRecord>, String> {
     Ok(get_run_records(&app, None, 500))
+}
+
+/// 获取网页 favicon，用于主窗口列表展示
+#[tauri::command]
+async fn get_web_favicon(url: String) -> Result<Option<String>, String> {
+    fetch_web_favicon(&url).await
 }
 
 /// 停止应用进程（杀掉进程、关闭窗口）
@@ -1484,6 +1491,38 @@ async fn set_window_title_inner(window: &tauri::WebviewWindow, url: &str) -> Res
     }
 
     Ok(())
+}
+
+async fn fetch_web_favicon(url: &str) -> Result<Option<String>, String> {
+    let base_url = url::Url::parse(url).map_err(|e| format!("URL 无效: {}", e))?;
+    if !matches!(base_url.scheme(), "http" | "https") {
+        return Ok(None);
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    if let Ok(resp) = client.get(base_url.clone()).send().await {
+        if resp.status().is_success() {
+            if let Ok(html) = resp.text().await {
+                if let Some(href) = extract_favicon_href(&html) {
+                    if let Ok(icon_url) = base_url.join(&href) {
+                        if matches!(icon_url.scheme(), "http" | "https") {
+                            return Ok(Some(icon_url.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(base_url
+        .join("/favicon.ico")
+        .ok()
+        .map(|url| url.to_string()))
 }
 
 /// 窗口位置和大小

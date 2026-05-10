@@ -28,6 +28,8 @@ interface MockOptions {
   >
   holdUpdateDownload?: boolean
   appVersion?: string
+  favicons?: Record<string, string | null>
+  faviconResolver?: (url: string) => string | null
   rejectCommands?: Record<string, unknown>
 }
 
@@ -156,6 +158,10 @@ export function setupTauriMocks(options: MockOptions = {}) {
     if (cmd === 'notify_apps_updated') return null
     if (cmd === 'get_running_apps') return clone(options.runningApps ?? [])
     if (cmd === 'get_recent_runs') return clone(recentRuns)
+    if (cmd === 'get_web_favicon') {
+      const url = String(args.url)
+      return options.faviconResolver?.(url) ?? options.favicons?.[url] ?? null
+    }
     if (cmd === 'get_app_log_runs') {
       const appId = String(args.appId)
       const limit = typeof args.limit === 'number' ? args.limit : 50

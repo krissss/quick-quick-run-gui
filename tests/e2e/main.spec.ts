@@ -111,6 +111,7 @@ async function installTauriMock(page: Page, state: Record<string, unknown>) {
           if (cmd === 'get_app_logs') return []
           if (cmd === 'clear_app_logs') return { removed: 0 }
           if (cmd === 'prune_log_records') return { removed: 0 }
+          if (cmd === 'get_web_favicon') return null
           if (cmd === 'notify_apps_updated') return null
           if (cmd === 'launch_app_window') return { message: '已启动', pid: 1234, run_id: 'run-1' }
           if (cmd === 'stop_app' || cmd === 'show_app_window' || cmd === 'open_in_browser') return null
