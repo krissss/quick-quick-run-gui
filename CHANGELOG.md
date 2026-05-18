@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-05-18
+
+### Added
+
+- 添加网页和服务手动重启
+
+### Fixed
+
+- stabilize graceful stop signal on unix
+
 ## [0.2.4] - 2026-05-18
 
 ### Added
@@ -104,7 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 为 macOS 专属代码添加条件编译守卫，修复跨平台构建
 
-[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.1...v0.2.2
