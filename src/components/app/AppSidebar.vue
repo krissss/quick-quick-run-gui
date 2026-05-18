@@ -20,6 +20,7 @@ const emit = defineEmits<{
   add: []
   select: [app: AppItem]
   reorder: [activeId: string, targetId: string]
+  openPorts: []
   openSettings: []
 }>()
 
@@ -455,6 +456,23 @@ onUnmounted(() => {
     </div>
 
     <div class="p-3 shadow-[inset_0_1px_0_0_var(--border)]">
+      <Button
+        type="button"
+        variant="ghost"
+        class="mb-1 h-8 w-full justify-start gap-2.5 px-2 text-muted-foreground hover:text-foreground"
+        title="端口排查"
+        @click="$emit('openPorts')"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M6 3v6" />
+          <path d="M18 3v6" />
+          <path d="M6 15v6" />
+          <path d="M18 15v6" />
+          <path d="M6 9h12" />
+          <path d="M6 15h12" />
+        </svg>
+        <span class="text-xs">端口排查</span>
+      </Button>
       <Button
         type="button"
         variant="ghost"

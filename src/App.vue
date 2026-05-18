@@ -4,6 +4,7 @@ import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import AppDetailForm from '@/components/app/AppDetailForm.vue'
 import AppSidebar from '@/components/app/AppSidebar.vue'
 import LogDialog from '@/components/app/LogDialog.vue'
+import PortManagerDialog from '@/components/app/PortManagerDialog.vue'
 import SettingsDialog from '@/components/app/SettingsDialog.vue'
 import ToastMessages from '@/components/app/ToastMessages.vue'
 import RunParametersDialog from '@/components/command/RunParametersDialog.vue'
@@ -98,6 +99,7 @@ const {
 
 const runDialogApp = ref<AppItem | null>(null)
 const runDialogLaunchOptions = ref<LaunchOptions>({})
+const showPortManagerDialog = ref(false)
 const startupTimers: number[] = []
 
 function commandParamsFor(app: AppItem) {
@@ -107,6 +109,14 @@ function commandParamsFor(app: AppItem) {
 function closeRunDialog() {
   runDialogApp.value = null
   runDialogLaunchOptions.value = {}
+}
+
+function openPortManagerDialog() {
+  showPortManagerDialog.value = true
+}
+
+function closePortManagerDialog() {
+  showPortManagerDialog.value = false
 }
 
 async function requestLaunch(app: AppItem, options: LaunchOptions = {}) {
@@ -190,6 +200,7 @@ onUnmounted(() => {
       @add="openAddForm"
       @select="selectApp"
       @reorder="reorderApps"
+      @open-ports="openPortManagerDialog"
       @open-settings="openSettingsDialog"
     />
 
@@ -246,6 +257,12 @@ onUnmounted(() => {
       @clear-all="clearAllLogRuns"
       @close="closeLogDialog"
       @relaunch="relaunchFromLog"
+    />
+
+    <PortManagerDialog
+      :open="showPortManagerDialog"
+      @close="closePortManagerDialog"
+      @message="showMessage"
     />
 
     <SettingsDialog

@@ -1,6 +1,7 @@
 #[cfg(target_os = "macos")]
 mod dock;
 mod html_title;
+mod port_tools;
 mod process;
 #[cfg(target_os = "macos")]
 mod tray;
@@ -17,6 +18,7 @@ use tauri::{Listener, RunEvent};
 use tauri_plugin_store::StoreExt;
 
 use html_title::{extract_favicon_href, extract_html_title};
+use port_tools::{inspect_port_processes, kill_port_process, PortProcessInfo};
 use process::{
     append_run_record, clear_run_records, create_log_path, create_run_id, get_run_records,
     kill_app_process, latest_log_path_for_app, now_millis, persist_session,
@@ -59,6 +61,8 @@ pub fn run() {
             prune_log_records,
             get_recent_runs,
             get_web_favicon,
+            inspect_port,
+            kill_port_pid,
             stop_app,
             show_app_window,
             notify_apps_updated,
@@ -155,6 +159,11 @@ struct LaunchResult {
 #[derive(serde::Serialize)]
 struct ClearLogsResult {
     removed: usize,
+}
+
+#[derive(serde::Serialize)]
+struct KillPortResult {
+    message: String,
 }
 
 /// 启动应用并在新窗口中运行
@@ -375,6 +384,29 @@ async fn launch_app_window(
         message: "进程已启动".into(),
         pid: Some(pid),
         run_id: Some(run_id),
+    })
+}
+
+#[tauri::command]
+async fn inspect_port(port: u16) -> Result<Vec<PortProcessInfo>, String> {
+    if port == 0 {
+        return Err("端口号必须在 1 到 65535 之间".to_string());
+    }
+    inspect_port_processes(port)
+}
+
+#[tauri::command]
+async fn kill_port_pid(port: u16, pid: u32) -> Result<KillPortResult, String> {
+    if port == 0 {
+        return Err("端口号必须在 1 到 65535 之间".to_string());
+    }
+    let listeners = inspect_port_processes(port)?;
+    if !listeners.iter().any(|process| process.pid == pid) {
+        return Err(format!("PID {} 当前未监听端口 {}", pid, port));
+    }
+    kill_port_process(pid)?;
+    Ok(KillPortResult {
+        message: format!("已请求结束 PID {}（端口 {}）", pid, port),
     })
 }
 
