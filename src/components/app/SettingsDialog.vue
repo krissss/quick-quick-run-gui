@@ -9,6 +9,7 @@ defineProps<{
   autostartEnabled: boolean
   hideDockOnClose: boolean
   logRetentionLimit: number
+  gracefulStopTimeoutSeconds: number
   checkingForUpdates: boolean
   appVersion: string
   availableUpdateVersion: string
@@ -25,6 +26,7 @@ defineEmits<{
   toggleAutostart: [enabled: boolean]
   toggleHideDockOnClose: [enabled: boolean]
   updateLogRetentionLimit: [limit: number]
+  updateGracefulStopTimeoutSeconds: [seconds: number]
   checkUpdates: []
   installUpdate: []
   toggleTheme: []
@@ -76,6 +78,24 @@ defineEmits<{
           :model-value="logRetentionLimit"
           aria-label="日志保留数量"
           @update:model-value="$emit('updateLogRetentionLimit', Number($event))"
+        />
+      </div>
+
+      <div class="h-px shadow-[0_-1px_0_0_var(--border)]" />
+
+      <div class="flex items-center justify-between gap-4 py-3">
+        <div>
+          <div class="text-sm font-medium">停止等待</div>
+          <div class="text-xs text-muted-foreground mt-0.5">发送 Ctrl+C 后等待再强制结束</div>
+        </div>
+        <Input
+          class="h-8 w-24 text-right"
+          type="number"
+          min="1"
+          max="120"
+          :model-value="gracefulStopTimeoutSeconds"
+          aria-label="停止等待秒数"
+          @update:model-value="$emit('updateGracefulStopTimeoutSeconds', Number($event))"
         />
       </div>
 

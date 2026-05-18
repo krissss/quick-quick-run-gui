@@ -9,11 +9,15 @@ import { relaunch } from '@tauri-apps/plugin-process'
 import { check, type DownloadEvent, type Update } from '@tauri-apps/plugin-updater'
 import {
   DEFAULT_LOG_RETENTION_LIMIT,
+  DEFAULT_GRACEFUL_STOP_TIMEOUT_SECONDS,
   exportData,
   importData,
+  loadGracefulStopTimeoutSeconds,
   loadHideDockOnClose,
   loadLogRetentionLimit,
+  normalizeGracefulStopTimeoutSeconds,
   normalizeLogRetentionLimit,
+  saveGracefulStopTimeoutSeconds,
   saveHideDockOnClose,
   saveLogRetentionLimit,
 } from '@/lib/store'
@@ -83,6 +87,7 @@ export function useSettings(
   const autostartEnabled = ref(false)
   const hideDockOnClose = ref(false)
   const logRetentionLimit = ref(DEFAULT_LOG_RETENTION_LIMIT)
+  const gracefulStopTimeoutSeconds = ref(DEFAULT_GRACEFUL_STOP_TIMEOUT_SECONDS)
   const checkingForUpdates = ref(false)
   const appVersion = ref('')
   const availableUpdate = shallowRef<Update | null>(null)
@@ -140,6 +145,11 @@ export function useSettings(
       logRetentionLimit.value = DEFAULT_LOG_RETENTION_LIMIT
     }
     try {
+      gracefulStopTimeoutSeconds.value = await loadGracefulStopTimeoutSeconds()
+    } catch {
+      gracefulStopTimeoutSeconds.value = DEFAULT_GRACEFUL_STOP_TIMEOUT_SECONDS
+    }
+    try {
       autostartEnabled.value = await autostartIsEnabled()
     } catch {
       autostartEnabled.value = false
@@ -172,6 +182,16 @@ export function useSettings(
       logRetentionLimit.value = next
     } catch (e: unknown) {
       showMessage(`保存日志保留数量失败: ${getErrorMessage(e)}`, 'error')
+    }
+  }
+
+  async function updateGracefulStopTimeoutSeconds(value: number) {
+    const next = normalizeGracefulStopTimeoutSeconds(value)
+    try {
+      await saveGracefulStopTimeoutSeconds(next)
+      gracefulStopTimeoutSeconds.value = next
+    } catch (e: unknown) {
+      showMessage(`保存停止等待时间失败: ${getErrorMessage(e)}`, 'error')
     }
   }
 
@@ -296,10 +316,10 @@ export function useSettings(
   }
 
   return {
-    showSettingsDialog, autostartEnabled, hideDockOnClose, logRetentionLimit, checkingForUpdates, appVersion,
+    showSettingsDialog, autostartEnabled, hideDockOnClose, logRetentionLimit, gracefulStopTimeoutSeconds, checkingForUpdates, appVersion,
     availableUpdateVersion, updateReleaseNotes, updateInProgress, updateProgressPercent, updateProgressLabel,
     currentTheme, themeIcon, themeLabel, toggleTheme,
-    openSettingsDialog, toggleAutostart, toggleHideDockOnClose, updateLogRetentionLimit, closeSettingsDialog,
+    openSettingsDialog, toggleAutostart, toggleHideDockOnClose, updateLogRetentionLimit, updateGracefulStopTimeoutSeconds, closeSettingsDialog,
     checkForUpdates, installAvailableUpdate,
     handleExport, handleImport,
   }

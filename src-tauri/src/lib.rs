@@ -27,6 +27,9 @@ use process::{
 };
 use url_check::check_url_inner;
 
+#[cfg(debug_assertions)]
+const DEV_SERVER_URL: &str = "http://localhost:47891";
+
 /// Lock a Mutex, recovering from poison by taking the guard.
 fn recover_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
@@ -388,19 +391,29 @@ fn launch_command_item(
         return Err("命令不能为空".to_string());
     }
 
-    if item_type == ItemType::Task {
-        let already_running = app
-            .try_state::<AppState>()
-            .map(|state| recover_lock(&state.processes).contains_key(&app_id))
-            .unwrap_or(false);
-        if already_running {
+    let running_item = app.try_state::<AppState>().and_then(|state| {
+        recover_lock(&state.processes)
+            .get(&app_id)
+            .map(|info| (info.pid, info.run_id.clone()))
+    });
+    if let Some((pid, run_id)) = running_item {
+        if item_type == ItemType::Task {
             return Ok(LaunchResult {
                 message: "任务正在运行".into(),
                 pid: None,
                 run_id: None,
             });
         }
-    } else {
+        if should_reuse_running_command_item(item_type, trigger) {
+            return Ok(LaunchResult {
+                message: "服务正在运行".into(),
+                pid,
+                run_id,
+            });
+        }
+    }
+
+    if item_type != ItemType::Task {
         kill_app_process(app, &app_id);
     }
 
@@ -971,6 +984,10 @@ fn should_advance_schedule_state(result: &Result<LaunchResult, String>) -> bool 
     matches!(result, Ok(result) if result.run_id.is_some())
 }
 
+fn should_reuse_running_command_item(item_type: ItemType, trigger: RunTrigger) -> bool {
+    item_type == ItemType::Service && trigger == RunTrigger::Startup
+}
+
 fn read_scheduled_items(app: &tauri::AppHandle) -> Vec<StoredRunItem> {
     let Ok(store) = app.store("qqr-store.json") else {
         return Vec::new();
@@ -1352,6 +1369,22 @@ mod scheduler_tests {
     }
 
     #[test]
+    fn startup_service_reuses_existing_command_item() {
+        assert!(should_reuse_running_command_item(
+            ItemType::Service,
+            RunTrigger::Startup
+        ));
+        assert!(!should_reuse_running_command_item(
+            ItemType::Service,
+            RunTrigger::Manual
+        ));
+        assert!(!should_reuse_running_command_item(
+            ItemType::Task,
+            RunTrigger::Startup
+        ));
+    }
+
+    #[test]
     fn builds_command_from_active_profile_values() {
         let mut values = HashMap::new();
         values.insert("account".to_string(), "demo".to_string());
@@ -1584,7 +1617,8 @@ fn build_app_window_url(target_url: &str) -> tauri::WebviewUrl {
     #[cfg(debug_assertions)]
     {
         let url = format!(
-            "http://localhost:5173/app-window.html?url={}",
+            "{}/app-window.html?url={}",
+            DEV_SERVER_URL,
             urlencoding::encode(target_url),
         );
         tauri::WebviewUrl::External(url.parse().unwrap())

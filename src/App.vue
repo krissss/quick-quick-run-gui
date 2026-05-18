@@ -71,6 +71,7 @@ const {
   autostartEnabled,
   hideDockOnClose,
   logRetentionLimit,
+  gracefulStopTimeoutSeconds,
   checkingForUpdates,
   appVersion,
   availableUpdateVersion,
@@ -85,6 +86,7 @@ const {
   toggleAutostart,
   toggleHideDockOnClose,
   updateLogRetentionLimit,
+  updateGracefulStopTimeoutSeconds,
   closeSettingsDialog,
   checkForUpdates,
   installAvailableUpdate,
@@ -247,6 +249,7 @@ onUnmounted(() => {
       :autostart-enabled="autostartEnabled"
       :hide-dock-on-close="hideDockOnClose"
       :log-retention-limit="logRetentionLimit"
+      :graceful-stop-timeout-seconds="gracefulStopTimeoutSeconds"
       :checking-for-updates="checkingForUpdates"
       :app-version="appVersion"
       :available-update-version="availableUpdateVersion"
@@ -260,6 +263,7 @@ onUnmounted(() => {
       @toggle-autostart="toggleAutostart"
       @toggle-hide-dock-on-close="toggleHideDockOnClose"
       @update-log-retention-limit="updateLogRetentionLimit"
+      @update-graceful-stop-timeout-seconds="updateGracefulStopTimeoutSeconds"
       @check-updates="checkForUpdates"
       @install-update="installAvailableUpdate"
       @toggle-theme="toggleTheme"

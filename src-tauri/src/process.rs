@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{Local, TimeZone};
 use command_group::CommandGroup;
@@ -17,8 +17,11 @@ const STORE_FILE: &str = "qqr-store.json";
 const SESSIONS_KEY: &str = "running_sessions";
 const RUN_RECORDS_KEY: &str = "run_records";
 const LOG_RETENTION_LIMIT_KEY: &str = "log_retention_limit";
+const GRACEFUL_STOP_TIMEOUT_SECONDS_KEY: &str = "graceful_stop_timeout_seconds";
 const DEFAULT_LOG_RETENTION_LIMIT: usize = 20;
 const MAX_LOG_RETENTION_LIMIT: usize = 200;
+const DEFAULT_GRACEFUL_STOP_TIMEOUT_SECONDS: u64 = 10;
+const MAX_GRACEFUL_STOP_TIMEOUT_SECONDS: u64 = 120;
 const LOG_TAIL_BYTES: u64 = 1024 * 1024;
 const MAX_RUN_RECORDS: usize = 500;
 
@@ -130,7 +133,7 @@ pub fn kill_app_process(handle: &tauri::AppHandle, app_id: &str) {
         };
         if let Some(info) = info {
             finish_process_run(handle, &info, RunStatus::Killed, None);
-            kill_process_info(info);
+            stop_process_info(info, graceful_stop_timeout(handle));
         }
     }
     remove_persisted_session(handle, app_id);
@@ -157,13 +160,14 @@ pub fn force_kill_all(handle: &tauri::AppHandle) {
     };
     let mut app_ids = app_ids;
     let killed_ids = app_ids.clone();
+    let timeout = graceful_stop_timeout(handle);
     for info in infos {
         finish_process_run(handle, &info, RunStatus::Killed, None);
-        kill_process_info(info);
+        stop_process_info(info, timeout);
     }
     for session in read_persisted_sessions(handle) {
         if !killed_ids.contains(&session.app_id) {
-            let _ = kill_process_group(session.pid);
+            let _ = stop_process_group(session.pid, timeout);
             if let Some(run_id) = session.run_id {
                 finish_run_record(handle, &run_id, RunStatus::Killed, None);
             }
@@ -733,13 +737,79 @@ fn run_status_from_exit(status: &ExitStatus) -> RunStatus {
     }
 }
 
-fn kill_process_info(info: ProcessInfo) {
+fn stop_process_info(info: ProcessInfo, timeout: Duration) {
     if let Some(mut child) = info.child {
+        let pid = child.id();
+        let _ = interrupt_process_group(pid);
+        if wait_child_process_group_exit(&mut child, pid, timeout) {
+            return;
+        }
         let _ = child.kill();
+        if is_process_group_alive(pid) {
+            let _ = kill_process_group(pid);
+        }
         return;
     }
     if let Some(pid) = info.pid {
-        let _ = kill_process_group(pid);
+        let _ = stop_process_group(pid, timeout);
+    }
+}
+
+fn stop_process_group(pid: u32, timeout: Duration) -> std::io::Result<ExitStatus> {
+    let _ = interrupt_process_group(pid);
+    wait_process_group_exit(pid, timeout);
+    if !is_process_group_alive(pid) {
+        return successful_noop_status();
+    }
+    kill_process_group(pid)
+}
+
+fn wait_child_process_group_exit(
+    child: &mut command_group::GroupChild,
+    pid: u32,
+    timeout: Duration,
+) -> bool {
+    let start = Instant::now();
+    loop {
+        let _ = child.try_wait();
+        if !is_process_group_alive(pid) {
+            return true;
+        }
+        if start.elapsed() >= timeout {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn wait_process_group_exit(pid: u32, timeout: Duration) {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if !is_process_group_alive(pid) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn interrupt_process_group(pid: u32) -> std::io::Result<ExitStatus> {
+    #[cfg(unix)]
+    {
+        let group = format!("-{}", pid);
+        let status = Command::new("kill").args(["-INT", &group]).status();
+        if matches!(status.as_ref(), Ok(s) if s.success()) {
+            return status;
+        }
+        Command::new("kill")
+            .args(["-INT", &pid.to_string()])
+            .status()
+    }
+
+    #[cfg(windows)]
+    {
+        Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T"])
+            .status()
     }
 }
 
@@ -764,11 +834,39 @@ fn kill_process_group(pid: u32) -> std::io::Result<ExitStatus> {
     }
 }
 
+fn successful_noop_status() -> std::io::Result<ExitStatus> {
+    #[cfg(unix)]
+    {
+        Command::new("true").status()
+    }
+
+    #[cfg(windows)]
+    {
+        Command::new("cmd").args(["/C", "exit", "0"]).status()
+    }
+}
+
+fn graceful_stop_timeout(handle: &tauri::AppHandle) -> Duration {
+    let seconds = handle
+        .store(STORE_FILE)
+        .ok()
+        .and_then(|store| {
+            let _ = store.reload();
+            store.get(GRACEFUL_STOP_TIMEOUT_SECONDS_KEY)
+        })
+        .and_then(|value| value.as_u64())
+        .filter(|value| *value > 0)
+        .map(|value| value.min(MAX_GRACEFUL_STOP_TIMEOUT_SECONDS))
+        .unwrap_or(DEFAULT_GRACEFUL_STOP_TIMEOUT_SECONDS);
+    Duration::from_secs(seconds)
+}
+
 fn is_process_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
         Command::new("kill")
             .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
             .status()
             .map(|status| status.success())
             .unwrap_or(false)
@@ -783,6 +881,25 @@ fn is_process_alive(pid: u32) -> bool {
             return false;
         };
         String::from_utf8_lossy(&output.stdout).contains(&pid.to_string())
+    }
+}
+
+fn is_process_group_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        let group = format!("-{}", pid);
+        Command::new("kill")
+            .args(["-0", &group])
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+            || is_process_alive(pid)
+    }
+
+    #[cfg(windows)]
+    {
+        is_process_alive(pid)
     }
 }
 
@@ -877,6 +994,39 @@ mod tests {
         let (mut child, pid) = result.unwrap();
         assert!(pid > 0);
         let _ = child.kill();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn graceful_stop_waits_for_signal_cleanup() {
+        let marker = std::env::temp_dir().join(format!("qqr-signal-marker-{}", now_millis()));
+        let command = format!(
+            "touch {path}; trap 'sleep 1; rm -f {path}; exit 0' INT; while [ -f {path} ]; do sleep 1; done",
+            path = marker.to_string_lossy(),
+        );
+        let result = spawn_shell_command(&command, None, None);
+        assert!(result.is_ok());
+        let (child, pid) = result.unwrap();
+        assert!(pid > 0);
+
+        let started = Instant::now();
+        while !marker.exists() && started.elapsed() < Duration::from_secs(2) {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(marker.exists());
+
+        let info = ProcessInfo {
+            child: Some(child),
+            pid: Some(pid),
+            log_path: None,
+            logs: Arc::new(Mutex::new(Vec::new())),
+            item_type: ItemType::Service,
+            run_id: None,
+            window: None,
+        };
+        stop_process_info(info, Duration::from_secs(3));
+
+        assert!(!marker.exists());
     }
 
     #[test]
