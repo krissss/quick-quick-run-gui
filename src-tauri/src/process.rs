@@ -10,6 +10,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{Local, TimeZone};
 use command_group::CommandGroup;
+#[cfg(unix)]
+use command_group::{Signal, UnixChildExt};
 use tauri::{Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
@@ -740,6 +742,9 @@ fn run_status_from_exit(status: &ExitStatus) -> RunStatus {
 fn stop_process_info(info: ProcessInfo, timeout: Duration) {
     if let Some(mut child) = info.child {
         let pid = child.id();
+        #[cfg(unix)]
+        let _ = child.signal(Signal::SIGINT);
+        #[cfg(windows)]
         let _ = interrupt_process_group(pid);
         if wait_child_process_group_exit(&mut child, pid, timeout) {
             return;
