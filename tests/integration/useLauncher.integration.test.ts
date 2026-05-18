@@ -263,6 +263,70 @@ describe('useLauncher integration', () => {
     wrapper.unmount()
   })
 
+  it('manually restarts running web and service apps', async () => {
+    const { launcher, mock, openLogDialog, wrapper } = await mountLauncher()
+    launcher.runningAppIds.value = new Set(['demo-web-id'])
+    launcher.runningPids.value = new Map([['demo-web-id', 4321]])
+
+    await launcher.restartApp(demoWeb)
+    await flushPromises()
+
+    expect(mock.getCalls('stop_app').at(-1)?.payload).toEqual({ appId: 'demo-web-id' })
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      appId: 'demo-web-id',
+      itemType: 'web',
+      launchTrigger: 'manual',
+    })
+    expect(openLogDialog).not.toHaveBeenCalled()
+    expect(launcher.restartingAppIds.value.has('demo-web-id')).toBe(false)
+
+    const service = normalizeApp(serviceApp)
+    const serviceCase = await mountLauncher({}, [service])
+    serviceCase.launcher.runningAppIds.value = new Set([service.id])
+    serviceCase.launcher.runningPids.value = new Map([[service.id, 2468]])
+
+    await serviceCase.launcher.restartApp(service)
+    await flushPromises()
+
+    expect(serviceCase.mock.getCalls('stop_app').at(-1)?.payload).toEqual({ appId: service.id })
+    expect(serviceCase.mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      appId: service.id,
+      itemType: 'service',
+      launchTrigger: 'manual',
+    })
+    expect(serviceCase.openLogDialog).toHaveBeenCalledWith(service)
+    serviceCase.wrapper.unmount()
+    wrapper.unmount()
+  })
+
+  it('reports manual restart failures and ignores task restarts', async () => {
+    const { launcher, mock, showMessage, wrapper } = await mountLauncher({
+      rejectCommands: {
+        stop_app: new Error('cannot stop'),
+      },
+    })
+    launcher.runningAppIds.value = new Set(['demo-web-id'])
+
+    await launcher.restartApp(demoWeb)
+    await launcher.restartApp(normalizeApp(taskApp))
+
+    expect(showMessage).toHaveBeenCalledWith('重启失败: cannot stop', 'error')
+    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
+    expect(launcher.restartingAppIds.value.has('demo-web-id')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('ignores manual restart requests for stopped web and service apps', async () => {
+    const { launcher, mock, wrapper } = await mountLauncher()
+
+    await launcher.restartApp(demoWeb)
+    await launcher.restartApp(normalizeApp(serviceApp))
+
+    expect(mock.getCalls('stop_app')).toHaveLength(0)
+    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
   it('automatically restarts failed services within the configured attempt limit', async () => {
     vi.useFakeTimers()
     const service = normalizeApp({

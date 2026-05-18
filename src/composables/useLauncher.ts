@@ -56,6 +56,7 @@ export function useLauncher(
   const runningPids = ref<Map<string, number>>(new Map())
   const latestRuns = ref<Map<string, RunRecord>>(new Map())
   const pendingLaunches = ref<Map<string, PendingLaunch>>(new Map())
+  const restartingAppIds = ref<Set<string>>(new Set())
   const automationAttempts = new Map<string, number>()
   const delayedLaunchTimers = new Map<string, number>()
 
@@ -318,6 +319,39 @@ export function useLauncher(
     }
   }
 
+  async function restartApp(app: AppItem) {
+    if (app.type !== 'web' && app.type !== 'service') return
+    if (!runningAppIds.value.has(app.id)) return
+    if (restartingAppIds.value.has(app.id)) return
+
+    const restarting = new Set(restartingAppIds.value)
+    restarting.add(app.id)
+    restartingAppIds.value = restarting
+    loading.value = true
+
+    try {
+      await invoke('stop_app', { appId: app.id })
+      cancelDelayedLaunch(app.id, false)
+
+      const running = new Set(runningAppIds.value)
+      running.delete(app.id)
+      runningAppIds.value = running
+      const pids = new Map(runningPids.value)
+      pids.delete(app.id)
+      runningPids.value = pids
+
+      await launchApp(app, { openLog: app.type === 'service' })
+    } catch (e: unknown) {
+      showMessage(`重启失败: ${getErrorMessage(e)}`, 'error')
+    } finally {
+      const next = new Set(restartingAppIds.value)
+      next.delete(app.id)
+      restartingAppIds.value = next
+      loading.value = false
+      await refreshRunningApps()
+    }
+  }
+
   async function showAppWindow(appId: string) {
     try {
       await invoke('show_app_window', { appId })
@@ -330,10 +364,12 @@ export function useLauncher(
     runningPids,
     latestRuns,
     pendingLaunches,
+    restartingAppIds,
     refreshRunningApps,
     launchApp,
     cancelDelayedLaunch,
     stopApp,
+    restartApp,
     showAppWindow,
   }
 }

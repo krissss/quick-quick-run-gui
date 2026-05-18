@@ -5,14 +5,15 @@ import CronSchedulePicker from '@/components/schedule/CronSchedulePicker.vue'
 import { serviceApp, taskApp, taskSuccessRun, webApp } from '../../../fixtures/apps'
 import { buttonContaining, inputByPlaceholder } from '../../../helpers/dom'
 
-function mountDetail(app = webApp, options: { isNew?: boolean; pending?: boolean } = {}) {
+function mountDetail(app = webApp, options: { isNew?: boolean; pending?: boolean; running?: boolean } = {}) {
+  const running = options.running ?? app.id === 'web-1'
   return mount(AppDetailForm, {
     attachTo: document.body,
     props: {
       modelValue: { ...app, schedule: { ...app.schedule }, profiles: [...app.profiles] },
       isNew: options.isNew ?? false,
-      runningAppIds: new Set(app.id === 'web-1' ? ['web-1'] : []),
-      runningPids: new Map(app.id === 'web-1' ? [['web-1', 4321]] : []),
+      runningAppIds: new Set(running ? [app.id] : []),
+      runningPids: new Map(running ? [[app.id, 4321]] : []),
       latestRuns: new Map([['task-1', taskSuccessRun]]),
       pendingLaunches: new Map(options.pending ? [[app.id, {
         appId: app.id,
@@ -20,6 +21,7 @@ function mountDetail(app = webApp, options: { isNew?: boolean; pending?: boolean
         delaySeconds: 60,
         runAt: Date.UTC(2026, 4, 4, 6, 30, 0),
       }]] : []),
+      restartingAppIds: new Set(),
       'onUpdate:modelValue': () => {},
     },
   })
@@ -34,6 +36,7 @@ describe('AppDetailForm', () => {
     expect(wrapper.text()).not.toContain('类型目标')
     await buttonContaining(wrapper, '窗口').trigger('click')
     await buttonContaining(wrapper, '日志').trigger('click')
+    await buttonContaining(wrapper, '重启').trigger('click')
     await buttonContaining(wrapper, '停止').trigger('click')
     await buttonContaining(wrapper, '启动', true).trigger('click')
     await buttonContaining(wrapper, '复制').trigger('click')
@@ -41,6 +44,7 @@ describe('AppDetailForm', () => {
 
     expect(wrapper.emitted('showWindow')).toEqual([['web-1']])
     expect(wrapper.emitted('openLog')).toEqual([[expect.objectContaining({ id: 'web-1' })]])
+    expect(wrapper.emitted('restart')).toEqual([[expect.objectContaining({ id: 'web-1' })]])
     expect(wrapper.emitted('stop')).toEqual([['web-1']])
     expect(wrapper.emitted('launch')).toEqual([[expect.objectContaining({ id: 'web-1' })]])
     expect(wrapper.emitted('duplicate')).toHaveLength(1)
@@ -54,6 +58,14 @@ describe('AppDetailForm', () => {
     await buttonContaining(wrapper, '取消').trigger('click')
 
     expect(wrapper.emitted('cancelDelayedLaunch')).toEqual([['web-1']])
+  })
+
+  it('shows restart for running services but not running tasks', () => {
+    const serviceWrapper = mountDetail(serviceApp, { running: true })
+    const taskWrapper = mountDetail(taskApp, { running: true })
+
+    expect(serviceWrapper.text()).toContain('重启')
+    expect(taskWrapper.text()).not.toContain('重启')
   })
 
   it('emits form events for type, working directory, schedule, and save', async () => {

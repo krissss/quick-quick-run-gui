@@ -59,10 +59,12 @@ const {
   runningPids,
   latestRuns,
   pendingLaunches,
+  restartingAppIds,
   refreshRunningApps,
   launchApp,
   cancelDelayedLaunch,
   stopApp,
+  restartApp,
   showAppWindow,
 } = useLauncher(apps, showMessage, openLogDialog)
 
@@ -198,6 +200,7 @@ onUnmounted(() => {
       :running-pids="runningPids"
       :latest-runs="latestRuns"
       :pending-launches="pendingLaunches"
+      :restarting-app-ids="restartingAppIds"
       @save="saveApp"
       @duplicate="duplicateSelectedApp"
       @launch="requestLaunch"
@@ -214,6 +217,7 @@ onUnmounted(() => {
       @show-window="showAppWindow"
       @open-log="openExistingLogDialog"
       @stop="stopApp"
+      @restart="restartApp"
     />
 
     <RunParametersDialog

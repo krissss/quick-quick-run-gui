@@ -23,6 +23,7 @@ const props = defineProps<{
   runningPids: Map<string, number>
   latestRuns: Map<string, RunRecord>
   pendingLaunches: Map<string, PendingLaunch>
+  restartingAppIds: Set<string>
 }>()
 
 const emit = defineEmits<{
@@ -42,9 +43,13 @@ const emit = defineEmits<{
   showWindow: [appId: string]
   openLog: [app: AppItem]
   stop: [appId: string]
+  restart: [app: AppItem]
 }>()
 
 const pendingLaunch = computed(() => props.pendingLaunches.get(editForm.value.id) || null)
+const isRunning = computed(() => props.runningAppIds.has(editForm.value.id))
+const isRestartable = computed(() => isRunning.value && (editForm.value.type === 'web' || editForm.value.type === 'service'))
+const isRestarting = computed(() => props.restartingAppIds.has(editForm.value.id))
 
 function emitLaunch(delaySeconds?: number) {
   if (delaySeconds) emit('launch', editForm.value, { delaySeconds })
@@ -78,7 +83,7 @@ function emitLaunch(delaySeconds?: number) {
                   {{ runStatusLabel(editForm, props.runningAppIds, props.latestRuns) || itemTypeLabel(editForm.type) }}
                 </span>
                 <span v-if="props.runningPids.has(editForm.id)" class="font-mono text-[11px] text-muted-foreground">PID {{ props.runningPids.get(editForm.id) }}</span>
-                <Button v-if="editForm.type === 'web' && props.runningAppIds.has(editForm.id)" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" @click="$emit('showWindow', editForm.id)">
+                <Button v-if="editForm.type === 'web' && isRunning" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" @click="$emit('showWindow', editForm.id)">
                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
                   窗口
                 </Button>
@@ -86,7 +91,11 @@ function emitLaunch(delaySeconds?: number) {
                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
                   日志
                 </Button>
-                <Button v-if="props.runningAppIds.has(editForm.id)" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-destructive" @click="$emit('stop', editForm.id)">
+                <Button v-if="isRestartable" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" :disabled="isRestarting" @click="$emit('restart', editForm)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                  {{ isRestarting ? '重启中' : '重启' }}
+                </Button>
+                <Button v-if="isRunning" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-destructive" :disabled="isRestarting" @click="$emit('stop', editForm.id)">
                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"/></svg>
                   停止
                 </Button>
