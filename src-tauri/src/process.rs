@@ -12,8 +12,13 @@ use chrono::{Local, TimeZone};
 use command_group::CommandGroup;
 #[cfg(unix)]
 use command_group::{Signal, UnixChildExt};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use tauri::{Emitter, Manager};
 use tauri_plugin_store::StoreExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const STORE_FILE: &str = "qqr-store.json";
 const SESSIONS_KEY: &str = "running_sessions";
@@ -240,17 +245,17 @@ pub fn spawn_shell_command(
 
     #[cfg(target_os = "windows")]
     let child = {
-        use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         let mut cmd = Command::new("cmd");
         cmd.args(["/C", command])
             .stdout(stdout)
-            .stderr(stderr)
-            .creation_flags(CREATE_NO_WINDOW);
+            .stderr(stderr);
         if let Some(dir) = &working_directory {
             cmd.current_dir(dir);
         }
-        cmd.group_spawn()
+        cmd.group()
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
             .map_err(|e| format!("启动命令失败: {}", e))?
     };
 
@@ -448,7 +453,7 @@ pub fn read_log_tail(path: &Path, max_lines: usize) -> Vec<String> {
         return Vec::new();
     }
 
-    let text = String::from_utf8_lossy(&bytes);
+    let text = decode_log_bytes(&bytes);
     let mut lines: Vec<String> = text.lines().map(ToString::to_string).collect();
     if start > 0 && !lines.is_empty() {
         lines.remove(0);
@@ -457,6 +462,38 @@ pub fn read_log_tail(path: &Path, max_lines: usize) -> Vec<String> {
         lines.drain(0..lines.len() - max_lines);
     }
     lines
+}
+
+/// Decode log bytes: try UTF-8 first, fall back to GBK per line on Windows.
+#[cfg(target_os = "windows")]
+fn decode_log_bytes(bytes: &[u8]) -> String {
+    if let Ok(s) = String::from_utf8(bytes.to_vec()) {
+        return s;
+    }
+    let mut result = String::new();
+    let mut pos = 0;
+    while pos < bytes.len() {
+        let line_end = bytes[pos..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map(|i| pos + i + 1)
+            .unwrap_or(bytes.len());
+        let line_bytes = &bytes[pos..line_end];
+        match String::from_utf8(line_bytes.to_vec()) {
+            Ok(s) => result.push_str(&s),
+            Err(_) => {
+                let (cow, _, _) = encoding_rs::GBK.decode(line_bytes);
+                result.push_str(&cow);
+            }
+        }
+        pos = line_end;
+    }
+    result
+}
+
+#[cfg(not(target_os = "windows"))]
+fn decode_log_bytes(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
 pub fn create_log_path(app: &tauri::AppHandle, app_id: &str) -> Result<PathBuf, String> {
@@ -812,8 +849,11 @@ fn interrupt_process_group(pid: u32) -> std::io::Result<ExitStatus> {
 
     #[cfg(windows)]
     {
+        // Windows 下通过 cmd /C 启动的控制台进程无窗口，
+        // taskkill 不带 /F 的优雅终止（WM_CLOSE）无效，直接使用 /F 强制终止。
         Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T"])
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
             .status()
     }
 }
@@ -835,6 +875,7 @@ fn kill_process_group(pid: u32) -> std::io::Result<ExitStatus> {
     {
         Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
             .status()
     }
 }
@@ -847,7 +888,10 @@ fn successful_noop_status() -> std::io::Result<ExitStatus> {
 
     #[cfg(windows)]
     {
-        Command::new("cmd").args(["/C", "exit", "0"]).status()
+        Command::new("cmd")
+            .args(["/C", "exit", "0"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
     }
 }
 
@@ -881,6 +925,7 @@ fn is_process_alive(pid: u32) -> bool {
     {
         let Ok(output) = Command::new("tasklist")
             .args(["/FI", &format!("PID eq {}", pid)])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
         else {
             return false;

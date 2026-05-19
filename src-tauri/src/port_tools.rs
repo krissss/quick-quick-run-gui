@@ -3,6 +3,12 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::process::Command;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 #[derive(Clone, serde::Serialize)]
 pub struct PortProcessInfo {
     pub pid: u32,
@@ -38,6 +44,7 @@ pub fn kill_port_process(pid: u32) -> Result<(), String> {
     {
         let output = Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|e| format!("执行 taskkill 失败: {}", e))?;
         if output.status.success() {
@@ -128,6 +135,7 @@ fn parse_lsof_field_output(port: u16, output: &str) -> Result<Vec<PortProcessInf
 fn inspect_port_processes_windows(port: u16) -> Result<Vec<PortProcessInfo>, String> {
     let output = Command::new("netstat")
         .args(["-ano", "-p", "tcp"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| format!("执行 netstat 失败: {}", e))?;
     if !output.status.success() {
@@ -170,6 +178,7 @@ fn inspect_port_processes_windows(port: u16) -> Result<Vec<PortProcessInfo>, Str
 fn windows_task_names() -> Result<HashMap<u32, String>, String> {
     let output = Command::new("tasklist")
         .args(["/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| format!("执行 tasklist 失败: {}", e))?;
     if !output.status.success() {
@@ -294,6 +303,7 @@ fn read_process_details(pid: u32) -> Option<ProcessDetails> {
             "CommandLine,ParentProcessId",
             "/value",
         ])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
     if !output.status.success() {
