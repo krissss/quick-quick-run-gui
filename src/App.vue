@@ -256,6 +256,7 @@ onUnmounted(() => {
       @clear-selected="clearSelectedLogRun"
       @clear-all="clearAllLogRuns"
       @close="closeLogDialog"
+      @stop="stopApp"
       @relaunch="relaunchFromLog"
     />
 

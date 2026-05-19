@@ -20,6 +20,7 @@ const props = defineProps<{
 
 defineEmits<{
   close: []
+  stop: [appId: string]
   relaunch: [appId: string]
   selectRun: [runId: string | null]
   clearSelected: []
@@ -145,6 +146,7 @@ function triggerLabel(trigger: RunRecord['trigger']) {
         清理全部
       </Button>
       <div class="flex-1" />
+      <Button v-if="runningAppIds.has(appId)" variant="destructive" size="sm" @click="$emit('stop', appId)">停止</Button>
       <Button v-if="launchFailed" variant="destructive" size="sm" @click="$emit('relaunch', appId)">重新启动</Button>
       <Button variant="secondary" size="sm" @click="$emit('close')">关闭</Button>
     </template>
