@@ -491,18 +491,18 @@ onUnmounted(() => {
         type="button"
         variant="ghost"
         class="h-8 w-full justify-center gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-        title="端口排查"
+        title="进程排查"
         @click="$emit('openPorts')"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M6 3v6" />
-          <path d="M18 3v6" />
-          <path d="M6 15v6" />
-          <path d="M18 15v6" />
-          <path d="M6 9h12" />
-          <path d="M6 15h12" />
+          <rect x="3" y="3" width="7" height="7" rx="1.5" />
+          <rect x="14" y="3" width="7" height="7" rx="1.5" />
+          <rect x="8.5" y="14" width="7" height="7" rx="1.5" />
+          <path d="M10 6.5h4" />
+          <path d="M6.5 10v2a2 2 0 0 0 2 2h3.5" />
+          <path d="M17.5 10v2a2 2 0 0 1-2 2H12" />
         </svg>
-        <span class="text-xs">端口排查</span>
+        <span class="text-xs">进程排查</span>
       </Button>
       <Button
         type="button"

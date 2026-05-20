@@ -31,8 +31,11 @@ interface MockOptions {
   favicons?: Record<string, string | null>
   faviconResolver?: (url: string) => string | null
   portProcesses?: Record<string, unknown[]>
+  namedProcesses?: Record<string, unknown[]>
   killPortResult?: { message: string }
+  killProcessResult?: { message: string }
   clearPortAfterKill?: boolean
+  clearNameAfterKill?: boolean
   rejectCommands?: Record<string, unknown>
 }
 
@@ -188,6 +191,10 @@ export function setupTauriMocks(options: MockOptions = {}) {
       const runtimePortProcesses = storeData.__portProcesses as Record<string, unknown[]> | undefined
       return clone(runtimePortProcesses?.[String(args.port)] ?? options.portProcesses?.[String(args.port)] ?? [])
     }
+    if (cmd === 'inspect_process_name') {
+      const runtimeNamedProcesses = storeData.__namedProcesses as Record<string, unknown[]> | undefined
+      return clone(runtimeNamedProcesses?.[String(args.query)] ?? options.namedProcesses?.[String(args.query)] ?? [])
+    }
     if (cmd === 'kill_port_pid') {
       if (options.clearPortAfterKill) {
         storeData.__portProcesses = {
@@ -196,6 +203,15 @@ export function setupTauriMocks(options: MockOptions = {}) {
         }
       }
       return options.killPortResult ?? { message: `已结束 PID ${String(args.pid)}（端口 ${String(args.port)}）` }
+    }
+    if (cmd === 'kill_process_pid') {
+      if (options.clearNameAfterKill) {
+        storeData.__namedProcesses = {
+          ...(storeData.__namedProcesses as Record<string, unknown[]> | undefined),
+          [String(args.query)]: [],
+        }
+      }
+      return options.killProcessResult ?? { message: `已结束 PID ${String(args.pid)}（名称 ${String(args.query)}）` }
     }
     if (cmd === 'launch_app_window') {
       return options.launchResult ?? { message: '已启动', pid: 1234, run_id: 'run-1' }

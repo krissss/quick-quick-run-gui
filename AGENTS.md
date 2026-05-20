@@ -205,7 +205,7 @@ pnpm dlx shadcn-vue@latest add [组件名]
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **quick-quick-run-gui** (872 symbols, 2121 relationships, 68 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **quick-quick-run-gui** (902 symbols, 2228 relationships, 70 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

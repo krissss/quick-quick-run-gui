@@ -18,7 +18,10 @@ use tauri::{Listener, RunEvent};
 use tauri_plugin_store::StoreExt;
 
 use html_title::{extract_favicon_href, extract_html_title};
-use port_tools::{inspect_port_processes, kill_port_process, PortProcessInfo};
+use port_tools::{
+    inspect_named_processes, inspect_port_processes, kill_port_process, kill_process,
+    PortProcessInfo,
+};
 use process::{
     append_run_record, clear_run_records, create_log_path, create_run_id, get_run_records,
     kill_app_process, latest_log_path_for_app, now_millis, persist_session,
@@ -62,7 +65,9 @@ pub fn run() {
             get_recent_runs,
             get_web_favicon,
             inspect_port,
+            inspect_process_name,
             kill_port_pid,
+            kill_process_pid,
             stop_app,
             show_app_window,
             notify_apps_updated,
@@ -396,6 +401,11 @@ async fn inspect_port(port: u16) -> Result<Vec<PortProcessInfo>, String> {
 }
 
 #[tauri::command]
+async fn inspect_process_name(query: String) -> Result<Vec<PortProcessInfo>, String> {
+    inspect_named_processes(&query)
+}
+
+#[tauri::command]
 async fn kill_port_pid(port: u16, pid: u32) -> Result<KillPortResult, String> {
     if port == 0 {
         return Err("端口号必须在 1 到 65535 之间".to_string());
@@ -407,6 +417,18 @@ async fn kill_port_pid(port: u16, pid: u32) -> Result<KillPortResult, String> {
     kill_port_process(port, pid)?;
     Ok(KillPortResult {
         message: format!("已结束 PID {}（端口 {}）", pid, port),
+    })
+}
+
+#[tauri::command]
+async fn kill_process_pid(query: String, pid: u32) -> Result<KillPortResult, String> {
+    let processes = inspect_named_processes(&query)?;
+    if !processes.iter().any(|process| process.pid == pid) {
+        return Err(format!("PID {} 当前不匹配进程名称 {}", pid, query.trim()));
+    }
+    kill_process(pid)?;
+    Ok(KillPortResult {
+        message: format!("已结束 PID {}（名称 {}）", pid, query.trim()),
     })
 }
 
