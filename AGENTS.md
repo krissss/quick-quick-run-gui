@@ -22,9 +22,18 @@ Tauri v2 桌面运行器，用于管理三类条目：
 ```bash
 pnpm dev          # 仅启动 Vite 开发服务器（前端）
 pnpm run build    # 类型检查（vue-tsc）+ Vite 构建
+pnpm check:quick  # 提交前快速验证：前端 build + Rust fmt/clippy/test
+pnpm check:ci     # 发版前完整验证：Rust checks + audit/build/unit/integration/e2e
 pnpm tauri:dev    # Tauri 完整开发模式（Rust + 前端）
 pnpm tauri:build  # Tauri 生产构建
 ```
+
+### 提交前验证
+
+- 提交前优先运行 `pnpm check:quick`，避免 Rust fmt、clippy 或测试在 push 后才由 CI 暴露。
+- 发版前必须运行 `pnpm check:ci`，它对齐 GitHub Actions 的 Rust checks、Frontend build（含生产依赖审计）和 Frontend tests。
+- 如果只改前端且需要单独验证，可运行 `pnpm check:frontend`；如果只改 `src-tauri`，可运行 `pnpm check:rust`。
+- 若本地环境导致某项无法运行，提交或回复中必须明确说明跳过的命令、原因，以及是否已用 CI 或其他命令替代验证。
 
 ## 架构
 
@@ -196,7 +205,7 @@ pnpm dlx shadcn-vue@latest add [组件名]
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **quick-quick-run-gui** (842 symbols, 2052 relationships, 65 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **quick-quick-run-gui** (872 symbols, 2121 relationships, 68 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
