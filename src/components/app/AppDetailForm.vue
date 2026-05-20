@@ -60,9 +60,9 @@ function emitLaunch(delaySeconds?: number) {
 <template>
   <div class="flex-1 overflow-y-auto">
     <div data-testid="app-detail-panel" class="mx-auto max-w-[780px] px-8 py-8">
-      <div class="overflow-hidden rounded-lg bg-card" style="box-shadow: var(--shadow-card)">
+      <div class="rounded-lg bg-card" style="box-shadow: var(--shadow-card)">
         <div class="px-5 py-4 shadow-[inset_0_-1px_0_0_var(--border)]">
-          <div class="flex min-h-[64px] items-center gap-4">
+          <div class="flex min-h-[64px] items-start gap-4">
             <div
               v-if="!props.isNew && editForm.name"
               class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-lg font-semibold shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)]"
@@ -91,15 +91,44 @@ function emitLaunch(delaySeconds?: number) {
                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
                   日志
                 </Button>
-                <Button v-if="isRestartable" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" :disabled="isRestarting" @click="$emit('restart', editForm)">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
-                  {{ isRestarting ? '重启中' : '重启' }}
-                </Button>
-                <Button v-if="isRunning" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-destructive" :disabled="isRestarting" @click="$emit('stop', editForm.id)">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"/></svg>
-                  停止
-                </Button>
+                <div
+                  v-if="pendingLaunch"
+                  class="flex h-6 items-center gap-2 rounded-md bg-secondary px-2 text-[11px] text-muted-foreground shadow-[var(--shadow-border)]"
+                >
+                  <span>
+                    {{ formatDelayLabel(pendingLaunch.delaySeconds) }}后 · {{ formatRunAtTime(pendingLaunch.runAt) }}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    class="h-5 px-1.5 text-[11px]"
+                    @click="$emit('cancelDelayedLaunch', editForm.id)"
+                  >
+                    取消
+                  </Button>
+                </div>
               </div>
+            </div>
+
+            <div
+              v-if="!props.isNew"
+              class="flex shrink-0 flex-wrap items-start justify-end gap-1.5 pt-0.5"
+            >
+              <LaunchActionGroup
+                v-if="!isRunning"
+                :label="primaryActionLabel(editForm)"
+                size="large"
+                @launch="emitLaunch"
+              />
+              <Button v-if="isRunning" type="button" variant="destructive" class="h-9 gap-2 px-4 text-sm" :disabled="isRestarting" @click="$emit('stop', editForm.id)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"/></svg>
+                停止
+              </Button>
+              <Button v-if="isRestartable" type="button" variant="secondary" class="h-9 gap-2 px-4 text-sm text-muted-foreground hover:text-foreground" :disabled="isRestarting" @click="$emit('restart', editForm)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                {{ isRestarting ? '重启中' : '重启' }}
+              </Button>
             </div>
           </div>
         </div>
@@ -132,28 +161,6 @@ function emitLaunch(delaySeconds?: number) {
             </svg>
             复制
           </Button>
-          <LaunchActionGroup
-            v-if="!props.isNew"
-            :label="primaryActionLabel(editForm)"
-            @launch="emitLaunch"
-          />
-          <div
-            v-if="pendingLaunch"
-            class="flex h-7 items-center gap-2 rounded-md bg-secondary px-2 text-[11px] text-muted-foreground shadow-[var(--shadow-border)]"
-          >
-            <span>
-              {{ formatDelayLabel(pendingLaunch.delaySeconds) }}后 · {{ formatRunAtTime(pendingLaunch.runAt) }}
-            </span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              class="h-6 px-1.5 text-[11px]"
-              @click="$emit('cancelDelayedLaunch', editForm.id)"
-            >
-              取消
-            </Button>
-          </div>
           <div class="flex-1" />
           <Button v-if="!props.isNew" variant="destructive" size="sm" @click="$emit('delete')">删除</Button>
         </div>

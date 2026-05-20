@@ -8,9 +8,11 @@ const props = withDefaults(defineProps<{
   label: string
   defaultDelaySeconds?: number | null
   disabled?: boolean
+  size?: 'compact' | 'large'
 }>(), {
   defaultDelaySeconds: null,
   disabled: false,
+  size: 'compact',
 })
 
 const emit = defineEmits<{
@@ -27,6 +29,19 @@ const primaryLabel = computed(() =>
   defaultDelay.value ? `${formatDelayLabel(defaultDelay.value)}后运行` : props.label,
 )
 const customDelaySeconds = computed(() => normalizeDelaySeconds(customDelay.value))
+const primaryButtonClass = computed(() =>
+  props.size === 'large'
+    ? 'h-9 rounded-r-none px-4 text-sm shadow-none'
+    : 'rounded-r-none shadow-none',
+)
+const menuButtonClass = computed(() =>
+  props.size === 'large'
+    ? 'h-9 w-9 rounded-l-none px-0 shadow-[inset_1px_0_0_0_rgba(255,255,255,0.24)]'
+    : 'w-7 rounded-l-none px-0 shadow-[inset_1px_0_0_0_rgba(255,255,255,0.24)]',
+)
+const primaryIconSize = computed(() => props.size === 'large' ? 14 : 14)
+const menuIconSize = computed(() => props.size === 'large' ? 14 : 12)
+const iconStrokeWidth = computed(() => props.size === 'large' ? 2.25 : 2.5)
 
 function toggleMenu() {
   if (props.disabled) return
@@ -85,12 +100,13 @@ onBeforeUnmount(detachGlobalListeners)
     <div class="inline-flex rounded-md">
       <Button
         type="button"
+        variant="default"
         size="sm"
-        class="rounded-r-none shadow-none"
+        :class="primaryButtonClass"
         :disabled="disabled"
         @click="launch(defaultDelay)"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" :width="primaryIconSize" :height="primaryIconSize" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="iconStrokeWidth" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M8 5v14l11-7z" />
         </svg>
         {{ primaryLabel }}
@@ -99,14 +115,14 @@ onBeforeUnmount(detachGlobalListeners)
         type="button"
         variant="default"
         size="sm"
-        class="w-7 rounded-l-none px-0 shadow-[inset_1px_0_0_0_rgba(255,255,255,0.24)]"
+        :class="menuButtonClass"
         :disabled="disabled"
         :aria-expanded="open"
         aria-label="延迟运行"
         title="延迟运行"
         @click="toggleMenu"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" :width="menuIconSize" :height="menuIconSize" viewBox="0 0 24 24" fill="none" stroke="currentColor" :stroke-width="iconStrokeWidth" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="9" />
           <path d="M12 7v5l3 2" />
         </svg>
@@ -115,7 +131,7 @@ onBeforeUnmount(detachGlobalListeners)
 
     <div
       v-if="open"
-      class="absolute bottom-full left-0 z-30 mb-2 w-56 rounded-lg bg-popover p-2"
+      class="absolute left-0 top-full z-30 mt-2 w-56 rounded-lg bg-popover p-2"
       style="box-shadow: var(--shadow-card)"
     >
       <div class="px-2 pb-1 text-[11px] font-medium text-muted-foreground">延迟运行</div>
