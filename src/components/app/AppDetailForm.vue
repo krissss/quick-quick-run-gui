@@ -13,6 +13,7 @@ import {
 } from '@/lib/appDisplay'
 import type { AppItem, AppType, MissedPolicy, RestartConfig, RetryConfig, StartupConfig } from '@/lib/store'
 import type { LaunchOptions, PendingLaunch, RunRecord } from '@/composables/useLauncher'
+import { useLogPreview } from '@/composables/useLogPreview'
 
 const editForm = defineModel<AppItem>({ required: true })
 
@@ -49,6 +50,11 @@ const pendingLaunch = computed(() => props.pendingLaunches.get(editForm.value.id
 const isRunning = computed(() => props.runningAppIds.has(editForm.value.id))
 const isRestartable = computed(() => isRunning.value && (editForm.value.type === 'web' || editForm.value.type === 'service'))
 const isRestarting = computed(() => props.restartingAppIds.has(editForm.value.id))
+
+const appId = computed(() => editForm.value.id)
+const hasCommand = computed(() => !!editForm.value.command)
+const { previewLines } = useLogPreview(appId, isRunning, hasCommand)
+const showLogPreview = computed(() => isRunning.value && hasCommand.value && previewLines.value.length > 0)
 
 function emitLaunch(delaySeconds?: number) {
   if (delaySeconds) emit('launch', editForm.value, { delaySeconds })
@@ -114,6 +120,19 @@ function emitLaunch(delaySeconds?: number) {
                 {{ isRestarting ? '重启中' : '重启' }}
               </Button>
             </div>
+          </div>
+        </div>
+
+        <div v-if="showLogPreview" class="relative mx-5 mt-4 rounded-md bg-[#1e1e2e] px-3 py-2 font-mono text-[11px] leading-[18px]">
+          <button
+            type="button"
+            class="absolute right-2 top-1.5 cursor-pointer text-[10px] text-zinc-500 hover:text-zinc-300"
+            @click="$emit('openLog', editForm)"
+          >
+            查看全部
+          </button>
+          <div v-for="(line, i) in previewLines" :key="i" class="truncate text-zinc-400" :title="line">
+            {{ line }}
           </div>
         </div>
 

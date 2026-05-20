@@ -224,7 +224,7 @@ function scheduleStartupLaunches() {
       await refreshRunningApps()
       const currentApp = apps.value.find(item => item.id === app.id)
       if (!currentApp || !currentApp.startup.enabled || runningAppIds.value.has(currentApp.id)) return
-      await launchApp(currentApp, { trigger: 'startup', openLog: false })
+      await launchApp(currentApp, { trigger: 'startup' })
     }, Math.max(0, app.startup.delaySeconds) * 1000)
     startupTimers.push(timer)
   }

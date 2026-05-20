@@ -42,7 +42,6 @@ interface RunUpdatedPayload {
 
 export interface LaunchOptions {
   trigger?: LaunchTrigger
-  openLog?: boolean
   delaySeconds?: number
 }
 
@@ -139,7 +138,6 @@ export function useLauncher(
       await launchApp(app, {
         ...options,
         trigger: 'delayed',
-        openLog: false,
         delaySeconds: undefined,
       })
     }, delaySeconds * 1000)
@@ -153,7 +151,6 @@ export function useLauncher(
       return
     }
     const trigger = options.trigger || 'manual'
-    const openLog = options.openLog ?? true
     if (trigger === 'manual') cancelDelayedLaunch(app.id, false)
     if (trigger === 'manual' || trigger === 'delayed') resetAutomationAttempts(app.id)
     const launchTarget = resolveAppProfile(app)
@@ -197,9 +194,6 @@ export function useLauncher(
       const s = new Set(runningAppIds.value)
       s.add(launchTarget.id)
       runningAppIds.value = s
-      if (openLog && launchTarget.command.trim()) {
-        await openLogDialog(launchTarget)
-      }
       await refreshRunningApps()
     } catch (e: unknown) {
       showMessage(`启动失败: ${getErrorMessage(e)}`, 'error')
@@ -240,7 +234,7 @@ export function useLauncher(
       if (!currentApp || runningAppIds.value.has(currentApp.id)) return
       if (kind === 'restart' && !currentApp.restart.enabled) return
       if (kind === 'retry' && !currentApp.retry.enabled) return
-      await launchApp(currentApp, { trigger, openLog: false })
+      await launchApp(currentApp, { trigger })
     }, Math.max(0, delaySeconds) * 1000)
   }
 
@@ -340,7 +334,7 @@ export function useLauncher(
       pids.delete(app.id)
       runningPids.value = pids
 
-      await launchApp(app, { openLog: app.type === 'service' })
+      await launchApp(app, {})
     } catch (e: unknown) {
       showMessage(`重启失败: ${getErrorMessage(e)}`, 'error')
     } finally {

@@ -125,7 +125,7 @@ describe('useLauncher integration', () => {
     wrapper.unmount()
   })
 
-  it('launches apps, captures background color, opens logs for command apps, and handles no-command windows', async () => {
+  it('launches apps, captures background color, and handles no-command windows', async () => {
     document.body.style.backgroundColor = 'rgb(10, 20, 30)'
     const { launcher, openLogDialog, showMessage, wrapper } = await mountLauncher({
       launchResult: { message: '窗口已打开', pid: null, run_id: null },
@@ -145,7 +145,7 @@ describe('useLauncher integration', () => {
     })
     await commandCase.launcher.launchApp(demoWeb)
 
-    expect(commandCase.openLogDialog).toHaveBeenCalledWith(demoWeb)
+    expect(commandCase.openLogDialog).not.toHaveBeenCalled()
     expect(commandCase.launcher.loading.value).toBe(false)
     commandCase.wrapper.unmount()
 
@@ -154,7 +154,7 @@ describe('useLauncher integration', () => {
     })
     await commandWithoutPid.launcher.launchApp(demoWeb)
     expect(commandWithoutPid.showMessage).toHaveBeenCalledWith('任务正在运行', 'success')
-    expect(commandWithoutPid.openLogDialog).toHaveBeenCalledWith(demoWeb)
+    expect(commandWithoutPid.openLogDialog).not.toHaveBeenCalled()
     commandWithoutPid.wrapper.unmount()
 
     const fallback = await mountLauncher({
@@ -202,11 +202,7 @@ describe('useLauncher integration', () => {
       workingDirectory: '/Users/demo/project',
       url: 'http://localhost:3000',
     })
-    expect(openLogDialog).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'demo-web-id',
-      command: 'pnpm dev demo --headless',
-      workingDirectory: '/Users/demo/project',
-    }))
+    expect(openLogDialog).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -294,7 +290,7 @@ describe('useLauncher integration', () => {
       itemType: 'service',
       launchTrigger: 'manual',
     })
-    expect(serviceCase.openLogDialog).toHaveBeenCalledWith(service)
+    expect(serviceCase.openLogDialog).not.toHaveBeenCalled()
     serviceCase.wrapper.unmount()
     wrapper.unmount()
   })
@@ -464,7 +460,7 @@ describe('useLauncher integration', () => {
     await emit('app-run-updated', { app_id: 'demo-web-id' })
     await emit('tray-launch-app', 'demo-web-id')
     await flushPromises()
-    expect(openLogDialog).toHaveBeenCalledWith(demoWeb)
+    expect(openLogDialog).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })
