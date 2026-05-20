@@ -30,6 +30,9 @@ interface MockOptions {
   appVersion?: string
   favicons?: Record<string, string | null>
   faviconResolver?: (url: string) => string | null
+  portProcesses?: Record<string, unknown[]>
+  killPortResult?: { message: string }
+  clearPortAfterKill?: boolean
   rejectCommands?: Record<string, unknown>
 }
 
@@ -181,6 +184,19 @@ export function setupTauriMocks(options: MockOptions = {}) {
       return { removed: before - recentRuns.length }
     }
     if (cmd === 'prune_log_records') return { removed: 0 }
+    if (cmd === 'inspect_port') {
+      const runtimePortProcesses = storeData.__portProcesses as Record<string, unknown[]> | undefined
+      return clone(runtimePortProcesses?.[String(args.port)] ?? options.portProcesses?.[String(args.port)] ?? [])
+    }
+    if (cmd === 'kill_port_pid') {
+      if (options.clearPortAfterKill) {
+        storeData.__portProcesses = {
+          ...(storeData.__portProcesses as Record<string, unknown[]> | undefined),
+          [String(args.port)]: [],
+        }
+      }
+      return options.killPortResult ?? { message: `已结束 PID ${String(args.pid)}（端口 ${String(args.port)}）` }
+    }
     if (cmd === 'launch_app_window') {
       return options.launchResult ?? { message: '已启动', pid: 1234, run_id: 'run-1' }
     }

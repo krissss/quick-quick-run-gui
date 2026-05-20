@@ -404,9 +404,9 @@ async fn kill_port_pid(port: u16, pid: u32) -> Result<KillPortResult, String> {
     if !listeners.iter().any(|process| process.pid == pid) {
         return Err(format!("PID {} 当前未监听端口 {}", pid, port));
     }
-    kill_port_process(pid)?;
+    kill_port_process(port, pid)?;
     Ok(KillPortResult {
-        message: format!("已请求结束 PID {}（端口 {}）", pid, port),
+        message: format!("已结束 PID {}（端口 {}）", pid, port),
     })
 }
 

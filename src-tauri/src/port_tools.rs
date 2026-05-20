@@ -2,6 +2,8 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::process::Command;
+use std::thread::sleep;
+use std::time::Duration;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -35,7 +37,7 @@ pub fn inspect_port_processes(port: u16) -> Result<Vec<PortProcessInfo>, String>
     }
 }
 
-pub fn kill_port_process(pid: u32) -> Result<(), String> {
+pub fn kill_port_process(port: u16, pid: u32) -> Result<(), String> {
     if pid == 0 {
         return Err("PID 无效".to_string());
     }
@@ -48,6 +50,7 @@ pub fn kill_port_process(pid: u32) -> Result<(), String> {
             .output()
             .map_err(|e| format!("执行 taskkill 失败: {}", e))?;
         if output.status.success() {
+            wait_until_port_released(port, pid, Duration::from_millis(1200))?;
             return Ok(());
         }
         return Err(command_error("taskkill", &output));
@@ -55,14 +58,78 @@ pub fn kill_port_process(pid: u32) -> Result<(), String> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        let output = Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .output()
-            .map_err(|e| format!("执行 kill 失败: {}", e))?;
-        if output.status.success() {
+        if let Some(process_group_id) = read_process_group_id(pid) {
+            let current_process_group_id = read_process_group_id(std::process::id());
+            if current_process_group_id != Some(process_group_id)
+                && signal_process_group(process_group_id, "TERM").is_ok()
+            {
+                if wait_until_port_released(port, pid, Duration::from_millis(1500)).is_ok() {
+                    return Ok(());
+                }
+                signal_process_group(process_group_id, "KILL")?;
+                wait_until_port_released(port, pid, Duration::from_millis(1500))?;
+                return Ok(());
+            }
+        }
+
+        signal_process(pid, "TERM")?;
+        if wait_until_port_released(port, pid, Duration::from_millis(1500)).is_ok() {
             return Ok(());
         }
-        Err(command_error("kill", &output))
+        signal_process(pid, "KILL")?;
+        wait_until_port_released(port, pid, Duration::from_millis(1500))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn signal_process(pid: u32, signal: &str) -> Result<(), String> {
+    let output = Command::new("kill")
+        .args([format!("-{}", signal), pid.to_string()])
+        .output()
+        .map_err(|e| format!("执行 kill -{} 失败: {}", signal, e))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_error(&format!("kill -{}", signal), &output))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn signal_process_group(process_group_id: u32, signal: &str) -> Result<(), String> {
+    let target = format!("-{}", process_group_id);
+    let output = Command::new("kill")
+        .args([format!("-{}", signal), target])
+        .output()
+        .map_err(|e| format!("执行 kill -{} 进程组失败: {}", signal, e))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_error(&format!("kill -{} 进程组", signal), &output))
+    }
+}
+
+fn wait_until_port_released(port: u16, pid: u32, timeout: Duration) -> Result<(), String> {
+    let start = std::time::Instant::now();
+    let mut listeners = Vec::new();
+    while start.elapsed() < timeout {
+        listeners = inspect_port_processes(port)?;
+        if !listeners.iter().any(|process| process.pid == pid) {
+            return Ok(());
+        }
+        sleep(Duration::from_millis(150));
+    }
+    let active_pids = listeners
+        .iter()
+        .map(|process| process.pid.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if active_pids.is_empty() {
+        Err(format!("PID {} 仍在监听端口 {}", pid, port))
+    } else {
+        Err(format!(
+            "端口 {} 仍被 PID {} 监听，请检查权限或自动重启进程",
+            port, active_pids
+        ))
     }
 }
 
@@ -290,6 +357,21 @@ fn read_process_details(pid: u32) -> Option<ProcessDetails> {
         parent_pid,
         command,
     })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn read_process_group_id(pid: u32) -> Option<u32> {
+    let output = Command::new("ps")
+        .args(["-o", "pgid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .ok()
 }
 
 #[cfg(target_os = "windows")]

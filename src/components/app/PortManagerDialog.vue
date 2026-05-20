@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import {
   AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -28,7 +26,7 @@ type PortProcessInfo = {
   raw: string
 }
 
-defineProps<{
+const props = defineProps<{
   open: boolean
 }>()
 
@@ -38,11 +36,14 @@ const emit = defineEmits<{
 }>()
 
 const portInput = ref('')
+const portInputRef = ref<{ $el: HTMLInputElement } | null>(null)
 const results = ref<PortProcessInfo[]>([])
 const searchedPort = ref<number | null>(null)
 const isInspecting = ref(false)
 const killingPid = ref<number | null>(null)
 const pendingKill = ref<PortProcessInfo | null>(null)
+const statusMessage = ref('')
+const statusType = ref<'success' | 'error' | 'info'>('info')
 
 const parsedPort = computed(() => {
   const value = Number(portInput.value)
@@ -51,6 +52,18 @@ const parsedPort = computed(() => {
 })
 
 const canInspect = computed(() => parsedPort.value !== null && !isInspecting.value)
+
+watch(() => props.open, async (open) => {
+  if (!open) return
+  await nextTick()
+  portInputRef.value?.$el?.focus()
+})
+
+function setStatus(text: string, type: 'success' | 'error' | 'info' = 'info') {
+  statusMessage.value = text
+  statusType.value = type
+  emit('message', text, type)
+}
 
 function processRoleClass(role: string) {
   if (role === '主进程') return 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
@@ -72,22 +85,23 @@ function processTooltip(process: PortProcessInfo) {
   ].join('\n')
 }
 
-async function inspectPort() {
+async function inspectPort(options: { keepStatus?: boolean } = {}) {
   if (!parsedPort.value) {
-    emit('message', '请输入 1 到 65535 之间的端口号', 'error')
+    setStatus('请输入 1 到 65535 之间的端口号', 'error')
     return
   }
 
   isInspecting.value = true
   searchedPort.value = parsedPort.value
+  if (!options.keepStatus) statusMessage.value = ''
   try {
     results.value = await invoke<PortProcessInfo[]>('inspect_port', { port: parsedPort.value })
-    if (results.value.length === 0) {
-      emit('message', `端口 ${parsedPort.value} 当前没有监听进程`, 'info')
+    if (results.value.length === 0 && !options.keepStatus) {
+      setStatus(`端口 ${parsedPort.value} 当前没有监听进程`, 'info')
     }
   } catch (error) {
     results.value = []
-    emit('message', String(error), 'error')
+    setStatus(String(error), 'error')
   } finally {
     isInspecting.value = false
   }
@@ -107,13 +121,14 @@ async function confirmKill() {
   const pid = pendingKill.value.pid
   const port = pendingKill.value.port
   killingPid.value = pid
+  cancelKill()
+  setStatus(`正在结束 PID ${pid}（端口 ${port}）...`, 'info')
   try {
-    await invoke('kill_port_pid', { port, pid })
-    emit('message', `已请求结束 PID ${pid}`, 'success')
-    cancelKill()
-    await inspectPort()
+    const result = await invoke<{ message: string }>('kill_port_pid', { port, pid })
+    setStatus(result.message || `已结束 PID ${pid}`, 'success')
+    await inspectPort({ keepStatus: true })
   } catch (error) {
-    emit('message', String(error), 'error')
+    setStatus(String(error), 'error')
   } finally {
     killingPid.value = null
   }
@@ -136,9 +151,10 @@ function closeDialog() {
     @close="closeDialog"
   >
     <div class="space-y-4">
-      <form class="flex items-center gap-2" @submit.prevent="inspectPort">
+      <form class="flex items-center gap-2" @submit.prevent="inspectPort()">
         <div class="relative flex-1">
           <Input
+            ref="portInputRef"
             v-model="portInput"
             class="h-9 pr-20 font-mono text-sm tabular-nums"
             type="number"
@@ -159,6 +175,18 @@ function closeDialog() {
           {{ isInspecting ? '查询中' : '查询' }}
         </Button>
       </form>
+
+      <div
+        v-if="statusMessage"
+        class="rounded-md px-3 py-2 text-xs leading-5"
+        :class="statusType === 'error'
+          ? 'bg-destructive/10 text-destructive'
+          : statusType === 'success'
+            ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+            : 'bg-secondary text-muted-foreground'"
+      >
+        {{ statusMessage }}
+      </div>
 
       <div
         class="overflow-hidden rounded-lg bg-card"
@@ -257,16 +285,24 @@ function closeDialog() {
       </div>
 
       <AlertDialogFooter class="bg-muted/40 px-5 py-3 shadow-[inset_0_1px_0_0_var(--border)]">
-        <AlertDialogCancel class="mt-0" :disabled="killingPid !== null">
+        <Button
+          type="button"
+          variant="outline"
+          class="mt-0"
+          :disabled="killingPid !== null"
+          @click="cancelKill"
+        >
           取消
-        </AlertDialogCancel>
-        <AlertDialogAction
+        </Button>
+        <Button
+          type="button"
+          variant="destructive"
           class="bg-destructive/10 text-destructive hover:bg-destructive/20"
           :disabled="killingPid !== null"
-          @click.prevent="confirmKill"
+          @click="confirmKill"
         >
           {{ killingPid === pendingKill?.pid ? '结束中' : '确认 Kill' }}
-        </AlertDialogAction>
+        </Button>
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>
