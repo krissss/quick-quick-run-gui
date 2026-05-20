@@ -247,9 +247,7 @@ pub fn spawn_shell_command(
     let child = {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         let mut cmd = Command::new("cmd");
-        cmd.args(["/C", command])
-            .stdout(stdout)
-            .stderr(stderr);
+        cmd.args(["/C", command]).stdout(stdout).stderr(stderr);
         if let Some(dir) = &working_directory {
             cmd.current_dir(dir);
         }
