@@ -8,6 +8,17 @@ import PortManagerDialog from '@/components/app/PortManagerDialog.vue'
 import SettingsDialog from '@/components/app/SettingsDialog.vue'
 import ToastMessages from '@/components/app/ToastMessages.vue'
 import RunParametersDialog from '@/components/command/RunParametersDialog.vue'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
 import { useApps } from '@/composables/useApps'
 import { useLauncher, type LaunchOptions } from '@/composables/useLauncher'
 import { useLogs } from '@/composables/useLogs'
@@ -38,12 +49,14 @@ const {
   apps,
   editForm,
   isNew,
+  hasUnsavedChanges,
   selectApp,
   openAddForm,
   duplicateApp,
   refreshApps,
   saveApp,
   deleteApp,
+  resetEditSnapshot,
   reorderApps,
   updateAppProfiles,
   setAppType,
@@ -100,6 +113,8 @@ const {
 const runDialogApp = ref<AppItem | null>(null)
 const runDialogLaunchOptions = ref<LaunchOptions>({})
 const showPortManagerDialog = ref(false)
+const pendingUnsavedAction = ref<(() => void | Promise<void>) | null>(null)
+const unsavedActionRunning = ref(false)
 const startupTimers: number[] = []
 
 function commandParamsFor(app: AppItem) {
@@ -119,6 +134,47 @@ function closePortManagerDialog() {
   showPortManagerDialog.value = false
 }
 
+function clearPendingUnsavedAction() {
+  pendingUnsavedAction.value = null
+  unsavedActionRunning.value = false
+}
+
+async function continueWithPendingAction() {
+  const action = pendingUnsavedAction.value
+  clearPendingUnsavedAction()
+  await action?.()
+}
+
+async function guardUnsavedChanges(action: () => void | Promise<void>) {
+  if (!hasUnsavedChanges.value) {
+    await action()
+    return
+  }
+  pendingUnsavedAction.value = action
+}
+
+async function saveAndContinue() {
+  if (!pendingUnsavedAction.value || unsavedActionRunning.value) return
+  unsavedActionRunning.value = true
+  const saved = await saveApp()
+  unsavedActionRunning.value = false
+  if (saved) await continueWithPendingAction()
+}
+
+async function discardAndContinue() {
+  if (!pendingUnsavedAction.value || unsavedActionRunning.value) return
+  resetEditSnapshot()
+  await continueWithPendingAction()
+}
+
+async function handleSelectApp(app: AppItem) {
+  await guardUnsavedChanges(() => selectApp(app))
+}
+
+async function handleOpenAddForm() {
+  await guardUnsavedChanges(openAddForm)
+}
+
 async function requestLaunch(app: AppItem, options: LaunchOptions = {}) {
   if (commandParamsFor(app).length > 0) {
     runDialogApp.value = app
@@ -128,9 +184,13 @@ async function requestLaunch(app: AppItem, options: LaunchOptions = {}) {
   await launchApp(app, options)
 }
 
-function duplicateSelectedApp() {
+async function duplicateSelectedApp() {
   if (!editForm.value.id) return
-  duplicateApp(editForm.value)
+  const sourceId = editForm.value.id
+  await guardUnsavedChanges(() => {
+    const source = apps.value.find(item => item.id === sourceId) || editForm.value
+    duplicateApp(source)
+  })
 }
 
 async function chooseWorkingDirectory() {
@@ -197,8 +257,9 @@ onUnmounted(() => {
       :is-new="isNew"
       :running-app-ids="runningAppIds"
       :latest-runs="latestRuns"
-      @add="openAddForm"
-      @select="selectApp"
+      :pending-launches="pendingLaunches"
+      @add="handleOpenAddForm"
+      @select="handleSelectApp"
       @reorder="reorderApps"
       @open-ports="openPortManagerDialog"
       @open-settings="openSettingsDialog"
@@ -292,5 +353,41 @@ onUnmounted(() => {
       @import-data="handleImport"
       @export-data="handleExport"
     />
+
+    <AlertDialog
+      :open="!!pendingUnsavedAction"
+      @update:open="(value) => { if (!value && !unsavedActionRunning) clearPendingUnsavedAction() }"
+    >
+      <AlertDialogContent class="w-[min(calc(100vw-2rem),32rem)] border-0 bg-card p-0 shadow-[var(--shadow-card)]">
+        <div class="px-5 pt-5">
+          <AlertDialogHeader>
+            <AlertDialogTitle class="text-base tracking-[-0.32px]">有未保存的更改</AlertDialogTitle>
+            <AlertDialogDescription class="leading-6">
+              当前表单还没有保存。继续操作会切换当前编辑内容，请先选择如何处理这些更改。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+        </div>
+
+        <AlertDialogFooter class="bg-muted/40 px-5 py-3 shadow-[inset_0_1px_0_0_var(--border)]">
+          <AlertDialogCancel class="mt-0" :disabled="unsavedActionRunning">
+            取消
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="secondary"
+            :disabled="unsavedActionRunning"
+            @click="discardAndContinue"
+          >
+            放弃更改
+          </Button>
+          <AlertDialogAction
+            :disabled="unsavedActionRunning"
+            @click.prevent="saveAndContinue"
+          >
+            {{ unsavedActionRunning ? '保存中' : '保存并继续' }}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>

@@ -229,6 +229,43 @@ describe('useApps integration', () => {
     expect(messages.at(-1)).toEqual({ text: '已添加', type: 'success' })
   })
 
+  it('cleans copied run profiles when saving after command template changes', async () => {
+    const mock = setupTauriMocks({
+      store: {
+        apps: [
+          {
+            id: 'task-1',
+            name: '同步任务',
+            type: 'task',
+            command: 'pnpm sync {--account= : 账号}',
+            activeProfileId: 'profile-1',
+            profiles: [
+              {
+                id: 'profile-1',
+                name: '账号 1',
+                values: { account: 'demo' },
+              },
+            ],
+          },
+        ],
+      },
+    })
+    const apps = useApps(() => {})
+
+    await apps.refreshApps()
+    apps.duplicateApp(apps.apps.value[0])
+    apps.editForm.value.command = 'pnpm sync'
+
+    await apps.saveApp()
+
+    expect(mock.storeData.apps.at(-1)).toMatchObject({
+      name: '同步任务 副本',
+      command: 'pnpm sync',
+      profiles: [],
+      activeProfileId: '',
+    })
+  })
+
   it('ignores backend update notification failures while persisting', async () => {
     const mock = setupTauriMocks({
       rejectCommands: { notify_apps_updated: new Error('offline') },

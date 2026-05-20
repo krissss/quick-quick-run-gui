@@ -1,7 +1,8 @@
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { validateCronExpression } from '@/lib/cron'
 import {
+  cleanAppProfilesForCommand,
   defaultRestart,
   defaultRetry,
   defaultSchedule,
@@ -49,6 +50,18 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
   const editForm = ref<AppItem>(emptyApp())
   const isNew = ref(true)
 
+  function appSnapshot(app: AppItem) {
+    return JSON.stringify(normalizeApp(app))
+  }
+
+  const editSnapshot = ref(appSnapshot(editForm.value))
+
+  function resetEditSnapshot() {
+    editSnapshot.value = appSnapshot(editForm.value)
+  }
+
+  const hasUnsavedChanges = computed(() => appSnapshot(editForm.value) !== editSnapshot.value)
+
   function buildDuplicateName(sourceName: string) {
     const baseName = (sourceName.trim() || '未命名').replace(/\s*副本(?:\s+\d+)?$/, '').trim() || '未命名'
     const existingNames = new Set(apps.value.map(app => app.name.trim()))
@@ -64,11 +77,13 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
   function selectApp(app: AppItem) {
     isNew.value = false
     editForm.value = normalizeApp(app)
+    resetEditSnapshot()
   }
 
   function openAddForm() {
     isNew.value = true
     editForm.value = emptyApp()
+    resetEditSnapshot()
   }
 
   function duplicateApp(app: AppItem) {
@@ -92,15 +107,18 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
       const still = apps.value.find(a => a.id === editForm.value.id)
       if (still) {
         editForm.value = normalizeApp(still)
+        resetEditSnapshot()
       } else {
         isNew.value = true
         editForm.value = emptyApp()
+        resetEditSnapshot()
       }
     }
   })
 
   async function refreshApps() {
     apps.value = (await loadApps()).map(normalizeApp)
+    if (isNew.value || !editForm.value.id) resetEditSnapshot()
   }
 
   async function persistApps() {
@@ -112,25 +130,25 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
   }
 
   async function saveApp() {
-    const app = normalizeApp(editForm.value)
+    const app = cleanAppProfilesForCommand(normalizeApp(editForm.value))
     if (app.type === 'web' && !app.url.trim()) {
       showMessage('请填写目标 URL', 'error')
-      return
+      return false
     }
     if (app.type !== 'web' && !app.command.trim()) {
       showMessage('请填写执行命令', 'error')
-      return
+      return false
     }
     if (app.type === 'task' && app.schedule.enabled) {
       const cron = app.schedule.cron.trim()
       if (!cron) {
         showMessage('请填写定时表达式', 'error')
-        return
+        return false
       }
       const cronError = validateCronExpression(cron)
       if (cronError) {
         showMessage(cronError, 'error')
-        return
+        return false
       }
     }
     if (!app.name.trim()) app.name = defaultAppName(app)
@@ -145,8 +163,10 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
       isNew.value = false
     }
     editForm.value = { ...app }
+    resetEditSnapshot()
     await persistApps()
     showMessage(wasNew ? '已添加' : '已保存', 'success')
+    return true
   }
 
   function setAppType(type: AppType) {
@@ -193,6 +213,7 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
     await persistApps()
     editForm.value = emptyApp()
     isNew.value = true
+    resetEditSnapshot()
     showMessage('已删除', 'success')
   }
 
@@ -230,13 +251,15 @@ export function useApps(showMessage: (msg: string, type?: 'success' | 'error' | 
         profiles,
         activeProfileId,
       }
+      resetEditSnapshot()
     }
     return nextApp
   }
 
   return {
-    apps, editForm, isNew,
+    apps, editForm, isNew, hasUnsavedChanges,
     selectApp, openAddForm, duplicateApp, refreshApps, persistApps, saveApp, deleteApp,
+    resetEditSnapshot,
     reorderApps, updateAppProfiles,
     setAppType, setScheduleEnabled, setMissedPolicy, setScheduleCron, setStartup, setRestart, setRetry, touchSchedule,
   }

@@ -28,6 +28,7 @@ const WEEKDAYS = [
 
 const props = defineProps<{
   modelValue: string
+  dense?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -166,62 +167,76 @@ function updateDayOfMonth(value: InputValue) {
 </script>
 
 <template>
-  <div class="space-y-3">
+  <div :class="props.dense ? 'space-y-2' : 'space-y-3'">
     <ToggleGroup
-      class="grid w-full grid-cols-3 gap-1"
+      :class="props.dense ? 'grid w-full grid-cols-6 gap-1' : 'grid w-full grid-cols-3 gap-1'"
       :model-value="activeMode"
       type="single"
       aria-label="定时频率"
       @update:model-value="updateMode"
     >
-      <ToggleGroupItem value="minutes">分钟</ToggleGroupItem>
-      <ToggleGroupItem value="hourly">每小时</ToggleGroupItem>
-      <ToggleGroupItem value="daily">每天</ToggleGroupItem>
-      <ToggleGroupItem value="weekly">每周</ToggleGroupItem>
-      <ToggleGroupItem value="monthly">每月</ToggleGroupItem>
-      <ToggleGroupItem value="custom">自定义</ToggleGroupItem>
+      <ToggleGroupItem :class="props.dense ? 'h-7 px-1' : undefined" value="minutes">分钟</ToggleGroupItem>
+      <ToggleGroupItem :class="props.dense ? 'h-7 px-1' : undefined" value="hourly">每小时</ToggleGroupItem>
+      <ToggleGroupItem :class="props.dense ? 'h-7 px-1' : undefined" value="daily">每天</ToggleGroupItem>
+      <ToggleGroupItem :class="props.dense ? 'h-7 px-1' : undefined" value="weekly">每周</ToggleGroupItem>
+      <ToggleGroupItem :class="props.dense ? 'h-7 px-1' : undefined" value="monthly">每月</ToggleGroupItem>
+      <ToggleGroupItem :class="props.dense ? 'h-7 px-1' : undefined" value="custom">自定义</ToggleGroupItem>
     </ToggleGroup>
 
-    <div v-if="activeMode === 'minutes'" class="grid grid-cols-[1fr_auto] items-end gap-2">
-      <div class="space-y-1.5">
-        <label class="text-xs font-medium text-muted-foreground">间隔</label>
-        <Input
-          :model-value="parsed.interval"
-          type="number"
-          min="1"
-          max="59"
-          @update:model-value="updateInterval"
-        />
+    <div v-if="activeMode === 'minutes'" class="flex items-end gap-2">
+      <div class="flex min-w-0 flex-1 items-end gap-2">
+        <div class="flex-1 space-y-1">
+          <label class="text-xs font-medium text-muted-foreground">间隔</label>
+          <Input
+            :model-value="parsed.interval"
+            type="number"
+            min="1"
+            max="59"
+            @update:model-value="updateInterval"
+          />
+        </div>
+        <div class="flex h-9 items-center rounded-md bg-secondary px-3 text-sm text-muted-foreground">
+          分钟
+        </div>
       </div>
-      <div class="h-9 rounded-md bg-secondary px-3 text-sm leading-9 text-muted-foreground">
-        分钟
-      </div>
+      <slot name="trailing" />
     </div>
 
-    <div v-else-if="activeMode === 'hourly'" class="space-y-1.5">
-      <label class="text-xs font-medium text-muted-foreground">每小时第几分钟</label>
-      <Input
-        :model-value="parsed.minute"
-        type="number"
-        min="0"
-        max="59"
-        @update:model-value="updateMinute"
-      />
+    <div v-else-if="activeMode === 'hourly'" class="flex items-end gap-2">
+      <div class="flex min-w-0 flex-1 items-end gap-2">
+        <div class="flex-1 space-y-1">
+          <label class="text-xs font-medium text-muted-foreground">分钟</label>
+          <Input
+            :model-value="parsed.minute"
+            type="number"
+            min="0"
+            max="59"
+            @update:model-value="updateMinute"
+          />
+        </div>
+        <div class="flex h-9 items-center rounded-md bg-secondary px-3 text-sm text-muted-foreground">
+          每小时
+        </div>
+      </div>
+      <slot name="trailing" />
     </div>
 
-    <div v-else-if="activeMode === 'daily'" class="grid grid-cols-2 gap-2">
-      <div class="space-y-1.5">
-        <label class="text-xs font-medium text-muted-foreground">小时</label>
-        <Input :model-value="parsed.hour" type="number" min="0" max="23" @update:model-value="updateHour" />
+    <div v-else-if="activeMode === 'daily'" class="flex items-end gap-2">
+      <div class="grid min-w-0 flex-1 grid-cols-2 gap-2">
+        <div class="space-y-1">
+          <label class="text-xs font-medium text-muted-foreground">小时</label>
+          <Input :model-value="parsed.hour" type="number" min="0" max="23" @update:model-value="updateHour" />
+        </div>
+        <div class="space-y-1">
+          <label class="text-xs font-medium text-muted-foreground">分钟</label>
+          <Input :model-value="parsed.minute" type="number" min="0" max="59" @update:model-value="updateMinute" />
+        </div>
       </div>
-      <div class="space-y-1.5">
-        <label class="text-xs font-medium text-muted-foreground">分钟</label>
-        <Input :model-value="parsed.minute" type="number" min="0" max="59" @update:model-value="updateMinute" />
-      </div>
+      <slot name="trailing" />
     </div>
 
-    <div v-else-if="activeMode === 'weekly'" class="space-y-3">
-      <div class="space-y-1.5">
+    <div v-else-if="activeMode === 'weekly'" class="space-y-2">
+      <div class="space-y-1">
         <label class="text-xs font-medium text-muted-foreground">星期</label>
         <ToggleGroup
           class="grid w-full grid-cols-7 gap-1"
@@ -233,51 +248,60 @@ function updateDayOfMonth(value: InputValue) {
           <ToggleGroupItem
             v-for="day in WEEKDAYS"
             :key="day.value"
-            class="px-1"
+            class="h-7 px-0.5"
             :value="String(day.value)"
           >
             {{ day.label }}
           </ToggleGroupItem>
         </ToggleGroup>
       </div>
-      <div class="grid grid-cols-2 gap-2">
-        <div class="space-y-1.5">
+      <div class="flex items-end gap-2">
+        <div class="grid min-w-0 flex-1 grid-cols-2 gap-2">
+          <div class="space-y-1">
+            <label class="text-xs font-medium text-muted-foreground">小时</label>
+            <Input :model-value="parsed.hour" type="number" min="0" max="23" @update:model-value="updateHour" />
+          </div>
+          <div class="space-y-1">
+            <label class="text-xs font-medium text-muted-foreground">分钟</label>
+            <Input :model-value="parsed.minute" type="number" min="0" max="59" @update:model-value="updateMinute" />
+          </div>
+        </div>
+        <slot name="trailing" />
+      </div>
+    </div>
+
+    <div v-else-if="activeMode === 'monthly'" class="flex items-end gap-2">
+      <div class="grid min-w-0 flex-1 grid-cols-3 gap-2">
+        <div class="space-y-1">
+          <label class="text-xs font-medium text-muted-foreground">日期</label>
+          <Input :model-value="parsed.dayOfMonth" type="number" min="1" max="31" @update:model-value="updateDayOfMonth" />
+        </div>
+        <div class="space-y-1">
           <label class="text-xs font-medium text-muted-foreground">小时</label>
           <Input :model-value="parsed.hour" type="number" min="0" max="23" @update:model-value="updateHour" />
         </div>
-        <div class="space-y-1.5">
+        <div class="space-y-1">
           <label class="text-xs font-medium text-muted-foreground">分钟</label>
           <Input :model-value="parsed.minute" type="number" min="0" max="59" @update:model-value="updateMinute" />
         </div>
       </div>
+      <slot name="trailing" />
     </div>
 
-    <div v-else-if="activeMode === 'monthly'" class="grid grid-cols-3 gap-2">
-      <div class="space-y-1.5">
-        <label class="text-xs font-medium text-muted-foreground">日期</label>
-        <Input :model-value="parsed.dayOfMonth" type="number" min="1" max="31" @update:model-value="updateDayOfMonth" />
+    <div v-else class="flex items-end gap-2">
+      <div :class="props.dense ? 'min-w-0 flex-1 space-y-1' : 'min-w-0 flex-1 space-y-1.5'">
+        <label class="text-xs font-medium text-muted-foreground">Cron</label>
+        <Input
+          :model-value="modelValue"
+          class="font-mono"
+          placeholder="*/15 * * * *"
+          @update:model-value="(value) => emitCron(value == null ? '' : String(value))"
+        />
       </div>
-      <div class="space-y-1.5">
-        <label class="text-xs font-medium text-muted-foreground">小时</label>
-        <Input :model-value="parsed.hour" type="number" min="0" max="23" @update:model-value="updateHour" />
-      </div>
-      <div class="space-y-1.5">
-        <label class="text-xs font-medium text-muted-foreground">分钟</label>
-        <Input :model-value="parsed.minute" type="number" min="0" max="59" @update:model-value="updateMinute" />
-      </div>
+      <slot name="trailing" />
     </div>
 
-    <div v-else class="space-y-1.5">
-      <label class="text-xs font-medium text-muted-foreground">Cron</label>
-      <Input
-        :model-value="modelValue"
-        class="font-mono"
-        placeholder="*/15 * * * *"
-        @update:model-value="(value) => emitCron(value == null ? '' : String(value))"
-      />
-    </div>
-
-    <div class="rounded-md bg-secondary px-3 py-2 font-mono text-xs text-muted-foreground">
+    <div v-if="!props.dense" class="rounded-md bg-secondary px-3 py-2 font-mono text-xs text-muted-foreground">
       {{ modelValue || '0 9 * * *' }}
     </div>
   </div>

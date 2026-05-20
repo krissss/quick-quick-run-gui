@@ -6,44 +6,44 @@ describe('capabilityRegistry', () => {
   it('declares all capabilities that can be mounted by app type', () => {
     expect(capabilitiesForType('web').map(item => item.id)).toEqual([
       'type-target',
+      'name',
+      'working-directory',
       'web-url',
       'command',
       'command-parameters',
-      'working-directory',
       'startup',
       'window-size',
-      'name',
     ])
     expect(capabilitiesForType('service').map(item => item.id)).toEqual([
       'type-target',
+      'name',
+      'working-directory',
       'command',
       'command-parameters',
-      'working-directory',
       'startup',
       'restart',
-      'name',
     ])
     expect(capabilitiesForType('task').map(item => item.id)).toEqual([
       'type-target',
+      'name',
+      'working-directory',
       'command',
       'command-parameters',
-      'working-directory',
       'startup',
       'schedule',
       'retry',
-      'name',
     ])
   })
 
   it('hides conditional runtime capabilities when an app does not use them', () => {
     expect(capabilitiesForType('web', webApp).map(item => item.id)).toEqual([
       'type-target',
+      'name',
+      'working-directory',
       'web-url',
       'command',
-      'working-directory',
       'startup',
       'window-size',
-      'name',
     ])
 
     expect(capabilitiesForType('service', {
@@ -51,12 +51,12 @@ describe('capabilityRegistry', () => {
       command: 'pnpm worker {account=demo : 账号}',
     }).map(item => item.id)).toEqual([
       'type-target',
+      'name',
+      'working-directory',
       'command',
       'command-parameters',
-      'working-directory',
       'startup',
       'restart',
-      'name',
     ])
   })
 })

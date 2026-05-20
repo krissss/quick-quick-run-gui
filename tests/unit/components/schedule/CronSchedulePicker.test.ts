@@ -37,7 +37,7 @@ describe('CronSchedulePicker', () => {
       props: { modelValue: '5 * * * *' },
     })
 
-    expect(wrapper.text()).toContain('每小时第几分钟')
+    expect(wrapper.text()).toContain('每小时')
     await wrapper.get('input[type="number"]').setValue('70')
 
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['59 * * * *'])

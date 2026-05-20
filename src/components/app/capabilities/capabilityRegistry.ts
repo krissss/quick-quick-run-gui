@@ -27,7 +27,7 @@ export const appCapabilityRegistry: AppCapabilityDefinition[] = [
   {
     id: 'type-target',
     label: '类型目标',
-    order: 10,
+    order: 1,
     types: allTypes,
     component: TypeTargetCapability,
   },
@@ -54,9 +54,16 @@ export const appCapabilityRegistry: AppCapabilityDefinition[] = [
     visible: app => parseCommandSignature(app.command).params.length > 0,
   },
   {
+    id: 'name',
+    label: '名称',
+    order: 5,
+    types: allTypes,
+    component: NameCapability,
+  },
+  {
     id: 'working-directory',
     label: '工作目录',
-    order: 40,
+    order: 6,
     types: allTypes,
     component: WorkingDirectoryCapability,
   },
@@ -94,13 +101,6 @@ export const appCapabilityRegistry: AppCapabilityDefinition[] = [
     order: 60,
     types: ['web'],
     component: WindowSizeCapability,
-  },
-  {
-    id: 'name',
-    label: '名称',
-    order: 70,
-    types: allTypes,
-    component: NameCapability,
   },
 ]
 

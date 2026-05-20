@@ -4,9 +4,10 @@ import { invoke } from '@tauri-apps/api/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { itemTypeLabel, runStatusClass, runStatusLabel } from '@/lib/appDisplay'
+import { itemTypeLabel, runStatusLabel } from '@/lib/appDisplay'
+import { formatRunAtTime } from '@/lib/delay'
 import type { AppItem, AppType } from '@/lib/store'
-import type { RunRecord } from '@/composables/useLauncher'
+import type { PendingLaunch, RunRecord } from '@/composables/useLauncher'
 
 const props = defineProps<{
   apps: AppItem[]
@@ -14,6 +15,7 @@ const props = defineProps<{
   isNew: boolean
   runningAppIds: Set<string>
   latestRuns: Map<string, RunRecord>
+  pendingLaunches: Map<string, PendingLaunch>
 }>()
 
 const emit = defineEmits<{
@@ -139,6 +141,33 @@ function sidebarSubtitle(app: AppItem) {
     ? app.url || app.command || app.workingDirectory
     : app.command || app.workingDirectory || app.url
   return value.replace(/^https?:\/\//, '')
+}
+
+function latestRunLabel(app: AppItem) {
+  if (props.runningAppIds.has(app.id)) return ''
+  const label = runStatusLabel(app, props.runningAppIds, props.latestRuns)
+  return label === '上次成功' ? '成功' : label
+}
+
+function primaryStatusLabel(app: AppItem) {
+  const pending = props.pendingLaunches.get(app.id)
+  if (pending) return `即将 ${formatRunAtTime(pending.runAt)}`
+  if (props.runningAppIds.has(app.id)) return '运行中'
+  const run = props.latestRuns.get(app.id)
+  if (run?.status === 'failed') return '失败'
+  if (run?.status === 'lost') return '丢失'
+  if (app.type === 'task' && app.schedule.enabled) return '定时'
+  if (latestRunLabel(app)) return latestRunLabel(app)
+  return ''
+}
+
+function primaryStatusClass(app: AppItem) {
+  if (props.pendingLaunches.has(app.id)) return 'bg-amber-500/12 text-amber-700 dark:text-amber-400'
+  if (props.runningAppIds.has(app.id)) return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+  const status = props.latestRuns.get(app.id)?.status
+  if (status === 'failed' || status === 'lost') return 'bg-destructive/10 text-destructive'
+  if (app.type === 'task' && app.schedule.enabled) return 'bg-blue-500/10 text-blue-700 dark:text-blue-400'
+  return 'bg-secondary text-muted-foreground'
 }
 
 function faviconKey(app: AppItem) {
@@ -277,6 +306,20 @@ onUnmounted(() => {
             {{ apps.length }} 个条目 · {{ runningCount }} 个运行中
           </div>
         </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          class="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+          :class="isNew ? 'bg-card text-foreground shadow-[var(--shadow-border)]' : ''"
+          aria-label="添加应用"
+          title="添加应用"
+          @click="$emit('add')"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+        </Button>
       </div>
 
       <div class="relative">
@@ -358,18 +401,6 @@ onUnmounted(() => {
         </ToggleGroupItem>
       </ToggleGroup>
 
-      <Button
-        type="button"
-        variant="ghost"
-        class="h-9 w-full justify-start gap-2.5 px-2"
-        :class="isNew ? 'bg-card text-foreground shadow-[var(--shadow-border)]' : 'text-muted-foreground hover:text-foreground'"
-        @click="$emit('add')"
-      >
-        <div class="flex h-7 w-7 items-center justify-center rounded-md bg-secondary text-muted-foreground shadow-[var(--shadow-border)]">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-        </div>
-        <span class="text-sm">添加应用</span>
-      </Button>
     </div>
 
     <div class="flex-1 overflow-y-auto py-2">
@@ -439,11 +470,11 @@ onUnmounted(() => {
               <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
                 <div class="truncate text-sm">{{ app.name }}</div>
                 <span
-                  v-if="runStatusLabel(app, runningAppIds, latestRuns)"
+                  v-if="primaryStatusLabel(app)"
                   class="rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none"
-                  :class="runStatusClass(app, runningAppIds, latestRuns)"
+                  :class="primaryStatusClass(app)"
                 >
-                  {{ runStatusLabel(app, runningAppIds, latestRuns) }}
+                  {{ primaryStatusLabel(app) }}
                 </span>
               </div>
               <div class="mt-0.5 truncate text-[10px] text-muted-foreground">
@@ -455,11 +486,11 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="p-3 shadow-[inset_0_1px_0_0_var(--border)]">
+    <div class="grid grid-cols-2 gap-1.5 p-2 shadow-[inset_0_1px_0_0_var(--border)]">
       <Button
         type="button"
         variant="ghost"
-        class="mb-1 h-8 w-full justify-start gap-2.5 px-2 text-muted-foreground hover:text-foreground"
+        class="h-8 w-full justify-center gap-1.5 px-2 text-muted-foreground hover:text-foreground"
         title="端口排查"
         @click="$emit('openPorts')"
       >
@@ -476,7 +507,8 @@ onUnmounted(() => {
       <Button
         type="button"
         variant="ghost"
-        class="h-8 w-full justify-start gap-2.5 px-2 text-muted-foreground hover:text-foreground"
+        class="h-8 w-full justify-center gap-1.5 px-2 text-muted-foreground hover:text-foreground"
+        title="设置"
         @click="$emit('openSettings')"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>

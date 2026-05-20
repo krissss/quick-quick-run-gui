@@ -266,6 +266,33 @@ export function parseCommandSignature(command: string): { baseCommand: string; p
   return { baseCommand: normalizeCommandParts(baseCommand), params }
 }
 
+export function cleanAppProfilesForCommand(app: AppItem): AppItem {
+  const paramKeys = new Set(parseCommandSignature(app.command).params.map(param => param.key))
+  if (paramKeys.size === 0) {
+    return {
+      ...app,
+      profiles: [],
+      activeProfileId: '',
+    }
+  }
+
+  const profiles = app.profiles
+    .map(profile => ({
+      ...profile,
+      values: Object.fromEntries(
+        Object.entries(profile.values).filter(([key]) => paramKeys.has(key)),
+      ),
+    }))
+    .filter(profile => Object.keys(profile.values).length > 0)
+  const activeProfileId = profiles.some(profile => profile.id === app.activeProfileId) ? app.activeProfileId : ''
+
+  return {
+    ...app,
+    profiles,
+    activeProfileId,
+  }
+}
+
 function isTruthyParamValue(value: string) {
   return ['true', '1', 'yes'].includes(value.trim().toLowerCase())
 }

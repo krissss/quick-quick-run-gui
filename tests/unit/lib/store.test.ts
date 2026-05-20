@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildCommandWithProfile,
+  cleanAppProfilesForCommand,
   exportData,
   importData,
   loadApps,
@@ -118,6 +119,50 @@ describe('store helpers', () => {
       command: 'pnpm dev demo --headless',
       workingDirectory: '/repo/default',
       url: 'http://localhost:3000',
+    })
+  })
+
+  it('cleans profile values against the current command signature', () => {
+    const app = normalizeApp({
+      id: 'task-1',
+      name: 'Task',
+      type: 'task',
+      command: 'pnpm run job {--account= : 账号}',
+      activeProfileId: 'profile-1',
+      profiles: [
+        {
+          id: 'profile-1',
+          name: '账号 1',
+          values: {
+            account: 'demo',
+            stale: 'remove-me',
+          },
+        },
+        {
+          id: 'profile-2',
+          name: '旧方案',
+          values: {
+            stale: 'remove-me',
+          },
+        },
+      ],
+    })
+
+    expect(cleanAppProfilesForCommand(app)).toMatchObject({
+      activeProfileId: 'profile-1',
+      profiles: [
+        {
+          id: 'profile-1',
+          values: {
+            account: 'demo',
+          },
+        },
+      ],
+    })
+
+    expect(cleanAppProfilesForCommand({ ...app, command: 'pnpm run job' })).toMatchObject({
+      activeProfileId: '',
+      profiles: [],
     })
   })
 

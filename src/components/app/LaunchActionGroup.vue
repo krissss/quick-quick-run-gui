@@ -9,14 +9,20 @@ const props = withDefaults(defineProps<{
   defaultDelaySeconds?: number | null
   disabled?: boolean
   size?: 'compact' | 'large'
+  pendingLaunch?: {
+    delaySeconds: number
+    runAt: number
+  } | null
 }>(), {
   defaultDelaySeconds: null,
   disabled: false,
   size: 'compact',
+  pendingLaunch: null,
 })
 
 const emit = defineEmits<{
   launch: [delaySeconds?: number]
+  cancelDelayedLaunch: []
 }>()
 
 const rootRef = ref<HTMLElement | null>(null)
@@ -29,6 +35,7 @@ const primaryLabel = computed(() =>
   defaultDelay.value ? `${formatDelayLabel(defaultDelay.value)}后运行` : props.label,
 )
 const customDelaySeconds = computed(() => normalizeDelaySeconds(customDelay.value))
+const hasPendingLaunch = computed(() => !!props.pendingLaunch)
 const primaryButtonClass = computed(() =>
   props.size === 'large'
     ? 'h-9 rounded-r-none px-4 text-sm shadow-none'
@@ -112,6 +119,19 @@ onBeforeUnmount(detachGlobalListeners)
         {{ primaryLabel }}
       </Button>
       <Button
+        v-if="size === 'large' && hasPendingLaunch"
+        type="button"
+        variant="destructive"
+        size="sm"
+        class="h-9 gap-2 rounded-none px-4 text-sm"
+        @click="$emit('cancelDelayedLaunch')"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="6" y="6" width="12" height="12" />
+        </svg>
+        停止启动
+      </Button>
+      <Button
         type="button"
         variant="default"
         size="sm"
@@ -131,7 +151,7 @@ onBeforeUnmount(detachGlobalListeners)
 
     <div
       v-if="open"
-      class="absolute left-0 top-full z-30 mt-2 w-56 rounded-lg bg-popover p-2"
+      class="absolute right-0 top-full z-30 mt-2 w-56 rounded-lg bg-popover p-2"
       style="box-shadow: var(--shadow-card)"
     >
       <div class="px-2 pb-1 text-[11px] font-medium text-muted-foreground">延迟运行</div>

@@ -32,8 +32,8 @@ function updateType(value: string | string[]) {
 </script>
 
 <template>
-  <div class="space-y-1.5">
-    <label class="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+  <div class="flex items-center justify-between gap-3">
+    <div class="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
       <span>类型</span>
       <TooltipProvider :delay-duration="150">
         <Tooltip>
@@ -62,16 +62,18 @@ function updateType(value: string | string[]) {
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
-    </label>
+    </div>
     <ToggleGroup
-      class="grid w-full grid-cols-3 gap-1"
+      class="grid min-w-[220px] grid-cols-3 gap-1"
       :model-value="app.type"
       type="single"
+      aria-label="类型"
       @update:model-value="updateType"
     >
       <ToggleGroupItem
         v-for="item in typeTargets"
         :key="item.type"
+        class="h-7 px-2"
         :value="item.type"
         :title="item.target"
       >

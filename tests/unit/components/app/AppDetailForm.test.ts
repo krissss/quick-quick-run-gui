@@ -38,7 +38,6 @@ describe('AppDetailForm', () => {
     await buttonContaining(wrapper, '日志').trigger('click')
     await buttonContaining(wrapper, '重启').trigger('click')
     await buttonContaining(wrapper, '停止').trigger('click')
-    await buttonContaining(wrapper, '启动', true).trigger('click')
     await buttonContaining(wrapper, '复制').trigger('click')
     await buttonContaining(wrapper, '删除').trigger('click')
 
@@ -46,16 +45,16 @@ describe('AppDetailForm', () => {
     expect(wrapper.emitted('openLog')).toEqual([[expect.objectContaining({ id: 'web-1' })]])
     expect(wrapper.emitted('restart')).toEqual([[expect.objectContaining({ id: 'web-1' })]])
     expect(wrapper.emitted('stop')).toEqual([['web-1']])
-    expect(wrapper.emitted('launch')).toEqual([[expect.objectContaining({ id: 'web-1' })]])
+    expect(wrapper.emitted('launch')).toBeUndefined()
     expect(wrapper.emitted('duplicate')).toHaveLength(1)
     expect(wrapper.emitted('delete')).toHaveLength(1)
   })
 
   it('shows pending delayed launch state and emits cancellation', async () => {
-    const wrapper = mountDetail(webApp, { pending: true })
+    const wrapper = mountDetail(webApp, { pending: true, running: false })
 
-    expect(wrapper.text()).toContain('1 分钟后')
-    await buttonContaining(wrapper, '取消').trigger('click')
+    expect(wrapper.text()).toContain('停止启动')
+    await buttonContaining(wrapper, '停止启动').trigger('click')
 
     expect(wrapper.emitted('cancelDelayedLaunch')).toEqual([['web-1']])
   })

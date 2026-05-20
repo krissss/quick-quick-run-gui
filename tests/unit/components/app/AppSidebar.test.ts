@@ -11,6 +11,7 @@ function mountSidebar(options: {
   isNew?: boolean
   runningAppIds?: Set<string>
   latestRuns?: Map<string, typeof serviceFailedRun>
+  pendingLaunches?: Map<string, never>
   faviconResolver?: (url: string) => string | null
 } = {}) {
   setupTauriMocks({
@@ -27,6 +28,7 @@ function mountSidebar(options: {
       isNew: options.isNew ?? false,
       runningAppIds: options.runningAppIds ?? new Set(),
       latestRuns: options.latestRuns ?? new Map(),
+      pendingLaunches: options.pendingLaunches ?? new Map(),
     },
   })
 }
@@ -50,13 +52,13 @@ describe('AppSidebar', () => {
     expect(wrapper.text()).toContain('daily')
     expect(visibleAppIds()).toEqual(['web-1', 'service-1', 'task-1'])
     expect(wrapper.text()).toContain('运行中')
-    expect(wrapper.text()).toContain('上次失败')
+    expect(wrapper.text()).toContain('失败')
     expect(appRow(wrapper, 'web-1').text()).not.toContain('网页')
     expect(appRow(wrapper, 'web-1').text()).toContain('运行中')
     expect(appRow(wrapper, 'web-1').text()).toContain('localhost:3000')
     await flushPromises()
     expect(appRow(wrapper, 'web-1').find('img[alt="demo-web favicon"]').attributes('src')).toBe('http://localhost:3000/favicon.png')
-    expect(appRow(wrapper, 'service-1').text()).toContain('上次失败')
+    expect(appRow(wrapper, 'service-1').text()).toContain('失败')
     expect(appRow(wrapper, 'service-1').text()).toContain('pnpm worker')
 
     await inputByPlaceholder(wrapper, '搜索名称、命令或 URL').setValue('worker')
@@ -66,7 +68,7 @@ describe('AppSidebar', () => {
     await wrapper.get('button[aria-label="筛选任务"]').trigger('click')
     expect(visibleAppIds()).toEqual(['task-1'])
 
-    await buttonContaining(wrapper, '添加应用').trigger('click')
+    await wrapper.get('button[aria-label="添加应用"]').trigger('click')
     await buttonContaining(wrapper, '设置').trigger('click')
     await appRow(wrapper, 'task-1').trigger('click')
 

@@ -14,7 +14,7 @@ describe('AppCapabilityStack', () => {
     })
 
     const ids = wrapper.findAll('[data-capability-id]').map(item => item.attributes('data-capability-id'))
-    expect(ids).toEqual(['type-target', 'web-url', 'command', 'working-directory', 'startup', 'window-size', 'name'])
+    expect(ids).toEqual(['type-target', 'name', 'working-directory', 'web-url', 'command', 'startup', 'window-size'])
     expect(wrapper.text()).toContain('目标 URL')
     expect(wrapper.text()).not.toContain('定时执行')
     expect(wrapper.text()).not.toContain('运行参数')
@@ -29,7 +29,7 @@ describe('AppCapabilityStack', () => {
     })
 
     const ids = wrapper.findAll('[data-capability-id]').map(item => item.attributes('data-capability-id'))
-    expect(ids).toEqual(['type-target', 'command', 'working-directory', 'startup', 'schedule', 'retry', 'name'])
+    expect(ids).toEqual(['type-target', 'name', 'working-directory', 'command', 'startup', 'schedule', 'retry'])
 
     await wrapper.getComponent(CronSchedulePicker).vm.$emit('update:modelValue', '*/5 * * * *')
     await wrapper.get('button[aria-label="选择工作目录"]').trigger('click')
@@ -52,7 +52,7 @@ describe('AppCapabilityStack', () => {
     })
 
     const ids = wrapper.findAll('[data-capability-id]').map(item => item.attributes('data-capability-id'))
-    expect(ids).toEqual(['type-target', 'command', 'command-parameters', 'working-directory', 'startup', 'schedule', 'retry', 'name'])
+    expect(ids).toEqual(['type-target', 'name', 'working-directory', 'command', 'command-parameters', 'startup', 'schedule', 'retry'])
     expect(wrapper.text()).toContain('运行参数')
     expect(wrapper.text()).toContain('2 个参数')
     expect(wrapper.text()).toContain('1 个方案')

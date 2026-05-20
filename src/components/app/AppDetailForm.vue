@@ -3,7 +3,6 @@ import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import AppCapabilityStack from '@/components/app/capabilities/AppCapabilityStack.vue'
 import LaunchActionGroup from '@/components/app/LaunchActionGroup.vue'
-import { formatDelayLabel, formatRunAtTime } from '@/lib/delay'
 import {
   iconGradient,
   itemTypeLabel,
@@ -91,23 +90,6 @@ function emitLaunch(delaySeconds?: number) {
                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
                   日志
                 </Button>
-                <div
-                  v-if="pendingLaunch"
-                  class="flex h-6 items-center gap-2 rounded-md bg-secondary px-2 text-[11px] text-muted-foreground shadow-[var(--shadow-border)]"
-                >
-                  <span>
-                    {{ formatDelayLabel(pendingLaunch.delaySeconds) }}后 · {{ formatRunAtTime(pendingLaunch.runAt) }}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    class="h-5 px-1.5 text-[11px]"
-                    @click="$emit('cancelDelayedLaunch', editForm.id)"
-                  >
-                    取消
-                  </Button>
-                </div>
               </div>
             </div>
 
@@ -118,7 +100,9 @@ function emitLaunch(delaySeconds?: number) {
               <LaunchActionGroup
                 v-if="!isRunning"
                 :label="primaryActionLabel(editForm)"
+                :pending-launch="pendingLaunch"
                 size="large"
+                @cancel-delayed-launch="$emit('cancelDelayedLaunch', editForm.id)"
                 @launch="emitLaunch"
               />
               <Button v-if="isRunning" type="button" variant="destructive" class="h-9 gap-2 px-4 text-sm" :disabled="isRestarting" @click="$emit('stop', editForm.id)">

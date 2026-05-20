@@ -23,7 +23,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
           <p><span class="font-mono">{name= : 名称}</span> 会作为位置参数替换。</p>
           <p><span class="font-mono">{--debug}</span> 是开关参数，<span class="font-mono">{--account= : 账号}</span> 会生成 <span class="font-mono">--account=值</span>。</p>
           <p>带模板的命令启动时会打开运行参数面板，可临时修改、另存或更新方案。</p>
-          <p>工作目录请在下方单独设置。</p>
         </div>
       </TooltipContent>
     </Tooltip>
