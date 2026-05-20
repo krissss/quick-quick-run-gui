@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-21
+
+### Added
+
+- 日志弹窗添加停止按钮
+- 优化应用详情操作按钮布局
+- 收敛应用表单并清理运行方案
+- 运行中任务迷你日志预览
+- 支持按进程名称排查
+
+### Fixed
+
+- 优化 Windows 下脚本执行体验
+- 修复端口排查 Kill 反馈
+
 ## [0.2.6] - 2026-05-19
 
 ### Added
@@ -120,7 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 为 macOS 专属代码添加条件编译守卫，修复跨平台构建
 
-[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.6...v0.3.0
 [0.2.6]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.3...v0.2.4
