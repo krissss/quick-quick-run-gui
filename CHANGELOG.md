@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-05-19
+
+### Added
+
+- 添加端口排查管理
+
 ## [0.2.5] - 2026-05-18
 
 ### Added
@@ -114,7 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 为 macOS 专属代码添加条件编译守卫，修复跨平台构建
 
-[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.2...v0.2.3

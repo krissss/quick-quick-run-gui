@@ -692,9 +692,14 @@ fn open_url_in_browser(url: &str) {
     let _ = std::process::Command::new("xdg-open").arg(url).spawn();
 
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd")
-        .args(["/C", "start", url])
-        .spawn();
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", url])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn();
+    }
 }
 
 /// 在系统默认浏览器中打开 URL（IPC 命令）
