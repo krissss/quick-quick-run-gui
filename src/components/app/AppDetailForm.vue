@@ -50,11 +50,17 @@ const pendingLaunch = computed(() => props.pendingLaunches.get(editForm.value.id
 const isRunning = computed(() => props.runningAppIds.has(editForm.value.id))
 const isRestartable = computed(() => isRunning.value && (editForm.value.type === 'web' || editForm.value.type === 'service'))
 const isRestarting = computed(() => props.restartingAppIds.has(editForm.value.id))
+const latestRun = computed(() => props.latestRuns.get(editForm.value.id) || null)
 
 const appId = computed(() => editForm.value.id)
-const hasCommand = computed(() => !!editForm.value.command)
-const { previewLines } = useLogPreview(appId, isRunning, hasCommand)
-const showLogPreview = computed(() => isRunning.value && hasCommand.value && previewLines.value.length > 0)
+const hasLogSource = computed(() => {
+  if (!editForm.value.id) return false
+  if (editForm.value.command.trim()) return true
+  if (props.runningPids.has(editForm.value.id)) return true
+  return latestRun.value?.status === 'running' || !!latestRun.value?.log_path
+})
+const { previewLines } = useLogPreview(appId, isRunning, hasLogSource)
+const showLogPreview = computed(() => isRunning.value && hasLogSource.value && previewLines.value.length > 0)
 
 function emitLaunch(delaySeconds?: number) {
   if (delaySeconds) emit('launch', editForm.value, { delaySeconds })
@@ -92,7 +98,7 @@ function emitLaunch(delaySeconds?: number) {
                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
                   窗口
                 </Button>
-                <Button v-if="editForm.command" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" @click="$emit('openLog', editForm)">
+                <Button v-if="hasLogSource" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" @click="$emit('openLog', editForm)">
                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
                   日志
                 </Button>

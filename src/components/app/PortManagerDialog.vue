@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { X } from '@lucide/vue'
 import {
   AlertDialog,
   AlertDialogContent,
@@ -11,7 +12,11 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { DialogFrame } from '@/components/ui/dialog-frame'
-import { Input } from '@/components/ui/input'
+import {
+  InputGroup,
+  InputGroupButton,
+  InputGroupInput,
+} from '@/components/ui/input-group'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 type PortProcessInfo = {
@@ -65,6 +70,10 @@ const canInspect = computed(() => {
   if (inspectMode.value === 'port') return parsedPort.value !== null
   return normalizedName.value.length > 0
 })
+
+const currentInputValue = computed(() =>
+  inspectMode.value === 'port' ? portInput.value : nameInput.value,
+)
 
 watch(() => props.open, async (open) => {
   if (!open) return
@@ -148,6 +157,15 @@ function focusCurrentInput() {
   } else {
     nameInputRef.value?.focus()
   }
+}
+
+function clearCurrentInput() {
+  if (inspectMode.value === 'port') {
+    portInput.value = ''
+  } else {
+    nameInput.value = ''
+  }
+  focusCurrentInput()
 }
 
 async function inspectProcesses(options: { keepStatus?: boolean } = {}) {
@@ -243,33 +261,43 @@ function closeDialog() {
           <ToggleGroupItem value="port" class="h-8 px-3 text-xs">端口</ToggleGroupItem>
           <ToggleGroupItem value="name" class="h-8 px-3 text-xs">名称</ToggleGroupItem>
         </ToggleGroup>
-        <div class="relative flex-1">
-          <Input
+        <InputGroup class="group flex-1 overflow-visible">
+          <InputGroupInput
             v-if="inspectMode === 'port'"
             ref="portInputRef"
             v-model="portInput"
             class="h-9 pr-20 font-mono text-sm tabular-nums"
-            clear-button-class="right-12"
             type="text"
             inputmode="numeric"
             pattern="[0-9]*"
             placeholder="3000"
             aria-label="端口号"
           />
-          <Input
+          <InputGroupInput
             v-else
             ref="nameInputRef"
             v-model="nameInput"
             class="h-9 pr-20 font-mono text-sm"
-            clear-button-class="right-14"
             type="text"
             placeholder="node"
             aria-label="进程名称"
           />
-          <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-medium uppercase text-muted-foreground">
-            {{ inspectMode === 'port' ? 'TCP' : 'NAME' }}
-          </span>
-        </div>
+          <div class="pointer-events-none absolute inset-y-0 right-2 flex items-center gap-1">
+            <InputGroupButton
+              v-if="currentInputValue"
+              class="h-6 w-6 opacity-0 pointer-events-none transition-opacity duration-150 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+              aria-label="清空输入"
+              title="清空"
+              @mousedown.prevent.stop
+              @click.prevent.stop="clearCurrentInput"
+            >
+              <X class="h-3.5 w-3.5" aria-hidden="true" />
+            </InputGroupButton>
+            <span class="rounded-sm px-1 text-[10px] font-medium uppercase text-muted-foreground">
+              {{ inspectMode === 'port' ? 'TCP' : 'NAME' }}
+            </span>
+          </div>
+        </InputGroup>
         <Button
           type="submit"
           class="h-9"

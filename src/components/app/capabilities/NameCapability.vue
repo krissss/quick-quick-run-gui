@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Input } from '@/components/ui/input'
+import { ClearableInput } from '@/components/ui/clearable-input'
 import type { AppItem } from '@/lib/store'
 
 const app = defineModel<AppItem>({ required: true })
@@ -20,6 +20,6 @@ const namePlaceholder = computed(() => {
       名称
       <span class="font-normal opacity-40">(可选)</span>
     </label>
-    <Input v-model="app.name" :placeholder="namePlaceholder" />
+    <ClearableInput v-model="app.name" :placeholder="namePlaceholder" />
   </div>
 </template>

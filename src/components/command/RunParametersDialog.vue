@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'
+import { ClearableInput } from '@/components/ui/clearable-input'
 import { DialogFrame } from '@/components/ui/dialog-frame'
-import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import LaunchActionGroup from '@/components/app/LaunchActionGroup.vue'
 import type { LaunchOptions } from '@/composables/useLauncher'
@@ -284,9 +284,10 @@ function launchDraft(delaySeconds?: number) {
               :model-value="runBoolValue(param)"
               @update:model-value="setRunParamValue(param, $event)"
             />
-            <Input
+            <ClearableInput
               v-else
-              class="h-8 text-xs"
+              class="h-8"
+              input-class="h-8 text-xs"
               :placeholder="param.default || param.label"
               :model-value="runParamValue(param)"
               @update:model-value="setRunParamValue(param, String($event ?? ''))"
@@ -317,7 +318,7 @@ function launchDraft(delaySeconds?: number) {
             </Button>
           </div>
           <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-            <Input v-model="profileNameDraft" class="h-8 text-xs" placeholder="保存为方案名称" />
+            <ClearableInput v-model="profileNameDraft" class="h-8" input-class="h-8 text-xs" placeholder="保存为方案名称" />
             <Button
               v-if="selectedProfile"
               type="button"

@@ -69,6 +69,12 @@ function mountDialog(props: {
   })
 }
 
+function clearInputButton() {
+  const button = document.querySelector('button[aria-label="清空输入"]')
+  if (!button) throw new Error('Clear input button not found')
+  return button
+}
+
 describe('PortManagerDialog', () => {
   it('focuses the port input when opened', async () => {
     const wrapper = mountDialog({ open: false })
@@ -78,6 +84,23 @@ describe('PortManagerDialog', () => {
 
     const input = inputByPlaceholder(wrapper, '3000').element as HTMLInputElement
     expect(document.activeElement).toBe(input)
+  })
+
+  it('clears the active inspect input without affecting other inputs', async () => {
+    const wrapper = mountDialog()
+
+    await inputByPlaceholder(wrapper, '3000').setValue('3815')
+    clearInputButton().dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    expect((inputByPlaceholder(wrapper, '3000').element as HTMLInputElement).value).toBe('')
+
+    await buttonContaining(wrapper, '名称', true).trigger('click')
+    await inputByPlaceholder(wrapper, 'node').setValue('vite')
+    clearInputButton().dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    expect((inputByPlaceholder(wrapper, 'node').element as HTMLInputElement).value).toBe('')
   })
 
   it('shows command failures inside the dialog', async () => {

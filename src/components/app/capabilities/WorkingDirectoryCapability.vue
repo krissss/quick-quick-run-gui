@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { ClearableInput } from '@/components/ui/clearable-input'
 import type { AppItem } from '@/lib/store'
 
 const app = defineModel<AppItem>({ required: true })
@@ -17,9 +17,10 @@ const emit = defineEmits<{
       <span class="font-normal opacity-40">(可选)</span>
     </label>
     <div class="flex rounded-md shadow-[var(--shadow-border)] focus-within:shadow-[inset_0_0_0_1px_var(--ring)]">
-      <Input
+      <ClearableInput
         v-model="app.workingDirectory"
-        class="min-w-0 flex-1 rounded-r-none shadow-none focus-visible:shadow-none"
+        class="min-w-0 flex-1 rounded-r-none shadow-none focus-within:shadow-none"
+        input-class="focus-visible:shadow-none"
         placeholder="~/repo"
       />
       <Button

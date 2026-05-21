@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { ClearableInput } from '@/components/ui/clearable-input'
 import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
@@ -291,9 +292,9 @@ function updateDayOfMonth(value: InputValue) {
     <div v-else class="flex items-end gap-2">
       <div :class="props.dense ? 'min-w-0 flex-1 space-y-1' : 'min-w-0 flex-1 space-y-1.5'">
         <label class="text-xs font-medium text-muted-foreground">Cron</label>
-        <Input
+        <ClearableInput
           :model-value="modelValue"
-          class="font-mono"
+          input-class="font-mono"
           placeholder="*/15 * * * *"
           @update:model-value="(value) => emitCron(value == null ? '' : String(value))"
         />

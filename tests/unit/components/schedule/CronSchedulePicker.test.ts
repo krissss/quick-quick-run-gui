@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import CronSchedulePicker from '@/components/schedule/CronSchedulePicker.vue'
-import { Input } from '@/components/ui/input'
+import { ClearableInput } from '@/components/ui/clearable-input'
 
 function buttonByText(wrapper: ReturnType<typeof mount>, text: string) {
   const button = wrapper.findAll('button').find((item) => item.text() === text)
@@ -104,7 +104,7 @@ describe('CronSchedulePicker', () => {
     })
 
     await buttonByText(wrapper, '自定义').trigger('click')
-    wrapper.findComponent(Input).vm.$emit('update:modelValue', undefined)
+    wrapper.findComponent(ClearableInput).vm.$emit('update:modelValue', undefined)
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([''])
 
     await wrapper.setProps({ modelValue: '*/5 * * * *' })

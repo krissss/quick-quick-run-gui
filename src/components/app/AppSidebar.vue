@@ -1,8 +1,14 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { Search, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from '@/components/ui/input-group'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { itemTypeLabel, runStatusLabel } from '@/lib/appDisplay'
 import { formatRunAtTime } from '@/lib/delay'
@@ -322,45 +328,28 @@ onUnmounted(() => {
         </Button>
       </div>
 
-      <div class="relative">
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-          aria-hidden="true"
-        >
-          <circle cx="11" cy="11" r="8" />
-          <path d="m21 21-4.3-4.3" />
-        </svg>
-        <Input
+      <InputGroup class="group h-8">
+        <InputGroupAddon>
+          <Search class="h-3.5 w-3.5" aria-hidden="true" />
+        </InputGroupAddon>
+        <InputGroupInput
           v-model="sidebarSearch"
-          class="h-8 pl-8 pr-8 text-xs"
+          class="h-8 px-2 text-xs"
           placeholder="搜索名称、命令或 URL"
           aria-label="搜索应用"
         />
-        <Button
-          v-if="sidebarSearch"
-          type="button"
-          variant="ghost"
-          size="icon"
-          class="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 text-muted-foreground"
-          aria-label="清空搜索"
-          title="清空搜索"
-          @click="clearSidebarSearch"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M18 6 6 18" />
-            <path d="m6 6 12 12" />
-          </svg>
-        </Button>
-      </div>
+        <InputGroupAddon v-if="sidebarSearch" align="inline-end">
+          <InputGroupButton
+            class="h-6 w-6 opacity-0 pointer-events-none transition-opacity duration-150 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+            aria-label="清空搜索"
+            title="清空搜索"
+            @mousedown.prevent.stop
+            @click.prevent.stop="clearSidebarSearch"
+          >
+            <X class="h-3 w-3" aria-hidden="true" />
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
 
       <ToggleGroup
         class="grid w-full grid-cols-4 gap-1"

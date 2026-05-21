@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Input } from '@/components/ui/input'
+import { ClearableInput } from '@/components/ui/clearable-input'
 import CommandTemplateTooltip from '@/components/command/CommandTemplateTooltip.vue'
 import type { AppItem } from '@/lib/store'
 
@@ -17,6 +17,6 @@ const commandPlaceholder = computed(() => app.value.type === 'task' ? 'pnpm repo
       <span v-if="app.type === 'web'" class="font-normal opacity-40">(可选)</span>
       <CommandTemplateTooltip />
     </label>
-    <Input v-model="app.command" :placeholder="commandPlaceholder" />
+    <ClearableInput v-model="app.command" :placeholder="commandPlaceholder" />
   </div>
 </template>

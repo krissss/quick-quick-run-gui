@@ -1,9 +1,10 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount, DOMWrapper } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import AppDetailForm from '@/components/app/AppDetailForm.vue'
 import CronSchedulePicker from '@/components/schedule/CronSchedulePicker.vue'
 import { serviceApp, taskApp, taskSuccessRun, webApp } from '../../../fixtures/apps'
 import { buttonContaining, inputByPlaceholder } from '../../../helpers/dom'
+import { setupTauriMocks } from '../../../helpers/tauri'
 
 function mountDetail(app = webApp, options: { isNew?: boolean; pending?: boolean; running?: boolean } = {}) {
   const running = options.running ?? app.id === 'web-1'
@@ -65,6 +66,26 @@ describe('AppDetailForm', () => {
 
     expect(serviceWrapper.text()).toContain('重启')
     expect(taskWrapper.text()).not.toContain('重启')
+  })
+
+  it('keeps the running log preview visible after clearing the command draft', async () => {
+    setupTauriMocks({
+      logs: { 'web-1': ['ready on 3000'] },
+    })
+    const wrapper = mountDetail(webApp, { running: true })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('ready on 3000')
+
+    const commandInput = inputByPlaceholder(wrapper, 'npm run dev')
+    const commandInputGroup = new DOMWrapper(commandInput.element.parentElement as Element)
+    await commandInputGroup.get('button[aria-label="清空输入"]').trigger('click')
+    await flushPromises()
+
+    expect((commandInput.element as HTMLInputElement).value).toBe('')
+    expect(wrapper.text()).toContain('ready on 3000')
+
+    wrapper.unmount()
   })
 
   it('emits form events for type, working directory, schedule, and save', async () => {

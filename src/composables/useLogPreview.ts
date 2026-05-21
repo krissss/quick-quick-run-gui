@@ -5,7 +5,7 @@ import { formatLogLine } from '@/lib/time'
 export function useLogPreview(
   appId: Ref<string>,
   isRunning: Ref<boolean>,
-  hasCommand: Ref<boolean>,
+  hasLogSource: Ref<boolean>,
 ) {
   const previewLines = ref<string[]>([])
 
@@ -27,10 +27,10 @@ export function useLogPreview(
   }
 
   watch(
-    [isRunning, hasCommand],
-    ([running, hasCmd]) => {
+    [appId, isRunning, hasLogSource],
+    ([, running, canReadLogs]) => {
       stop()
-      if (running && hasCmd) {
+      if (running && canReadLogs) {
         poll()
         timer = setInterval(poll, 1500)
       }
