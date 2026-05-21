@@ -4,17 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-Tauri v2 桌面运行器，用于管理三类条目：
-- **网页（web）：** 可选 shell 启动命令 + 目标 URL，点击后在独立 WebView 窗口中打开。
-- **服务（service）：** 长时间运行的 shell 命令，不创建应用窗口，支持运行态、日志和停止。
-- **任务（task）：** 一次性 shell 命令，支持手动运行、cron 定时运行、错过执行策略和运行历史。
+这是一个 Tauri v2 桌面运行器，用来管理三类条目：
+
+- **web**：可选 shell 启动命令 + 目标 URL，在独立 WebView 窗口中打开。
+- **service**：长时间运行的后台命令，不创建应用窗口，重点是运行态、日志和停止。
+- **task**：一次性命令，支持手动运行、cron 定时、错过执行策略和运行历史。
 
 ## 技术栈
 
 - **前端：** Vue 3（Composition API + `<script setup>`）、TypeScript、Vite、Tailwind CSS v4、shadcn-vue
 - **后端：** Rust、Tauri v2、tokio（异步）、serde
-- **调度：** cron 解析、`chrono`、`chrono-tz`
-- **数据存储：** tauri-plugin-store（JSON 文件：`qqr-store.json`）
+- **存储/调度：** tauri-plugin-store（`qqr-store.json`）、cron、`chrono`、`chrono-tz`
 - **包管理器：** pnpm
 
 ## 常用命令
@@ -37,46 +37,25 @@ pnpm tauri:build  # Tauri 生产构建
 
 ## 架构
 
-### IPC 通信
+### 入口与边界
 
-**命令（前端 → 后端）：**
-| 命令 | 参数 | 返回 | 平台 |
-|---|---|---|---|
-| `launch_app_window` | `appId`, `command`, `url`, `width`, `height`, `appName`, `itemType`, `bgR/G/B` | `{ message, pid, run_id }` | - |
-| `get_running_apps` | - | `{ app_id, pid, item_type }[]` | - |
-| `get_app_logs` | `appId` | `string[]` | - |
-| `get_recent_runs` | - | `RunRecord[]` | - |
-| `stop_app` | `appId` | - | - |
-| `show_app_window` | `appId` | - | - |
-| `notify_apps_updated` | - | - | - |
-| `open_in_browser` | `url` | - | - |
+- 前端主入口是 `src/App.vue`，独立应用窗口入口是 `src/AppWindow.vue`。
+- Tauri IPC 命令集中在 `src-tauri/src/lib.rs`；前端主要通过 `src/composables/useLauncher.ts`、`src/composables/useLogs.ts` 等 composable 调用。
+- 进程生命周期、日志文件、运行记录和重启恢复主要在 `src-tauri/src/process.rs`。
+- 用户配置的规范化、导入导出和本地 store 封装在 `src/lib/store.ts`。
+- UI 基础组件在 `src/components/ui/`，业务表单位于 `src/components/app/capabilities/`。
+- Vite 是多页入口：`index.html` 对应主窗口，`app-window.html` 对应独立应用窗口。
 
-**事件（后端 → 前端）：**
-| 事件 | Payload |
-|---|---|
-| `app-launched` | `string` (app_id) |
-| `app-stopped` | `string` (app_id) |
-| `app-process-stopped` | `string` (app_id，web 后台进程退出但窗口仍可保留) |
-| `app-run-updated` | `{ app_id, run_id, status }` |
-| `app-window-opened` | `string` (app_id) |
-| `app-log` | `{app_id: string, line: string}` |
-| `app-launch-failed` | `{app_id: string, reason: string}` |
-| `tray-launch-app` | `string` (app_id) |
-| `tray-open-log` | `string` (app_id) |
+### 行为不变量
 
-### 进程管理（`src-tauri/src/process.rs`）
+- web 的 `command` 可为空；service/task 必须有命令才能启动或保存。
+- web 有后台进程时会等待 URL 可达再创建 WebView；无命令时直接创建窗口。
+- web 后台进程自然退出时保留窗口运行态；service/task 退出后从运行态移除。
+- 窗口关闭会停止关联 web 进程；退出应用（托盘 Quit）不主动停止托管进程，托盘 `stop-all` 才会强制停止全部进程。
+- 托管命令通过 `command_group` 创建独立进程组，停止时应面向整个进程组处理。
+- `RunRecord` 记录运行状态、PID、退出码、日志路径和触发方式；日志历史按配置裁剪，但运行中的记录必须保留。
 
-- `AppState`：`HashMap<String, ProcessInfo>` 管理所有运行进程
-- `ItemType`：`Web`、`Service`、`Task`
-- `RunRecord`：记录每次运行的状态、PID、退出码、日志路径、触发方式（manual/schedule/startup-recover）
-- 窗口关闭时 `on_window_event(CloseRequested)` 自动杀掉关联 web 进程
-- web 进程自然退出时保留窗口运行态；service/task 退出后从运行态移除
-- 退出应用（托盘 Quit）不主动停止托管进程；托盘 `stop-all` 才会强制停止全部进程
-- 使用 `command_group` crate 创建独立进程组：
-  - Unix：`group_spawn()` 底层使用 `setsid()` 创建新会话
-  - Windows：`CREATE_NO_WINDOW` + `group_spawn()`
-
-### 定时任务
+### 调度规则
 
 - 调度器在启动后延迟 3 秒开始，每 60 秒检查一次启用的 task。
 - 仅 `type === "task"` 且 `schedule.enabled === true` 的条目参与调度。
@@ -87,103 +66,17 @@ pnpm tauri:build  # Tauri 生产构建
   - `run-once`：最多回溯 32 天，补跑最近一次错过的 due。
 - `schedule_state` 只在任务真实启动成功并返回 `run_id` 后推进；启动失败或任务已在运行时不推进。
 
-### 数据存储
-
-`qqr-store.json` 主要 key：
-- `apps`：用户配置的 web/service/task 条目。
-- `running_sessions`：重启恢复用的运行中进程快照。
-- `run_records`：最多保留 500 条运行历史。
-- `schedule_state`：调度器按 app id 保存的最近成功触发 due 时间。
-- `hide_dock_on_close`：关闭主窗口时是否进入仅菜单栏模式（默认 `false`）。
-
-### 窗口管理
-
-- 主窗口：`main` (index.html → App.vue)
-- 应用窗口：动态创建，label 格式 `app-{appId前8字符}`（`window_label_for()`），加载 `app-window.html` (AppWindow.vue)
-- 主窗口关闭时默认只隐藏窗口并保留 Dock 图标；启用「菜单栏模式」后才隐藏 Dock 图标（macOS）。
-- 点击 Dock 图标或菜单栏图标会重新显示主窗口；菜单栏右键菜单提供打开运行中 web 窗口、查看 service/task 日志、停止运行项等操作。
-
-### Vite 多页入口
-
-```javascript
-// vite.config.ts
-input: {
-  main: 'index.html',           // 主窗口
-  'app-window': 'app-window.html' // 应用窗口
-}
-```
-
-### 关键文件
-
-**前端：**
-- `src/App.vue` — 主界面，卡片列表、CRUD、主题、日志
-- `src/AppWindow.vue` — 应用窗口，工具栏 + iframe
-- `src/components/CronSchedulePicker.vue` — 人性化 cron 编辑组件
-- `src/lib/store.ts` — 数据持久化封装
-- `src/lib/cron.ts` — 前端 cron 表达式校验
-- `src/lib/theme.ts` — 主题切换（light/dark/system）
-- `src/components/ui/` — shadcn-vue 组件
-
-**后端：**
-- `src-tauri/src/lib.rs` — IPC 命令入口、窗口管理、任务调度
-- `src-tauri/src/process.rs` — 进程生命周期
-- `src-tauri/src/tray.rs` — 系统托盘（macOS only）
-- `src-tauri/src/dock.rs` — Dock 图标控制（macOS only）
-- `src-tauri/src/url_check.rs` — TCP 连接检查
-- `src-tauri/src/favicon.rs` — HTML 标题提取
-
-**配置：**
-- `src-tauri/tauri.conf.json` — 窗口配置、CSP
-- `src-tauri/capabilities/default.json` — 权限定义
-- `src-tauri/Cargo.toml` — Rust 依赖
-
-### 条件编译
-
-```rust
-// 平台相关
-#[cfg(unix)]      // Unix-specific code
-#[cfg(windows)]   // Windows-specific code
-#[cfg(target_os = "macos")]  // macOS-only (tray, dock)
-```
-
-### 数据流
-
-```
-web 条目：
-  用户点击卡片
-    → launch_app_window(itemType=web)
-    → 启动 shell 进程（command 可选）
-    → 轮询 check_url_reachable
-    → 创建 WebviewWindow
-    → 设置窗口标题（从目标页面 <title>）
-
-service 条目：
-  用户点击卡片
-    → launch_app_window(itemType=service)
-    → 杀掉旧实例
-    → 启动 shell 进程
-    → 写入 running_sessions + run_records
-    → 进程退出后更新运行记录并移除运行态
-
-task 条目：
-  用户点击运行或调度器命中 cron
-    → launch_app_window(itemType=task) 或 run_scheduler_tick
-    → 若任务已运行则不重复启动
-    → 启动 shell 进程
-    → 写入 run_records
-    → 进程退出后更新状态
-```
-
 ### shadcn-vue 组件
 
-使用 `@/components/ui/` 下的组件，通过 `components.json` 配置。新增组件：
+- 使用 `@/components/ui/` 下的组件，通过 `components.json` 配置。新增官方组件：
+
 ```bash
 pnpm dlx shadcn-vue@latest add [组件名]
 ```
 
 ## UI 设计规范
 
-**必须严格遵循 `DESIGN.md` 中的 Vercel 设计系统进行所有 UI 相关开发。** 主要原则：
+所有 UI 相关开发必须先查阅 `DESIGN.md`。核心约束：
 
 - **字体：** Geist Sans（主字体）+ Geist Mono（等宽），启用 OpenType `"liga"`
 - **配色：** 黑白灰为主调（`#171717` / `#ffffff`），禁止引入暖色调装饰色
@@ -194,8 +87,6 @@ pnpm dlx shadcn-vue@latest add [组件名]
 - **阴影层级：** 多层 shadow stack（border + elevation + ambient + inner highlight）
 - **focus ring：** `hsla(212, 100%, 48%, 1)` 蓝色聚焦环
 
-修改任何前端组件、样式、布局前，先查阅 `DESIGN.md` 对应章节（配色、排版、组件、深度）。
-
 ## 调试
 
 - 前端日志：浏览器 DevTools
@@ -205,7 +96,7 @@ pnpm dlx shadcn-vue@latest add [组件名]
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **quick-quick-run-gui** (902 symbols, 2228 relationships, 70 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **quick-quick-run-gui** (928 symbols, 2294 relationships, 72 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
