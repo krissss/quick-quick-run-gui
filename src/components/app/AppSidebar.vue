@@ -13,33 +13,30 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { itemTypeLabel, runStatusLabel } from '@/lib/appDisplay'
 import { formatRunAtTime } from '@/lib/delay'
 import type { AppItem, AppType } from '@/lib/store'
-import type { PendingLaunch, RunRecord } from '@/composables/useLauncher'
+import { useAppSessionStore } from '@/stores/appSession'
+import { useAppsStore } from '@/stores/apps'
+import { useLauncherStore } from '@/stores/launcher'
+import { useSettingsStore } from '@/stores/settings'
 
 const props = defineProps<{
-  apps: AppItem[]
-  selectedAppId: string
-  isNew: boolean
-  runningAppIds: Set<string>
-  latestRuns: Map<string, RunRecord>
-  pendingLaunches: Map<string, PendingLaunch>
   faviconUrl: (app: AppItem) => string
 }>()
 
 const emit = defineEmits<{
-  add: []
-  select: [app: AppItem]
-  reorder: [activeId: string, targetId: string]
-  openPorts: []
-  openSettings: []
   'favicon-error': [app: AppItem]
 }>()
+
+const appsStore = useAppsStore()
+const launcherStore = useLauncherStore()
+const settingsStore = useSettingsStore()
+const sessionStore = useAppSessionStore()
 
 const sidebarSearch = ref('')
 const sidebarFilter = ref<'all' | AppType>('all')
 
 const filteredApps = computed(() => {
   const query = sidebarSearch.value.trim().toLowerCase()
-  return props.apps.filter((app) => {
+  return appsStore.apps.filter((app) => {
     if (sidebarFilter.value !== 'all' && app.type !== sidebarFilter.value) return false
     if (!query) return true
     const profileText = app.profiles
@@ -50,9 +47,7 @@ const filteredApps = computed(() => {
   })
 })
 
-const runningCount = computed(() =>
-  props.apps.filter(app => props.runningAppIds.has(app.id)).length,
-)
+const runningCount = computed(() => launcherStore.runningCount(appsStore.apps))
 
 const draggedAppId = ref<string | null>(null)
 const dragOverAppId = ref<string | null>(null)
@@ -122,7 +117,7 @@ function handleAppPointerUp(event: PointerEvent) {
     }, 0)
   }
   ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
-  if (hasDragged && targetId && activeId !== targetId) emit('reorder', activeId, targetId)
+  if (hasDragged && targetId && activeId !== targetId) void appsStore.reorderApps(activeId, targetId)
   resetAppDrag()
 }
 
@@ -137,7 +132,7 @@ function handleAppClick(event: MouseEvent, app: AppItem) {
     }
     return
   }
-  emit('select', app)
+  void sessionStore.selectApp(app)
 }
 
 function sidebarSubtitle(app: AppItem) {
@@ -148,16 +143,17 @@ function sidebarSubtitle(app: AppItem) {
 }
 
 function latestRunLabel(app: AppItem) {
-  if (props.runningAppIds.has(app.id)) return ''
-  const label = runStatusLabel(app, props.runningAppIds, props.latestRuns)
+  const runState = launcherStore.appRunState(app.id)
+  if (runState.isRunning) return ''
+  const label = runStatusLabel(app, launcherStore.runningAppIds, launcherStore.latestRuns)
   return label === '上次成功' ? '成功' : label
 }
 
 function primaryStatusLabel(app: AppItem) {
-  const pending = props.pendingLaunches.get(app.id)
-  if (pending) return `即将 ${formatRunAtTime(pending.runAt)}`
-  if (props.runningAppIds.has(app.id)) return '运行中'
-  const run = props.latestRuns.get(app.id)
+  const runState = launcherStore.appRunState(app.id)
+  if (runState.pendingLaunch) return `即将 ${formatRunAtTime(runState.pendingLaunch.runAt)}`
+  if (runState.isRunning) return '运行中'
+  const run = runState.latestRun
   if (run?.status === 'failed') return '失败'
   if (run?.status === 'lost') return '丢失'
   if (app.type === 'task' && app.schedule.enabled) return '定时'
@@ -166,9 +162,10 @@ function primaryStatusLabel(app: AppItem) {
 }
 
 function primaryStatusClass(app: AppItem) {
-  if (props.pendingLaunches.has(app.id)) return 'bg-amber-500/12 text-amber-700 dark:text-amber-400'
-  if (props.runningAppIds.has(app.id)) return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-  const status = props.latestRuns.get(app.id)?.status
+  const runState = launcherStore.appRunState(app.id)
+  if (runState.pendingLaunch) return 'bg-amber-500/12 text-amber-700 dark:text-amber-400'
+  if (runState.isRunning) return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+  const status = runState.latestRun?.status
   if (status === 'failed' || status === 'lost') return 'bg-destructive/10 text-destructive'
   if (app.type === 'task' && app.schedule.enabled) return 'bg-blue-500/10 text-blue-700 dark:text-blue-400'
   return 'bg-secondary text-muted-foreground'
@@ -183,7 +180,7 @@ function primaryStatusClass(app: AppItem) {
         <div class="min-w-0">
           <div class="truncate text-sm font-semibold tracking-[-0.28px]">QQRun</div>
           <div class="mt-0.5 text-xs text-muted-foreground">
-            {{ apps.length }} 个条目 · {{ runningCount }} 个运行中
+            {{ appsStore.apps.length }} 个条目 · {{ runningCount }} 个运行中
           </div>
         </div>
         <Button
@@ -191,10 +188,10 @@ function primaryStatusClass(app: AppItem) {
           variant="ghost"
           size="icon"
           class="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-          :class="isNew ? 'bg-card text-foreground shadow-[var(--shadow-border)]' : ''"
+          :class="appsStore.isNew ? 'bg-card text-foreground shadow-[var(--shadow-border)]' : ''"
           aria-label="添加应用"
           title="添加应用"
-          @click="$emit('add')"
+          @click="sessionStore.openAddForm"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 5v14M5 12h14"/>
@@ -281,7 +278,7 @@ function primaryStatusClass(app: AppItem) {
             variant="ghost"
             class="relative h-auto w-full justify-start gap-2.5 px-2 py-2 text-left cursor-grab select-none touch-none active:cursor-grabbing"
             :class="[
-              selectedAppId === app.id && !isNew ? 'bg-card text-foreground shadow-[var(--shadow-border)]' : 'text-foreground hover:bg-accent/50',
+              appsStore.editForm.id === app.id && !appsStore.isNew ? 'bg-card text-foreground shadow-[var(--shadow-border)]' : 'text-foreground hover:bg-accent/50',
               draggedAppId === app.id ? 'opacity-50' : '',
               dragOverAppId === app.id ? 'bg-accent/70 shadow-[inset_0_0_0_1px_var(--ring)]' : '',
             ]"
@@ -294,7 +291,7 @@ function primaryStatusClass(app: AppItem) {
             @click="handleAppClick($event, app)"
           >
             <span
-              v-if="selectedAppId === app.id && !isNew"
+              v-if="appsStore.editForm.id === app.id && !appsStore.isNew"
               class="absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-foreground/70"
               aria-hidden="true"
             />
@@ -330,7 +327,7 @@ function primaryStatusClass(app: AppItem) {
         variant="ghost"
         class="h-8 w-full justify-center gap-1.5 px-2 text-muted-foreground hover:text-foreground"
         title="进程排查"
-        @click="$emit('openPorts')"
+        @click="sessionStore.openPortManagerDialog"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="3" y="3" width="7" height="7" rx="1.5" />
@@ -347,7 +344,7 @@ function primaryStatusClass(app: AppItem) {
         variant="ghost"
         class="h-8 w-full justify-center gap-1.5 px-2 text-muted-foreground hover:text-foreground"
         title="设置"
-        @click="$emit('openSettings')"
+        @click="settingsStore.openSettingsDialog"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
         <span class="text-xs">设置</span>

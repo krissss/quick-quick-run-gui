@@ -1,24 +1,20 @@
 import { ref } from 'vue'
+import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { useIntervalFn } from '@vueuse/core'
 import { DEFAULT_LOG_RETENTION_LIMIT, loadLogRetentionLimit, type AppItem } from '@/lib/store'
-import type { RunRecord } from '@/composables/useLauncher'
+import type { RunRecord, RunUpdatedPayload } from '@/stores/launcher'
 import { formatLogLine } from '@/lib/time'
-import { getErrorMessage } from './useMessage'
-
-interface RunUpdatedPayload {
-  app_id: string
-  run_id: string
-  status: RunRecord['status']
-}
+import { getErrorMessage } from '@/lib/error'
+import { useMessageStore } from './message'
 
 interface ClearLogsResult {
   removed: number
 }
 
-export function useLogs(
-  showMessage: (msg: string, type?: 'success' | 'error' | 'info') => void = () => {},
-) {
+export const useLogsStore = defineStore('logs', () => {
+  const message = useMessageStore()
   const showLogDialog = ref(false)
   const logAppId = ref('')
   const logAppName = ref('')
@@ -28,10 +24,7 @@ export function useLogs(
   const logLaunchFailed = ref(false)
   const logLaunchFailedReason = ref('')
   const logWindowOpened = ref(false)
-  let logFailedUnlisten: (() => void) | null = null
-  let logOpenedUnlisten: (() => void) | null = null
-  let logRunUnlisten: (() => void) | null = null
-  let pollTimer: ReturnType<typeof setInterval> | null = null
+  const unsubscribers: (() => void)[] = []
 
   function formatLines(lines: string[]) {
     return lines.map(formatLogLine)
@@ -80,9 +73,9 @@ export function useLogs(
       })
       await loadLogRuns()
       await loadLogLines()
-      showMessage(result.removed > 0 ? `已清理 ${result.removed} 条日志` : '没有可清理的日志', 'success')
+      message.showMessage(result.removed > 0 ? `已清理 ${result.removed} 条日志` : '没有可清理的日志', 'success')
     } catch (e: unknown) {
-      showMessage(`清理日志失败: ${getErrorMessage(e)}`, 'error')
+      message.showMessage(`清理日志失败: ${getErrorMessage(e)}`, 'error')
     }
   }
 
@@ -96,11 +89,22 @@ export function useLogs(
   }
 
   function cleanupLogSubscriptions() {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-    if (logFailedUnlisten) { logFailedUnlisten(); logFailedUnlisten = null }
-    if (logOpenedUnlisten) { logOpenedUnlisten(); logOpenedUnlisten = null }
-    if (logRunUnlisten) { logRunUnlisten(); logRunUnlisten = null }
+    unsubscribers.splice(0).forEach(fn => fn())
+    pausePoll()
   }
+
+  const { pause: pausePoll, resume: resumePoll } = useIntervalFn(async () => {
+    try {
+      const run = selectedRun()
+      if (run && run.status !== 'running') return
+      const payload: { appId: string; runId?: string } = { appId: logAppId.value }
+      if (selectedLogRunId.value) payload.runId = selectedLogRunId.value
+      const all = formatLines(await invoke<string[]>('get_app_logs', payload))
+      if (all.length !== logLines.value.length) {
+        logLines.value = all
+      }
+    } catch { /* ignore */ }
+  }, 300, { immediate: false })
 
   async function openLogDialog(app: AppItem, windowAlreadyOpen = false) {
     cleanupLogSubscriptions()
@@ -117,43 +121,28 @@ export function useLogs(
     await loadLogLines()
     showLogDialog.value = true
 
-    // 监听状态事件
-    logFailedUnlisten = await listen<{ app_id: string; reason: string }>('app-launch-failed', (e) => {
-      if (e.payload.app_id === logAppId.value) {
-        logLaunchFailed.value = true
-        logLaunchFailedReason.value = e.payload.reason
-      }
-    })
-
-    logOpenedUnlisten = await listen<string>('app-window-opened', (e) => {
-      if (e.payload === logAppId.value) {
-        logWindowOpened.value = true
-      }
-    })
-
-    logRunUnlisten = await listen<RunUpdatedPayload>('app-run-updated', async (e) => {
-      if (e.payload.app_id === logAppId.value) {
-        const shouldRefreshLines = selectedLogRunId.value == null || selectedLogRunId.value === e.payload.run_id
-        await loadLogRuns()
-        if (shouldRefreshLines) await loadLogLines()
-      }
-    })
-
-    // 轮询拉取新日志（每 300ms）
-    let lastCount = logLines.value.length
-    pollTimer = setInterval(async () => {
-      try {
-        const run = selectedRun()
-        if (run && run.status !== 'running') return
-        const payload: { appId: string; runId?: string } = { appId: logAppId.value }
-        if (selectedLogRunId.value) payload.runId = selectedLogRunId.value
-        const all = formatLines(await invoke<string[]>('get_app_logs', payload))
-        if (all.length !== lastCount) {
-          logLines.value = all
-          lastCount = all.length
+    unsubscribers.push(
+      await listen<{ app_id: string; reason: string }>('app-launch-failed', (e) => {
+        if (e.payload.app_id === logAppId.value) {
+          logLaunchFailed.value = true
+          logLaunchFailedReason.value = e.payload.reason
         }
-      } catch { /* ignore */ }
-    }, 300)
+      }),
+      await listen<string>('app-window-opened', (e) => {
+        if (e.payload === logAppId.value) {
+          logWindowOpened.value = true
+        }
+      }),
+      await listen<RunUpdatedPayload>('app-run-updated', async (e) => {
+        if (e.payload.app_id === logAppId.value) {
+          const shouldRefreshLines = selectedLogRunId.value == null || selectedLogRunId.value === e.payload.run_id
+          await loadLogRuns()
+          if (shouldRefreshLines) await loadLogLines()
+        }
+      }),
+    )
+
+    resumePoll()
   }
 
   function closeLogDialog() {
@@ -177,4 +166,4 @@ export function useLogs(
     clearAllLogRuns,
     closeLogDialog,
   }
-}
+})

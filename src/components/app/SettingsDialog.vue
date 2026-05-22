@@ -3,46 +3,19 @@ import { Button } from '@/components/ui/button'
 import { DialogFrame } from '@/components/ui/dialog-frame'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { useSettingsStore } from '@/stores/settings'
 
-defineProps<{
-  open: boolean
-  autostartEnabled: boolean
-  hideDockOnClose: boolean
-  logRetentionLimit: number
-  gracefulStopTimeoutSeconds: number
-  checkingForUpdates: boolean
-  appVersion: string
-  availableUpdateVersion: string
-  updateReleaseNotes: string
-  updateInProgress: boolean
-  updateProgressPercent: number | null
-  updateProgressLabel: string
-  themeIcon: 'light' | 'dark' | 'system'
-  themeLabel: string
-}>()
-
-defineEmits<{
-  close: []
-  toggleAutostart: [enabled: boolean]
-  toggleHideDockOnClose: [enabled: boolean]
-  updateLogRetentionLimit: [limit: number]
-  updateGracefulStopTimeoutSeconds: [seconds: number]
-  checkUpdates: []
-  installUpdate: []
-  toggleTheme: []
-  importData: []
-  exportData: []
-}>()
+const settingsStore = useSettingsStore()
 </script>
 
 <template>
   <DialogFrame
-    :open="open"
+    :open="settingsStore.showSettingsDialog"
     title="设置"
     close-label="关闭设置"
-    :close-disabled="updateInProgress"
+    :close-disabled="settingsStore.updateInProgress"
     panel-class="max-w-md"
-    @close="$emit('close')"
+    @close="settingsStore.closeSettingsDialog"
   >
     <div class="space-y-1">
       <div class="flex items-center justify-between py-3">
@@ -50,7 +23,7 @@ defineEmits<{
           <div class="text-sm font-medium">开机自启动</div>
           <div class="text-xs text-muted-foreground mt-0.5">登录时自动启动应用</div>
         </div>
-        <Switch aria-label="开机自启动" :model-value="autostartEnabled" @update:model-value="$emit('toggleAutostart', $event)" />
+        <Switch aria-label="开机自启动" :model-value="settingsStore.autostartEnabled" @update:model-value="settingsStore.toggleAutostart" />
       </div>
 
       <div class="h-px shadow-[0_-1px_0_0_var(--border)]" />
@@ -60,7 +33,7 @@ defineEmits<{
           <div class="text-sm font-medium">菜单栏模式</div>
           <div class="text-xs text-muted-foreground mt-0.5">关闭主窗口时隐藏 Dock 图标</div>
         </div>
-        <Switch aria-label="菜单栏模式" :model-value="hideDockOnClose" @update:model-value="$emit('toggleHideDockOnClose', $event)" />
+        <Switch aria-label="菜单栏模式" :model-value="settingsStore.hideDockOnClose" @update:model-value="settingsStore.toggleHideDockOnClose" />
       </div>
 
       <div class="h-px shadow-[0_-1px_0_0_var(--border)]" />
@@ -75,9 +48,9 @@ defineEmits<{
           type="number"
           min="1"
           max="200"
-          :model-value="logRetentionLimit"
+          :model-value="settingsStore.logRetentionLimit"
           aria-label="日志保留数量"
-          @update:model-value="$emit('updateLogRetentionLimit', Number($event))"
+          @update:model-value="settingsStore.updateLogRetentionLimit(Number($event))"
         />
       </div>
 
@@ -93,9 +66,9 @@ defineEmits<{
           type="number"
           min="1"
           max="120"
-          :model-value="gracefulStopTimeoutSeconds"
+          :model-value="settingsStore.gracefulStopTimeoutSeconds"
           aria-label="停止等待秒数"
-          @update:model-value="$emit('updateGracefulStopTimeoutSeconds', Number($event))"
+          @update:model-value="settingsStore.updateGracefulStopTimeoutSeconds(Number($event))"
         />
       </div>
 
@@ -104,18 +77,18 @@ defineEmits<{
       <div class="flex items-center justify-between py-3">
         <div>
           <div class="text-sm font-medium">外观主题</div>
-          <div class="text-xs text-muted-foreground mt-0.5">{{ themeLabel }}</div>
+          <div class="text-xs text-muted-foreground mt-0.5">{{ settingsStore.themeLabel }}</div>
         </div>
         <Button
           variant="ghost"
           size="sm"
           class="h-8 w-8 px-0"
-          :title="`切换主题：${themeLabel}`"
+          :title="`切换主题：${settingsStore.themeLabel}`"
           aria-label="切换主题"
-          @click="$emit('toggleTheme')"
+          @click="settingsStore.toggleTheme"
         >
           <svg
-            v-if="themeIcon === 'light'"
+            v-if="settingsStore.themeIcon === 'light'"
             xmlns="http://www.w3.org/2000/svg"
             width="14"
             height="14"
@@ -137,7 +110,7 @@ defineEmits<{
             <path d="m19.07 4.93-1.41 1.41" />
           </svg>
           <svg
-            v-else-if="themeIcon === 'dark'"
+            v-else-if="settingsStore.themeIcon === 'dark'"
             xmlns="http://www.w3.org/2000/svg"
             width="14"
             height="14"
@@ -177,62 +150,62 @@ defineEmits<{
             <div class="text-sm font-medium">软件更新</div>
             <div class="text-xs text-muted-foreground mt-0.5">
               <span>检查 GitHub Release 新版本</span>
-              <span v-if="appVersion" class="ml-2 font-mono tabular-nums">当前版本 v{{ appVersion }}</span>
+              <span v-if="settingsStore.appVersion" class="ml-2 font-mono tabular-nums">当前版本 v{{ settingsStore.appVersion }}</span>
             </div>
           </div>
           <Button
             variant="ghost"
             size="sm"
             class="text-xs"
-            :disabled="checkingForUpdates || updateInProgress"
-            @click="$emit('checkUpdates')"
+            :disabled="settingsStore.checkingForUpdates || settingsStore.updateInProgress"
+            @click="settingsStore.checkForUpdates"
           >
-            {{ checkingForUpdates ? '检查中' : '检查更新' }}
+            {{ settingsStore.checkingForUpdates ? '检查中' : '检查更新' }}
           </Button>
         </div>
 
         <div
-          v-if="availableUpdateVersion || updateInProgress"
+          v-if="settingsStore.availableUpdateVersion || settingsStore.updateInProgress"
           class="rounded-md bg-muted px-3 py-3"
           style="box-shadow: var(--shadow-border)"
         >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="text-sm font-medium">
-                {{ updateProgressLabel || `发现新版本 v${availableUpdateVersion}` }}
+                {{ settingsStore.updateProgressLabel || `发现新版本 v${settingsStore.availableUpdateVersion}` }}
               </div>
               <pre
-                v-if="updateReleaseNotes && !updateInProgress"
+                v-if="settingsStore.updateReleaseNotes && !settingsStore.updateInProgress"
                 class="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words font-sans text-xs leading-5 text-muted-foreground"
-              >{{ updateReleaseNotes }}</pre>
+              >{{ settingsStore.updateReleaseNotes }}</pre>
             </div>
             <Button
-              v-if="!updateInProgress"
+              v-if="!settingsStore.updateInProgress"
               variant="default"
               size="sm"
               class="shrink-0 text-xs"
-              @click="$emit('installUpdate')"
+              @click="settingsStore.installAvailableUpdate"
             >
               下载并安装
             </Button>
           </div>
 
-          <div v-if="updateInProgress" class="mt-3 space-y-1.5">
+          <div v-if="settingsStore.updateInProgress" class="mt-3 space-y-1.5">
             <div
               class="h-1.5 overflow-hidden rounded-full bg-background"
               role="progressbar"
-              :aria-valuenow="updateProgressPercent ?? undefined"
+              :aria-valuenow="settingsStore.updateProgressPercent ?? undefined"
               aria-valuemin="0"
               aria-valuemax="100"
             >
               <div
                 class="h-full rounded-full bg-foreground transition-all duration-300"
-                :class="{ 'animate-pulse': updateProgressPercent == null }"
-                :style="{ width: `${updateProgressPercent ?? 35}%` }"
+                :class="{ 'animate-pulse': settingsStore.updateProgressPercent == null }"
+                :style="{ width: `${settingsStore.updateProgressPercent ?? 35}%` }"
               />
             </div>
             <div class="text-xs text-muted-foreground">
-              {{ updateProgressLabel }}
+              {{ settingsStore.updateProgressLabel }}
             </div>
           </div>
         </div>
@@ -246,8 +219,8 @@ defineEmits<{
           <div class="text-xs text-muted-foreground mt-0.5">导入或导出应用配置</div>
         </div>
         <div class="flex gap-1.5">
-          <Button variant="ghost" size="sm" class="text-xs" @click="$emit('importData')">导入</Button>
-          <Button variant="ghost" size="sm" class="text-xs" @click="$emit('exportData')">导出</Button>
+          <Button variant="ghost" size="sm" class="text-xs" @click="settingsStore.handleImport">导入</Button>
+          <Button variant="ghost" size="sm" class="text-xs" @click="settingsStore.handleExport">导出</Button>
         </div>
       </div>
     </div>

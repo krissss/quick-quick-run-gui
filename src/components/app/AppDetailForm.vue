@@ -11,62 +11,44 @@ import {
   runStatusLabel,
   statusDotClass,
 } from '@/lib/appDisplay'
-import type { AppItem, AppType, MissedPolicy, RestartConfig, RetryConfig, StartupConfig } from '@/lib/store'
-import type { LaunchOptions, PendingLaunch, RunRecord } from '@/composables/useLauncher'
+import type { AppItem } from '@/lib/store'
+import { useAppSessionStore } from '@/stores/appSession'
+import { useAppsStore } from '@/stores/apps'
+import { useLauncherStore } from '@/stores/launcher'
 import { useLogPreview } from '@/composables/useLogPreview'
 
-const editForm = defineModel<AppItem>({ required: true })
-
 const props = defineProps<{
-  isNew: boolean
-  runningAppIds: Set<string>
-  runningPids: Map<string, number>
-  latestRuns: Map<string, RunRecord>
-  pendingLaunches: Map<string, PendingLaunch>
-  restartingAppIds: Set<string>
   faviconUrl?: string
 }>()
 
 const emit = defineEmits<{
-  save: []
-  duplicate: []
-  launch: [app: AppItem, options?: LaunchOptions]
-  cancelDelayedLaunch: [appId: string]
-  delete: []
-  setType: [type: AppType]
-  setScheduleEnabled: [enabled: boolean]
-  setMissedPolicy: [missedPolicy: MissedPolicy]
-  setScheduleCron: [cron: string]
-  setStartup: [startup: StartupConfig]
-  setRestart: [restart: RestartConfig]
-  setRetry: [retry: RetryConfig]
-  chooseWorkingDirectory: []
-  showWindow: [appId: string]
-  openLog: [app: AppItem]
-  stop: [appId: string]
-  restart: [app: AppItem]
   'favicon-error': [app: AppItem]
 }>()
 
-const pendingLaunch = computed(() => props.pendingLaunches.get(editForm.value.id) || null)
-const isRunning = computed(() => props.runningAppIds.has(editForm.value.id))
+const appsStore = useAppsStore()
+const launcherStore = useLauncherStore()
+const sessionStore = useAppSessionStore()
+const editForm = computed<AppItem>({
+  get: () => appsStore.editForm,
+  set: value => {
+    appsStore.updateForm(value)
+  },
+})
+
+const runState = computed(() => launcherStore.appRunState(editForm.value.id))
+const pendingLaunch = computed(() => runState.value.pendingLaunch)
+const isRunning = computed(() => runState.value.isRunning)
 const isRestartable = computed(() => isRunning.value && (editForm.value.type === 'web' || editForm.value.type === 'service'))
-const isRestarting = computed(() => props.restartingAppIds.has(editForm.value.id))
-const latestRun = computed(() => props.latestRuns.get(editForm.value.id) || null)
+const isRestarting = computed(() => runState.value.isRestarting)
 
 const appId = computed(() => editForm.value.id)
-const hasLogSource = computed(() => {
-  if (!editForm.value.id) return false
-  if (editForm.value.command.trim()) return true
-  if (props.runningPids.has(editForm.value.id)) return true
-  return latestRun.value?.status === 'running' || !!latestRun.value?.log_path
-})
+const hasLogSource = computed(() => launcherStore.hasLogSource(editForm.value))
 const { previewLines } = useLogPreview(appId, isRunning, hasLogSource)
 const showLogPreview = computed(() => isRunning.value && hasLogSource.value && previewLines.value.length > 0)
 
 function emitLaunch(delaySeconds?: number) {
-  if (delaySeconds) emit('launch', editForm.value, { delaySeconds })
-  else emit('launch', editForm.value)
+  if (delaySeconds) void sessionStore.requestLaunch(editForm.value, { delaySeconds })
+  else void sessionStore.requestLaunch(editForm.value)
 }
 </script>
 
@@ -79,25 +61,25 @@ function emitLaunch(delaySeconds?: number) {
             <AppIcon
               :app="editForm"
               :favicon-url="props.faviconUrl || ''"
-              :is-new="props.isNew"
+              :is-new="appsStore.isNew"
               size="lg"
               @favicon-error="emit('favicon-error', editForm)"
             />
             <div class="min-w-0 flex-1">
               <h2 class="truncate text-base font-semibold tracking-[-0.32px]">
-                {{ props.isNew ? '添加应用' : editForm.name || '未命名' }}
+                {{ appsStore.isNew ? '添加应用' : editForm.name || '未命名' }}
               </h2>
-              <div v-if="!props.isNew" class="mt-1.5 flex flex-wrap items-center gap-2">
-                <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" :class="runStatusClass(editForm, props.runningAppIds, props.latestRuns)">
-                  <span class="h-1.5 w-1.5 rounded-full" :class="statusDotClass(editForm, props.runningAppIds, props.latestRuns)" />
-                  {{ runStatusLabel(editForm, props.runningAppIds, props.latestRuns) || itemTypeLabel(editForm.type) }}
+              <div v-if="!appsStore.isNew" class="mt-1.5 flex flex-wrap items-center gap-2">
+                <span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" :class="runStatusClass(editForm, launcherStore.runningAppIds, launcherStore.latestRuns)">
+                  <span class="h-1.5 w-1.5 rounded-full" :class="statusDotClass(editForm, launcherStore.runningAppIds, launcherStore.latestRuns)" />
+                  {{ runStatusLabel(editForm, launcherStore.runningAppIds, launcherStore.latestRuns) || itemTypeLabel(editForm.type) }}
                 </span>
-                <span v-if="props.runningPids.has(editForm.id)" class="font-mono text-[11px] text-muted-foreground">PID {{ props.runningPids.get(editForm.id) }}</span>
-                <Button v-if="editForm.type === 'web' && isRunning" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" @click="$emit('showWindow', editForm.id)">
+                <span v-if="runState.pid != null" class="font-mono text-[11px] text-muted-foreground">PID {{ runState.pid }}</span>
+                <Button v-if="editForm.type === 'web' && isRunning" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" @click="launcherStore.showAppWindow(editForm.id)">
                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
                   窗口
                 </Button>
-                <Button v-if="hasLogSource" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" @click="$emit('openLog', editForm)">
+                <Button v-if="hasLogSource" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" @click="sessionStore.openExistingLogDialog(editForm)">
                   <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
                   日志
                 </Button>
@@ -105,7 +87,7 @@ function emitLaunch(delaySeconds?: number) {
             </div>
 
             <div
-              v-if="!props.isNew"
+              v-if="!appsStore.isNew"
               class="flex shrink-0 flex-wrap items-start justify-end gap-1.5 pt-0.5"
             >
               <LaunchActionGroup
@@ -113,14 +95,14 @@ function emitLaunch(delaySeconds?: number) {
                 :label="primaryActionLabel(editForm)"
                 :pending-launch="pendingLaunch"
                 size="large"
-                @cancel-delayed-launch="$emit('cancelDelayedLaunch', editForm.id)"
+                @cancel-delayed-launch="launcherStore.cancelDelayedLaunch(editForm.id)"
                 @launch="emitLaunch"
               />
-              <Button v-if="isRunning" type="button" variant="destructive" class="h-9 gap-2 px-4 text-sm" :disabled="isRestarting" @click="$emit('stop', editForm.id)">
+              <Button v-if="isRunning" type="button" variant="destructive" class="h-9 gap-2 px-4 text-sm" :disabled="isRestarting" @click="launcherStore.stopApp(editForm.id)">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"/></svg>
                 停止
               </Button>
-              <Button v-if="isRestartable" type="button" variant="secondary" class="h-9 gap-2 px-4 text-sm text-muted-foreground hover:text-foreground" :disabled="isRestarting" @click="$emit('restart', editForm)">
+              <Button v-if="isRestartable" type="button" variant="secondary" class="h-9 gap-2 px-4 text-sm text-muted-foreground hover:text-foreground" :disabled="isRestarting" @click="launcherStore.restartApp(editForm)">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
                 {{ isRestarting ? '重启中' : '重启' }}
               </Button>
@@ -132,7 +114,7 @@ function emitLaunch(delaySeconds?: number) {
           <button
             type="button"
             class="absolute right-2 top-1.5 cursor-pointer text-[10px] text-zinc-500 hover:text-zinc-300"
-            @click="$emit('openLog', editForm)"
+            @click="sessionStore.openExistingLogDialog(editForm)"
           >
             查看全部
           </button>
@@ -144,24 +126,24 @@ function emitLaunch(delaySeconds?: number) {
         <div class="px-5 py-5">
           <AppCapabilityStack
             v-model="editForm"
-            @set-type="$emit('setType', $event)"
-            @set-schedule-enabled="$emit('setScheduleEnabled', $event)"
-            @set-schedule-cron="$emit('setScheduleCron', $event)"
-            @set-missed-policy="$emit('setMissedPolicy', $event)"
-            @set-startup="$emit('setStartup', $event)"
-            @set-restart="$emit('setRestart', $event)"
-            @set-retry="$emit('setRetry', $event)"
-            @choose-working-directory="$emit('chooseWorkingDirectory')"
+            @set-type="appsStore.setAppType"
+            @set-schedule-enabled="appsStore.setScheduleEnabled"
+            @set-schedule-cron="appsStore.setScheduleCron"
+            @set-missed-policy="appsStore.setMissedPolicy"
+            @set-startup="appsStore.setStartup"
+            @set-restart="appsStore.setRestart"
+            @set-retry="appsStore.setRetry"
+            @choose-working-directory="sessionStore.chooseWorkingDirectory"
           />
         </div>
 
         <div class="flex flex-wrap items-center gap-2 bg-muted/40 px-5 py-3 shadow-[inset_0_1px_0_0_var(--border)]">
-          <Button size="sm" @click="$emit('save')">{{ props.isNew ? '添加' : '保存' }}</Button>
+          <Button size="sm" @click="appsStore.saveApp">{{ appsStore.isNew ? '添加' : '保存' }}</Button>
           <Button
-            v-if="!props.isNew"
+            v-if="!appsStore.isNew"
             variant="secondary"
             size="sm"
-            @click="$emit('duplicate')"
+            @click="sessionStore.duplicateSelectedApp"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="9" y="9" width="11" height="11" rx="2" />
@@ -170,7 +152,7 @@ function emitLaunch(delaySeconds?: number) {
             复制
           </Button>
           <div class="flex-1" />
-          <Button v-if="!props.isNew" variant="destructive" size="sm" @click="$emit('delete')">删除</Button>
+          <Button v-if="!appsStore.isNew" variant="destructive" size="sm" @click="appsStore.deleteApp">删除</Button>
         </div>
       </div>
     </div>

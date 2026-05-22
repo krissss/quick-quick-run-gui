@@ -1,9 +1,14 @@
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref } from 'vue'
+import { defineStore } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { tryOnScopeDispose } from '@vueuse/core'
 import { formatDelayLabel, formatRunAtTime, normalizeDelaySeconds } from '@/lib/delay'
 import { resolveAppProfile, type AppItem, type AppType } from '@/lib/store'
-import { getErrorMessage } from './useMessage'
+import { getErrorMessage } from '@/lib/error'
+import { useAppsStore } from './apps'
+import { useLogsStore } from './logs'
+import { useMessageStore } from './message'
 
 interface RunningAppInfo {
   app_id: string
@@ -34,7 +39,7 @@ export interface PendingLaunch {
   runAt: number
 }
 
-interface RunUpdatedPayload {
+export interface RunUpdatedPayload {
   app_id: string
   run_id: string
   status: RunRecord['status']
@@ -45,11 +50,16 @@ export interface LaunchOptions {
   delaySeconds?: number
 }
 
-export function useLauncher(
-  apps: { value: AppItem[] },
-  showMessage: (msg: string, type?: 'success' | 'error' | 'info') => void,
-  openLogDialog: (app: AppItem) => void | Promise<void>,
-) {
+export interface AppRunState {
+  isRunning: boolean
+  pid: number | null
+  latestRun: RunRecord | null
+  pendingLaunch: PendingLaunch | null
+  isRestarting: boolean
+}
+
+export const useLauncherStore = defineStore('launcher', () => {
+  const message = useMessageStore()
   const loading = ref(false)
   const runningAppIds = ref<Set<string>>(new Set())
   const runningPids = ref<Map<string, number>>(new Map())
@@ -58,6 +68,39 @@ export function useLauncher(
   const restartingAppIds = ref<Set<string>>(new Set())
   const automationAttempts = new Map<string, number>()
   const delayedLaunchTimers = new Map<string, number>()
+  const unlisteners: (() => void)[] = []
+
+  tryOnScopeDispose(() => stopEventListeners())
+
+  function getCurrentApps() {
+    return useAppsStore().apps
+  }
+
+  function findApp(appId: string) {
+    return getCurrentApps().find(app => app.id === appId) || null
+  }
+
+  function appRunState(appId: string): AppRunState {
+    return {
+      isRunning: runningAppIds.value.has(appId),
+      pid: runningPids.value.get(appId) ?? null,
+      latestRun: latestRuns.value.get(appId) ?? null,
+      pendingLaunch: pendingLaunches.value.get(appId) ?? null,
+      isRestarting: restartingAppIds.value.has(appId),
+    }
+  }
+
+  function runningCount(apps = getCurrentApps()) {
+    return apps.filter(app => runningAppIds.value.has(app.id)).length
+  }
+
+  function hasLogSource(app: AppItem) {
+    if (!app.id) return false
+    if (app.command.trim()) return true
+    if (runningPids.value.has(app.id)) return true
+    const latestRun = latestRuns.value.get(app.id)
+    return latestRun?.status === 'running' || !!latestRun?.log_path
+  }
 
   async function refreshRunningApps() {
     try {
@@ -108,7 +151,7 @@ export function useLauncher(
     }
     const pending = pendingLaunches.value.get(appId)
     setPendingLaunch(appId, null)
-    if (notify && pending) showMessage(`已取消延迟运行：${pending.appName}`, 'info')
+    if (notify && pending) message.showMessage(`已取消延迟运行：${pending.appName}`, 'info')
   }
 
   function scheduleDelayedLaunch(app: AppItem, options: LaunchOptions, delaySeconds: number) {
@@ -121,18 +164,18 @@ export function useLauncher(
       delaySeconds,
       runAt,
     })
-    showMessage(`已安排 ${app.name} ${formatDelayLabel(delaySeconds)}后运行（${formatRunAtTime(runAt)}）`, 'success')
+    message.showMessage(`已安排 ${app.name} ${formatDelayLabel(delaySeconds)}后运行（${formatRunAtTime(runAt)}）`, 'success')
 
     const timer = window.setTimeout(async () => {
       delayedLaunchTimers.delete(app.id)
       setPendingLaunch(app.id, null)
       await refreshRunningApps()
-      if (!apps.value.some(item => item.id === app.id)) {
-        showMessage(`已跳过延迟运行：${app.name} 已不存在`, 'info')
+      if (!findApp(app.id)) {
+        message.showMessage(`已跳过延迟运行：${app.name} 已不存在`, 'info')
         return
       }
       if (runningAppIds.value.has(app.id)) {
-        showMessage(`已跳过延迟运行：${app.name} 正在运行`, 'info')
+        message.showMessage(`已跳过延迟运行：${app.name} 正在运行`, 'info')
         return
       }
       await launchApp(app, {
@@ -158,7 +201,7 @@ export function useLauncher(
       await refreshRunningApps()
       if (runningAppIds.value.has(launchTarget.id)) {
         await showAppWindow(launchTarget.id)
-        showMessage(`${launchTarget.name} 正在运行，已打开窗口`, 'info')
+        message.showMessage(`${launchTarget.name} 正在运行，已打开窗口`, 'info')
         return
       }
     }
@@ -187,16 +230,16 @@ export function useLauncher(
         const m = new Map(runningPids.value)
         m.delete(launchTarget.id)
         runningPids.value = m
-        showMessage(result.message, 'success')
+        message.showMessage(result.message, 'success')
       } else {
-        showMessage(result.message, 'success')
+        message.showMessage(result.message, 'success')
       }
       const s = new Set(runningAppIds.value)
       s.add(launchTarget.id)
       runningAppIds.value = s
       await refreshRunningApps()
     } catch (e: unknown) {
-      showMessage(`启动失败: ${getErrorMessage(e)}`, 'error')
+      message.showMessage(`启动失败: ${getErrorMessage(e)}`, 'error')
     }
     loading.value = false
   }
@@ -224,13 +267,13 @@ export function useLauncher(
     const key = automationKey(kind, app.id)
     const nextAttempt = (automationAttempts.get(key) || 0) + 1
     if (nextAttempt > maxAttempts) {
-      showMessage(kind === 'restart' ? '重启次数已达上限' : '重试次数已达上限', 'error')
+      message.showMessage(kind === 'restart' ? '重启次数已达上限' : '重试次数已达上限', 'error')
       return
     }
     automationAttempts.set(key, nextAttempt)
     window.setTimeout(async () => {
       await refreshRunningApps()
-      const currentApp = apps.value.find(item => item.id === app.id)
+      const currentApp = findApp(app.id)
       if (!currentApp || runningAppIds.value.has(currentApp.id)) return
       if (kind === 'restart' && !currentApp.restart.enabled) return
       if (kind === 'retry' && !currentApp.retry.enabled) return
@@ -240,7 +283,7 @@ export function useLauncher(
 
   async function handleRunUpdated(payload: RunUpdatedPayload) {
     if (payload.status === 'running') return
-    const app = apps.value.find(item => item.id === payload.app_id)
+    const app = findApp(payload.app_id)
     if (!app) return
     if (shouldRestart(app, payload.status)) {
       scheduleAutomatedLaunch(app, 'restart', 'auto-restart', app.restart.maxAttempts, app.restart.delaySeconds)
@@ -255,11 +298,9 @@ export function useLauncher(
     }
   }
 
-  // 事件监听
-  const unlisteners: (() => void)[] = []
-
-  onMounted(async () => {
-    unlisteners.push(
+  async function startEventListeners() {
+    if (unlisteners.length > 0) return
+    const listeners = [
       await listen<string>('app-launched', (e) => {
         const s = new Set(runningAppIds.value)
         s.add(e.payload)
@@ -289,27 +330,28 @@ export function useLauncher(
         refreshRunningApps()
       }),
       await listen<string>('tray-launch-app', async (e) => {
-        const app = apps.value.find(a => a.id === e.payload)
+        const app = findApp(e.payload)
         if (app) await launchApp(app)
       }),
       await listen<string>('tray-open-log', async (e) => {
-        const app = apps.value.find(a => a.id === e.payload)
-        if (app) await openLogDialog(app)
+        const app = findApp(e.payload)
+        if (app) await useLogsStore().openLogDialog(app)
       }),
-    )
-  })
+    ]
+    unlisteners.push(...listeners)
+  }
 
-  onUnmounted(() => {
-    unlisteners.forEach(fn => fn())
+  function stopEventListeners() {
+    unlisteners.splice(0).forEach(fn => fn())
     for (const timer of delayedLaunchTimers.values()) window.clearTimeout(timer)
     delayedLaunchTimers.clear()
-  })
+  }
 
   async function stopApp(appId: string) {
     try {
       await invoke('stop_app', { appId })
     } catch (e: unknown) {
-      showMessage(`停止失败: ${getErrorMessage(e)}`, 'error')
+      message.showMessage(`停止失败: ${getErrorMessage(e)}`, 'error')
     }
   }
 
@@ -336,7 +378,7 @@ export function useLauncher(
 
       await launchApp(app, {})
     } catch (e: unknown) {
-      showMessage(`重启失败: ${getErrorMessage(e)}`, 'error')
+      message.showMessage(`重启失败: ${getErrorMessage(e)}`, 'error')
     } finally {
       const next = new Set(restartingAppIds.value)
       next.delete(app.id)
@@ -359,11 +401,17 @@ export function useLauncher(
     latestRuns,
     pendingLaunches,
     restartingAppIds,
+    findApp,
+    appRunState,
+    runningCount,
+    hasLogSource,
     refreshRunningApps,
     launchApp,
     cancelDelayedLaunch,
     stopApp,
     restartApp,
     showAppWindow,
+    startEventListeners,
+    stopEventListeners,
   }
-}
+})

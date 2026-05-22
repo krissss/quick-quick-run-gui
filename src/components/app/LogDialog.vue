@@ -2,30 +2,15 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { DialogFrame } from '@/components/ui/dialog-frame'
-import type { RunRecord } from '@/composables/useLauncher'
+import { useAppSessionStore } from '@/stores/appSession'
+import { useLauncherStore } from '@/stores/launcher'
+import { useLogsStore } from '@/stores/logs'
+import type { RunRecord } from '@/stores/launcher'
 import { formatDateTime, formatDuration } from '@/lib/time'
 
-const props = defineProps<{
-  open: boolean
-  appId: string
-  appName: string
-  lines: string[]
-  runs: RunRecord[]
-  selectedRunId: string | null
-  launchFailed: boolean
-  launchFailedReason: string
-  windowOpened: boolean
-  runningAppIds: Set<string>
-}>()
-
-defineEmits<{
-  close: []
-  stop: [appId: string]
-  relaunch: [appId: string]
-  selectRun: [runId: string | null]
-  clearSelected: []
-  clearAll: []
-}>()
+const logsStore = useLogsStore()
+const launcherStore = useLauncherStore()
+const sessionStore = useAppSessionStore()
 
 const logContainer = ref<HTMLElement | null>(null)
 
@@ -37,14 +22,15 @@ function scrollToBottom() {
   })
 }
 
-watch(() => props.lines.length, scrollToBottom)
-watch(() => props.open, (open) => {
+watch(() => logsStore.logLines.length, scrollToBottom)
+watch(() => logsStore.showLogDialog, (open) => {
   if (open) scrollToBottom()
 })
 
-const selectedRun = computed(() => props.runs.find(run => run.id === props.selectedRunId))
-const hasClearableRuns = computed(() => props.runs.some(run => run.status !== 'running'))
+const selectedRun = computed(() => logsStore.logRuns.find(run => run.id === logsStore.selectedLogRunId))
+const hasClearableRuns = computed(() => logsStore.logRuns.some(run => run.status !== 'running'))
 const canClearSelected = computed(() => !!selectedRun.value && selectedRun.value.status !== 'running')
+const isCurrentAppRunning = computed(() => launcherStore.appRunState(logsStore.logAppId).isRunning)
 
 function runStatusLabel(status: RunRecord['status']) {
   if (status === 'running') return '运行中'
@@ -74,37 +60,37 @@ function triggerLabel(trigger: RunRecord['trigger']) {
 
 <template>
   <DialogFrame
-    :open="open"
-    :title="`${appName} — 日志`"
+    :open="logsStore.showLogDialog"
+    :title="`${logsStore.logAppName} — 日志`"
     close-label="关闭日志"
     panel-class="max-w-5xl"
     content-class="flex min-h-[420px] flex-col"
-    @close="$emit('close')"
+    @close="logsStore.closeLogDialog"
   >
     <template #header-actions>
-      <div v-if="!launchFailed && !windowOpened && runningAppIds.has(appId)" class="flex items-center gap-1.5">
+      <div v-if="!logsStore.logLaunchFailed && !logsStore.logWindowOpened && isCurrentAppRunning" class="flex items-center gap-1.5">
         <span class="inline-block w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
         <span class="text-xs text-muted-foreground">启动中</span>
       </div>
-      <span v-if="launchFailed" class="text-xs text-destructive font-medium">
-        {{ launchFailedReason === 'process_exited' ? '进程已退出' : '启动超时' }}
+      <span v-if="logsStore.logLaunchFailed" class="text-xs text-destructive font-medium">
+        {{ logsStore.logLaunchFailedReason === 'process_exited' ? '进程已退出' : '启动超时' }}
       </span>
     </template>
 
     <div class="grid min-h-0 flex-1 gap-3 md:grid-cols-[240px_minmax(0,1fr)]">
       <div
-        v-if="runs.length > 0"
+        v-if="logsStore.logRuns.length > 0"
         class="min-h-0 overflow-y-auto rounded-md bg-secondary/50 p-2"
         style="box-shadow: inset 0 0 0 1px var(--border)"
       >
         <div class="px-2 pb-2 text-xs font-medium text-muted-foreground">最近运行</div>
         <button
-          v-for="run in runs"
+          v-for="run in logsStore.logRuns"
           :key="run.id"
           type="button"
           class="mb-1 w-full rounded-md px-2 py-2 text-left text-xs transition-colors hover:bg-background"
-          :class="run.id === selectedRunId ? 'bg-background shadow-[var(--shadow-border)]' : 'text-muted-foreground'"
-          @click="$emit('selectRun', run.id)"
+          :class="run.id === logsStore.selectedLogRunId ? 'bg-background shadow-[var(--shadow-border)]' : 'text-muted-foreground'"
+          @click="logsStore.selectLogRun(run.id)"
         >
           <div class="flex items-center justify-between gap-2">
             <span class="font-medium" :class="runStatusClass(run.status)">{{ runStatusLabel(run.status) }}</span>
@@ -120,11 +106,11 @@ function triggerLabel(trigger: RunRecord['trigger']) {
       <div
         ref="logContainer"
         class="min-h-[360px] overflow-y-auto bg-background rounded-md p-4 font-mono text-xs"
-        :class="runs.length > 0 ? 'min-h-0' : 'col-span-full'"
+        :class="logsStore.logRuns.length > 0 ? 'min-h-0' : 'col-span-full'"
         style="box-shadow: inset 0 0 0 1px var(--border)"
       >
-        <div v-for="(line, i) in lines" :key="i" class="whitespace-pre-wrap break-all text-foreground/80 hover:text-foreground">{{ line }}</div>
-        <div v-if="lines.length === 0" class="text-muted-foreground text-center py-10">暂无日志</div>
+        <div v-for="(line, i) in logsStore.logLines" :key="i" class="whitespace-pre-wrap break-all text-foreground/80 hover:text-foreground">{{ line }}</div>
+        <div v-if="logsStore.logLines.length === 0" class="text-muted-foreground text-center py-10">暂无日志</div>
       </div>
     </div>
 
@@ -133,7 +119,7 @@ function triggerLabel(trigger: RunRecord['trigger']) {
         variant="ghost"
         size="sm"
         :disabled="!canClearSelected"
-        @click="$emit('clearSelected')"
+        @click="logsStore.clearSelectedLogRun"
       >
         清理当前
       </Button>
@@ -141,14 +127,14 @@ function triggerLabel(trigger: RunRecord['trigger']) {
         variant="ghost"
         size="sm"
         :disabled="!hasClearableRuns"
-        @click="$emit('clearAll')"
+        @click="logsStore.clearAllLogRuns"
       >
         清理全部
       </Button>
       <div class="flex-1" />
-      <Button v-if="runningAppIds.has(appId)" variant="destructive" size="sm" @click="$emit('stop', appId)">停止</Button>
-      <Button v-if="launchFailed" variant="destructive" size="sm" @click="$emit('relaunch', appId)">重新启动</Button>
-      <Button variant="secondary" size="sm" @click="$emit('close')">关闭</Button>
+      <Button v-if="isCurrentAppRunning" variant="destructive" size="sm" @click="launcherStore.stopApp(logsStore.logAppId)">停止</Button>
+      <Button v-if="logsStore.logLaunchFailed" variant="destructive" size="sm" @click="sessionStore.relaunchFromLog(logsStore.logAppId)">重新启动</Button>
+      <Button variant="secondary" size="sm" @click="logsStore.closeLogDialog">关闭</Button>
     </template>
   </DialogFrame>
 </template>

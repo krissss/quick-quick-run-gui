@@ -1,4 +1,5 @@
 import { clearMocks } from '@tauri-apps/api/mocks'
+import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, vi } from 'vitest'
 
 function createMemoryStorage(): Storage {
@@ -47,6 +48,7 @@ Object.defineProperty(window, 'sessionStorage', {
 })
 
 beforeEach(() => {
+  setActivePinia(createPinia())
   vi.stubGlobal('PointerEvent', MouseEvent)
   vi.stubGlobal('ResizeObserver', class ResizeObserver {
     observe() {}

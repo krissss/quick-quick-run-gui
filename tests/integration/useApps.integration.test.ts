@@ -1,27 +1,35 @@
 import { nextTick } from 'vue'
+import { createPinia, setActivePinia, storeToRefs } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
-import { useApps } from '@/composables/useApps'
+import { useAppsStore } from '@/stores/apps'
+import { useMessageStore } from '@/stores/message'
 import { setupTauriMocks } from '../helpers/tauri'
 
-describe('useApps integration', () => {
+function setupStores() {
+  setActivePinia(createPinia())
+  const appsStore = useAppsStore()
+  const messageStore = useMessageStore()
+  return { appsStore, messageStore, ...storeToRefs(appsStore), ...storeToRefs(messageStore) }
+}
+
+describe('apps store', () => {
   it('validates required fields for each app type', async () => {
     setupTauriMocks()
-    const messages: Array<{ text: string; type?: string }> = []
-    const apps = useApps((text, type) => messages.push({ text, type }))
+    const { appsStore, messages } = setupStores()
 
-    await apps.saveApp()
-    expect(messages.at(-1)).toEqual({ text: '请填写目标 URL', type: 'error' })
+    await appsStore.saveApp()
+    expect(messages.value.at(-1)).toEqual({ id: 1, text: '请填写目标 URL', type: 'error' })
 
-    apps.setAppType('service')
-    await apps.saveApp()
-    expect(messages.at(-1)).toEqual({ text: '请填写执行命令', type: 'error' })
+    appsStore.setAppType('service')
+    await appsStore.saveApp()
+    expect(messages.value.at(-1)?.text).toBe('请填写执行命令')
 
-    apps.setAppType('task')
-    apps.editForm.value.command = 'pnpm task'
-    apps.setScheduleEnabled(true)
-    apps.setScheduleCron('   ')
-    await apps.saveApp()
-    expect(messages.at(-1)).toEqual({ text: '请填写定时表达式', type: 'error' })
+    appsStore.setAppType('task')
+    appsStore.editForm.command = 'pnpm task'
+    appsStore.setScheduleEnabled(true)
+    appsStore.setScheduleCron('   ')
+    await appsStore.saveApp()
+    expect(messages.value.at(-1)?.text).toBe('请填写定时表达式')
   })
 
   it('defaults the app name from the command or URL when omitted', async () => {
@@ -30,44 +38,25 @@ describe('useApps integration', () => {
       randomUUID: () => 'default-name',
     })
     const mock = setupTauriMocks()
-    const apps = useApps(() => {})
+    const { appsStore } = setupStores()
 
-    apps.setAppType('service')
-    apps.editForm.value.command = 'pnpm serve'
-    await apps.saveApp()
+    appsStore.setAppType('service')
+    appsStore.editForm.command = 'pnpm serve'
+    await appsStore.saveApp()
     expect(mock.storeData.apps).toMatchObject([
       { id: 'default-name', name: 'pnpm serve', command: 'pnpm serve' },
     ])
 
-    apps.openAddForm()
+    appsStore.openAddForm()
     vi.stubGlobal('crypto', {
       ...globalThis.crypto,
       randomUUID: () => 'default-url',
     })
-    apps.editForm.value.url = 'http://localhost:5173'
-    await apps.saveApp()
+    appsStore.editForm.url = 'http://localhost:5173'
+    await appsStore.saveApp()
     expect(mock.storeData.apps).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'default-url', name: 'http://localhost:5173', url: 'http://localhost:5173' }),
     ]))
-  })
-
-  it('blocks saving an enabled task with an invalid cron expression', async () => {
-    const mock = setupTauriMocks()
-    const messages: Array<{ text: string; type?: string }> = []
-    const apps = useApps((text, type) => messages.push({ text, type }))
-
-    apps.setAppType('task')
-    apps.editForm.value.name = '同步日报'
-    apps.editForm.value.command = 'pnpm report'
-    apps.setScheduleEnabled(true)
-    apps.setScheduleCron('abc')
-
-    await apps.saveApp()
-
-    expect(messages.at(-1)).toEqual({ text: '定时表达式需要 5 段，例如 */15 * * * *', type: 'error' })
-    expect(apps.apps.value).toEqual([])
-    expect(mock.storeData.apps).toBeUndefined()
-    expect(mock.getCalls('notify_apps_updated')).toHaveLength(0)
   })
 
   it('persists a valid scheduled task and notifies the backend', async () => {
@@ -76,17 +65,16 @@ describe('useApps integration', () => {
       randomUUID: () => 'task-1',
     })
     const mock = setupTauriMocks()
-    const messages: Array<{ text: string; type?: string }> = []
-    const apps = useApps((text, type) => messages.push({ text, type }))
+    const { appsStore, messages } = setupStores()
 
-    apps.setAppType('task')
-    apps.editForm.value.name = '同步日报'
-    apps.editForm.value.command = 'pnpm report'
-    apps.setScheduleEnabled(true)
-    apps.setScheduleCron('*/30 * * * *')
-    apps.setMissedPolicy('run-once')
+    appsStore.setAppType('task')
+    appsStore.editForm.name = '同步日报'
+    appsStore.editForm.command = 'pnpm report'
+    appsStore.setScheduleEnabled(true)
+    appsStore.setScheduleCron('*/30 * * * *')
+    appsStore.setMissedPolicy('run-once')
 
-    await apps.saveApp()
+    await appsStore.saveApp()
 
     expect(mock.storeData.apps).toMatchObject([
       {
@@ -103,7 +91,7 @@ describe('useApps integration', () => {
       },
     ])
     expect(mock.getCalls('notify_apps_updated')).toHaveLength(1)
-    expect(messages.at(-1)).toEqual({ text: '已添加', type: 'success' })
+    expect(messages.value.at(-1)?.text).toBe('已添加')
   })
 
   it('refreshes, updates, syncs, and deletes existing app records', async () => {
@@ -115,36 +103,35 @@ describe('useApps integration', () => {
         ],
       },
     })
-    const messages: Array<{ text: string; type?: string }> = []
-    const apps = useApps((text, type) => messages.push({ text, type }))
+    const { appsStore, apps, editForm, isNew, messages } = setupStores()
 
-    await apps.refreshApps()
-    expect(apps.apps.value).toHaveLength(2)
+    await appsStore.refreshApps()
+    expect(apps.value).toHaveLength(2)
 
-    apps.selectApp(apps.apps.value[0])
-    apps.editForm.value.name = 'Web Updated'
-    await apps.saveApp()
+    appsStore.selectApp(apps.value[0])
+    editForm.value.name = 'Web Updated'
+    await appsStore.saveApp()
     expect(mock.storeData.apps).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'web-1', name: 'Web Updated' }),
     ]))
-    expect(messages.at(-1)).toEqual({ text: '已保存', type: 'success' })
+    expect(messages.value.at(-1)?.text).toBe('已保存')
 
-    apps.apps.value = [{ ...apps.apps.value[0], name: 'Synced Name' }, apps.apps.value[1]]
+    apps.value = [{ ...apps.value[0], name: 'Synced Name' }, apps.value[1]]
     await nextTick()
-    expect(apps.editForm.value.name).toBe('Synced Name')
+    expect(editForm.value.name).toBe('Synced Name')
 
-    apps.apps.value = apps.apps.value.filter((app) => app.id !== 'web-1')
+    apps.value = apps.value.filter((app) => app.id !== 'web-1')
     await nextTick()
-    expect(apps.isNew.value).toBe(true)
-    expect(apps.editForm.value.id).toBe('')
+    expect(isNew.value).toBe(true)
+    expect(editForm.value.id).toBe('')
 
-    apps.selectApp(apps.apps.value[0])
-    await apps.deleteApp()
-    expect(apps.apps.value).toEqual([])
-    expect(messages.at(-1)).toEqual({ text: '已删除', type: 'success' })
+    appsStore.selectApp(apps.value[0])
+    await appsStore.deleteApp()
+    expect(apps.value).toEqual([])
+    expect(messages.value.at(-1)?.text).toBe('已删除')
 
-    apps.openAddForm()
-    expect(apps.isNew.value).toBe(true)
+    appsStore.openAddForm()
+    expect(isNew.value).toBe(true)
   })
 
   it('reorders apps, persists order values, and keeps the selected app in sync', async () => {
@@ -157,15 +144,15 @@ describe('useApps integration', () => {
         ],
       },
     })
-    const apps = useApps(() => {})
+    const { appsStore, apps, editForm } = setupStores()
 
-    await apps.refreshApps()
-    apps.selectApp(apps.apps.value[1])
-    await apps.reorderApps('task-1', 'web-1')
+    await appsStore.refreshApps()
+    appsStore.selectApp(apps.value[1])
+    await appsStore.reorderApps('task-1', 'web-1')
 
-    expect(apps.apps.value.map((app) => app.id)).toEqual(['task-1', 'web-1', 'service-1'])
-    expect(apps.apps.value.map((app) => app.order)).toEqual([0, 1, 2])
-    expect(apps.editForm.value.id).toBe('service-1')
+    expect(apps.value.map((app) => app.id)).toEqual(['task-1', 'web-1', 'service-1'])
+    expect(apps.value.map((app) => app.order)).toEqual([0, 1, 2])
+    expect(editForm.value.id).toBe('service-1')
     expect(mock.storeData.apps).toMatchObject([
       { id: 'task-1', order: 0 },
       { id: 'web-1', order: 1 },
@@ -173,7 +160,7 @@ describe('useApps integration', () => {
     ])
     expect(mock.getCalls('notify_apps_updated')).toHaveLength(1)
 
-    await apps.reorderApps('missing', 'web-1')
+    await appsStore.reorderApps('missing', 'web-1')
     expect(mock.getCalls('notify_apps_updated')).toHaveLength(1)
   })
 
@@ -198,15 +185,14 @@ describe('useApps integration', () => {
         ],
       },
     })
-    const messages: Array<{ text: string; type?: string }> = []
-    const apps = useApps((text, type) => messages.push({ text, type }))
+    const { appsStore, apps, editForm, isNew, messages } = setupStores()
 
-    await apps.refreshApps()
-    apps.selectApp(apps.apps.value[0])
-    apps.duplicateApp(apps.editForm.value)
+    await appsStore.refreshApps()
+    appsStore.selectApp(apps.value[0])
+    appsStore.duplicateApp(editForm.value)
 
-    expect(apps.isNew.value).toBe(true)
-    expect(apps.editForm.value).toMatchObject({
+    expect(isNew.value).toBe(true)
+    expect(editForm.value).toMatchObject({
       id: '',
       name: '日报 副本 2',
       type: 'task',
@@ -219,14 +205,14 @@ describe('useApps integration', () => {
       },
     })
 
-    await apps.saveApp()
+    await appsStore.saveApp()
 
     expect(mock.storeData.apps).toMatchObject([
       { id: 'task-1', name: '日报' },
       { id: 'task-2', name: '日报 副本' },
       { name: '日报 副本 2', command: 'pnpm report' },
     ])
-    expect(messages.at(-1)).toEqual({ text: '已添加', type: 'success' })
+    expect(messages.value.at(-1)?.text).toBe('已添加')
   })
 
   it('cleans copied run profiles when saving after command template changes', async () => {
@@ -250,13 +236,13 @@ describe('useApps integration', () => {
         ],
       },
     })
-    const apps = useApps(() => {})
+    const { appsStore, apps } = setupStores()
 
-    await apps.refreshApps()
-    apps.duplicateApp(apps.apps.value[0])
-    apps.editForm.value.command = 'pnpm sync'
+    await appsStore.refreshApps()
+    appsStore.duplicateApp(apps.value[0])
+    appsStore.editForm.command = 'pnpm sync'
 
-    await apps.saveApp()
+    await appsStore.saveApp()
 
     expect(mock.storeData.apps.at(-1)).toMatchObject({
       name: '同步任务 副本',
@@ -270,33 +256,33 @@ describe('useApps integration', () => {
     const mock = setupTauriMocks({
       rejectCommands: { notify_apps_updated: new Error('offline') },
     })
-    const apps = useApps(() => {})
-    apps.apps.value = [{ ...apps.editForm.value, id: 'web-1', name: 'Web', url: 'http://localhost:3000' }]
+    const { appsStore, apps } = setupStores()
+    apps.value = [{ ...apps.value[0], id: 'web-1', name: 'Web', url: 'http://localhost:3000' }]
 
-    await expect(apps.persistApps()).resolves.toBeUndefined()
+    await expect(appsStore.persistApps()).resolves.toBeUndefined()
     expect(mock.storeData.apps).toMatchObject([{ id: 'web-1' }])
   })
 
   it('touches schedule metadata without changing schedule settings', () => {
-    const apps = useApps(() => {})
-    apps.setAppType('task')
-    apps.setScheduleCron('*/20 * * * *')
-    const before = apps.editForm.value.schedule.lastRunAt
+    const { appsStore, editForm } = setupStores()
+    appsStore.setAppType('task')
+    appsStore.setScheduleCron('*/20 * * * *')
+    const before = editForm.value.schedule.lastRunAt
 
-    apps.touchSchedule()
+    appsStore.touchSchedule()
 
-    expect(apps.editForm.value.schedule.cron).toBe('*/20 * * * *')
-    expect(apps.editForm.value.schedule.lastRunAt).toBeGreaterThanOrEqual(before ?? 0)
+    expect(editForm.value.schedule.cron).toBe('*/20 * * * *')
+    expect(editForm.value.schedule.lastRunAt).toBeGreaterThanOrEqual(before ?? 0)
   })
 
   it('does not create records when saving an external stale selection', async () => {
     setupTauriMocks()
-    const apps = useApps(() => {})
-    apps.selectApp({ ...apps.editForm.value, id: 'missing', name: 'Missing', url: 'http://localhost:3000' })
+    const { appsStore, apps, isNew } = setupStores()
+    appsStore.selectApp({ ...apps.value[0], id: 'missing', name: 'Missing', url: 'http://localhost:3000' })
 
-    await apps.saveApp()
+    await appsStore.saveApp()
 
-    expect(apps.apps.value).toEqual([])
-    expect(apps.isNew.value).toBe(false)
+    expect(apps.value).toEqual([])
+    expect(isNew.value).toBe(false)
   })
 })

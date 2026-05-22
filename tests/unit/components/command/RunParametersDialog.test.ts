@@ -1,6 +1,10 @@
 import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import RunParametersDialog from '@/components/command/RunParametersDialog.vue'
+import { useAppSessionStore } from '@/stores/appSession'
+import { useAppsStore } from '@/stores/apps'
+import { useLauncherStore } from '@/stores/launcher'
+import { useMessageStore } from '@/stores/message'
 import type { AppItem, AppProfile } from '@/lib/store'
 import { webApp } from '../../../fixtures/apps'
 import { buttonContaining, inputByPlaceholder } from '../../../helpers/dom'
@@ -15,13 +19,14 @@ function profiledApp(): AppItem {
 }
 
 function mountDialog(app: AppItem = profiledApp(), persistProfiles = vi.fn()) {
+  const sessionStore = useAppSessionStore()
+  const appsStore = useAppsStore()
+  sessionStore.runDialogApp = app
+  sessionStore.runDialogLaunchOptions = {}
+  vi.spyOn(appsStore, 'updateAppProfiles').mockImplementation(persistProfiles)
+
   return mount(RunParametersDialog, {
     attachTo: document.body,
-    props: {
-      open: true,
-      app,
-      persistProfiles,
-    },
   })
 }
 
@@ -41,6 +46,8 @@ describe('RunParametersDialog', () => {
       activeProfileId,
     }))
     const wrapper = mountDialog(profiledApp(), persistProfiles)
+    const showMessage = vi.spyOn(useMessageStore(), 'showMessage')
+    const launchApp = vi.spyOn(useLauncherStore(), 'launchApp').mockResolvedValue()
 
     expect(document.querySelector('button[aria-label="关闭运行参数"]')).toBeTruthy()
     await inputByPlaceholder(wrapper, '账号').setValue('demo')
@@ -60,16 +67,16 @@ describe('RunParametersDialog', () => {
       })],
       'profile-1',
     )
-    expect(wrapper.emitted('message')).toEqual([['已保存运行方案', 'success']])
+    expect(showMessage).toHaveBeenCalledWith('已保存运行方案', 'success')
     expect(document.body.textContent).toContain('pnpm dev demo --headless')
 
     await buttonContaining(wrapper, '运行', true).trigger('click')
-    const launchApp = wrapper.emitted('launch')?.[0]?.[0] as AppItem
-    expect(launchApp.activeProfileId).toBe('__run-draft__')
-    expect(launchApp.profiles.at(-1)).toMatchObject({
+    const launchTarget = launchApp.mock.calls[0]?.[0] as AppItem
+    expect(launchTarget.activeProfileId).toBe('__run-draft__')
+    expect(launchTarget.profiles.at(-1)).toMatchObject({
       values: { account: 'demo', headless: 'true' },
     })
-    expect(wrapper.emitted('close')).toHaveLength(1)
+    expect(useAppSessionStore().runDialogApp).toBeNull()
   })
 
   it('updates and deletes a selected profile', async () => {
@@ -86,6 +93,7 @@ describe('RunParametersDialog', () => {
       activeProfileId,
     }))
     const wrapper = mountDialog(app, persistProfiles)
+    const showMessage = vi.spyOn(useMessageStore(), 'showMessage')
 
     await inputByPlaceholder(wrapper, '账号').setValue('new')
     await buttonContaining(wrapper, '更新方案', true).trigger('click')
@@ -107,25 +115,20 @@ describe('RunParametersDialog', () => {
       [],
       '',
     )
-    expect(wrapper.emitted('message')?.at(-1)).toEqual(['已删除运行方案', 'success'])
+    expect(showMessage).toHaveBeenLastCalledWith('已删除运行方案', 'success')
   })
 
   it('passes an existing delayed launch request through after parameters are selected', async () => {
-    const wrapper = mount(RunParametersDialog, {
-      attachTo: document.body,
-      props: {
-        open: true,
-        app: profiledApp(),
-        launchOptions: { delaySeconds: 60 },
-        persistProfiles: vi.fn(),
-      },
-    })
+    const sessionStore = useAppSessionStore()
+    sessionStore.runDialogApp = profiledApp()
+    sessionStore.runDialogLaunchOptions = { delaySeconds: 60 }
+    const launchApp = vi.spyOn(useLauncherStore(), 'launchApp').mockResolvedValue()
+    const wrapper = mount(RunParametersDialog, { attachTo: document.body })
 
     await inputByPlaceholder(wrapper, '账号').setValue('demo')
     await buttonContaining(wrapper, '1 分钟后运行', true).trigger('click')
 
-    const emitted = wrapper.emitted('launch')?.[0]
-    expect(emitted?.[0]).toMatchObject({ activeProfileId: '__run-draft__' })
-    expect(emitted?.[1]).toEqual({ delaySeconds: 60 })
+    expect(launchApp.mock.calls[0]?.[0]).toMatchObject({ activeProfileId: '__run-draft__' })
+    expect(launchApp.mock.calls[0]?.[1]).toEqual({ delaySeconds: 60 })
   })
 })

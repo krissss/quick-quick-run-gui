@@ -5,7 +5,10 @@ import { ClearableInput } from '@/components/ui/clearable-input'
 import { DialogFrame } from '@/components/ui/dialog-frame'
 import { Switch } from '@/components/ui/switch'
 import LaunchActionGroup from '@/components/app/LaunchActionGroup.vue'
-import type { LaunchOptions } from '@/composables/useLauncher'
+import { useAppSessionStore } from '@/stores/appSession'
+import { useAppsStore } from '@/stores/apps'
+import { useLauncherStore } from '@/stores/launcher'
+import { useMessageStore } from '@/stores/message'
 import {
   buildCommandWithProfile,
   parseCommandSignature,
@@ -14,20 +17,10 @@ import {
   type CommandParam,
 } from '@/lib/store'
 
-type MessageType = 'success' | 'error' | 'info'
-
-const props = defineProps<{
-  open: boolean
-  app: AppItem | null
-  launchOptions?: LaunchOptions
-  persistProfiles: (app: AppItem, profiles: AppProfile[], activeProfileId: string) => Promise<AppItem | void>
-}>()
-
-const emit = defineEmits<{
-  close: []
-  launch: [app: AppItem, options?: LaunchOptions]
-  message: [text: string, type?: MessageType]
-}>()
+const sessionStore = useAppSessionStore()
+const appsStore = useAppsStore()
+const launcherStore = useLauncherStore()
+const messageStore = useMessageStore()
 
 const currentApp = ref<AppItem | null>(null)
 const selectedProfileId = ref('')
@@ -95,7 +88,7 @@ function reset() {
 }
 
 watch(
-  [() => props.open, () => props.app],
+  [() => !!sessionStore.runDialogApp, () => sessionStore.runDialogApp],
   ([open, app]) => {
     if (open && app) {
       initialize(app)
@@ -107,7 +100,7 @@ watch(
 )
 
 function closeDialog() {
-  emit('close')
+  sessionStore.closeRunDialog()
 }
 
 function selectProfile(profileId: string) {
@@ -148,7 +141,7 @@ function uniqueProfileName(app: AppItem, name: string) {
 async function persistProfileChanges(profiles: AppProfile[], activeProfileId: string) {
   const app = currentApp.value
   if (!app) return
-  const persisted = await props.persistProfiles(app, profiles, activeProfileId)
+  const persisted = await appsStore.updateAppProfiles(app, profiles, activeProfileId)
   currentApp.value = cloneApp(persisted || { ...app, profiles, activeProfileId })
   selectedProfileId.value = activeProfileId
 }
@@ -165,7 +158,7 @@ async function saveDraftAsProfile() {
 
   await persistProfileChanges([...app.profiles, profile], profile.id)
   profileNameDraft.value = profile.name
-  emit('message', '已保存运行方案', 'success')
+  messageStore.showMessage('已保存运行方案', 'success')
 }
 
 async function updateSelectedProfile() {
@@ -182,7 +175,7 @@ async function updateSelectedProfile() {
       : item,
   )
   await persistProfileChanges(nextProfiles, profile.id)
-  emit('message', '已更新运行方案', 'success')
+  messageStore.showMessage('已更新运行方案', 'success')
 }
 
 async function deleteSelectedProfile() {
@@ -194,7 +187,7 @@ async function deleteSelectedProfile() {
   await persistProfileChanges(nextProfiles, '')
   values.value = valuesForProfile(nextApp, '')
   profileNameDraft.value = ''
-  emit('message', '已删除运行方案', 'success')
+  messageStore.showMessage('已删除运行方案', 'success')
 }
 
 function launchDraft(delaySeconds?: number) {
@@ -214,17 +207,16 @@ function launchDraft(delaySeconds?: number) {
     ],
   }
   const options = delaySeconds
-    ? { ...(props.launchOptions || {}), delaySeconds }
-    : props.launchOptions
-  emit('close')
-  if (options) emit('launch', launchTarget, options)
-  else emit('launch', launchTarget)
+    ? { ...sessionStore.runDialogLaunchOptions, delaySeconds }
+    : sessionStore.runDialogLaunchOptions
+  sessionStore.closeRunDialog()
+  void launcherStore.launchApp(launchTarget, options)
 }
 </script>
 
 <template>
   <DialogFrame
-    :open="open && !!currentApp"
+    :open="!!sessionStore.runDialogApp && !!currentApp"
     :title="currentApp?.name || ''"
     close-label="关闭运行参数"
     panel-class="max-w-2xl"
@@ -352,7 +344,7 @@ function launchDraft(delaySeconds?: number) {
       <Button variant="secondary" size="sm" @click="closeDialog">取消</Button>
       <LaunchActionGroup
         label="运行"
-        :default-delay-seconds="launchOptions?.delaySeconds"
+        :default-delay-seconds="sessionStore.runDialogLaunchOptions.delaySeconds"
         @launch="launchDraft"
       />
     </template>

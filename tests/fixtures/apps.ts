@@ -1,5 +1,5 @@
 import type { AppItem } from '@/lib/store'
-import type { RunRecord } from '@/composables/useLauncher'
+import type { RunRecord } from '@/stores/launcher'
 
 export const baseSchedule = {
   enabled: false,

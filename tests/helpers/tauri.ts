@@ -1,6 +1,6 @@
 import { mockIPC } from '@tauri-apps/api/mocks'
 import type { AppType } from '@/lib/store'
-import type { RunRecord } from '@/composables/useLauncher'
+import type { RunRecord } from '@/stores/launcher'
 
 interface RunningAppInfo {
   app_id: string

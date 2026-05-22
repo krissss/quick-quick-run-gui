@@ -1,4 +1,5 @@
-import { onUnmounted, ref } from 'vue'
+import { ref } from 'vue'
+import { defineStore } from 'pinia'
 
 export type MessageType = 'success' | 'error' | 'info'
 
@@ -8,11 +9,7 @@ export interface MessageItem {
   type: MessageType
 }
 
-export function getErrorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
-}
-
-export function useMessage() {
+export const useMessageStore = defineStore('message', () => {
   const messages = ref<MessageItem[]>([])
   const timers = new Map<number, ReturnType<typeof setTimeout>>()
   let nextId = 0
@@ -35,10 +32,5 @@ export function useMessage() {
     timers.set(item.id, setTimeout(() => dismissMessage(item.id), duration))
   }
 
-  onUnmounted(() => {
-    timers.forEach((timer) => clearTimeout(timer))
-    timers.clear()
-  })
-
   return { messages, showMessage, dismissMessage }
-}
+})

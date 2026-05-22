@@ -1,24 +1,29 @@
 import { DOMWrapper, mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
+import { describe, expect, it, vi } from 'vitest'
 import LogDialog from '@/components/app/LogDialog.vue'
+import { useAppSessionStore } from '@/stores/appSession'
+import { useLauncherStore } from '@/stores/launcher'
+import { useLogsStore } from '@/stores/logs'
 import { buttonContaining } from '../../../helpers/dom'
 
-function mountLogDialog(props = {}) {
+function mountLogDialog(state: Partial<ReturnType<typeof useLogsStore>> = {}) {
+  const logsStore = useLogsStore()
+  const launcherStore = useLauncherStore()
+  logsStore.showLogDialog = true
+  logsStore.logAppId = 'web-1'
+  logsStore.logAppName = 'demo-web'
+  logsStore.logLines = ['ready']
+  logsStore.logRuns = []
+  logsStore.selectedLogRunId = null
+  logsStore.logLaunchFailed = false
+  logsStore.logLaunchFailedReason = ''
+  logsStore.logWindowOpened = false
+  launcherStore.runningAppIds = new Set(['web-1'])
+  Object.assign(logsStore, state)
+
   return mount(LogDialog, {
     attachTo: document.body,
-    props: {
-      open: true,
-      appId: 'web-1',
-      appName: 'demo-web',
-      lines: ['ready'],
-      runs: [],
-      selectedRunId: null,
-      launchFailed: false,
-      launchFailedReason: '',
-      windowOpened: false,
-      runningAppIds: new Set(['web-1']),
-      ...props,
-    },
   })
 }
 
@@ -35,25 +40,31 @@ describe('LogDialog', () => {
     if (!overlay) throw new Error('Overlay not found')
     await new DOMWrapper(overlay as HTMLElement).trigger('click')
 
-    expect(wrapper.emitted('close')).toHaveLength(1)
+    expect(useLogsStore().showLogDialog).toBe(false)
   })
 
   it('shows failed launch state and emits relaunch', async () => {
-    const wrapper = mountLogDialog({
-      launchFailed: true,
-      launchFailedReason: 'process_exited',
-      windowOpened: false,
-    })
+    const wrapper = mountLogDialog()
+    const logsStore = useLogsStore()
+    logsStore.logLaunchFailed = true
+    logsStore.logLaunchFailedReason = 'process_exited'
+    logsStore.logWindowOpened = false
+    const relaunchFromLog = vi.spyOn(useAppSessionStore(), 'relaunchFromLog').mockResolvedValue()
+    await nextTick()
 
     expect(document.body.textContent).toContain('进程已退出')
     await buttonContaining(wrapper, '重新启动').trigger('click')
 
-    expect(wrapper.emitted('relaunch')).toEqual([['web-1']])
+    expect(relaunchFromLog).toHaveBeenCalledWith('web-1')
   })
 
   it('shows recent runs with formatted time and emits selection changes', async () => {
+    const logsStore = useLogsStore()
+    const selectLogRun = vi.spyOn(logsStore, 'selectLogRun').mockResolvedValue()
+    const clearSelectedLogRun = vi.spyOn(logsStore, 'clearSelectedLogRun').mockResolvedValue()
+    const clearAllLogRuns = vi.spyOn(logsStore, 'clearAllLogRuns').mockResolvedValue()
     const wrapper = mountLogDialog({
-      runs: [
+      logRuns: [
         {
           id: 'run-1',
           app_id: 'web-1',
@@ -68,8 +79,9 @@ describe('LogDialog', () => {
           trigger: 'schedule',
         },
       ],
-      selectedRunId: 'run-1',
+      selectedLogRunId: 'run-1',
     })
+    await nextTick()
 
     expect(document.body.textContent).toContain('最近运行')
     expect(document.body.textContent).toContain('成功')
@@ -80,8 +92,8 @@ describe('LogDialog', () => {
     await buttonContaining(wrapper, '清理当前').trigger('click')
     await buttonContaining(wrapper, '清理全部').trigger('click')
 
-    expect(wrapper.emitted('selectRun')).toEqual([['run-1']])
-    expect(wrapper.emitted('clearSelected')).toHaveLength(1)
-    expect(wrapper.emitted('clearAll')).toHaveLength(1)
+    expect(selectLogRun).toHaveBeenCalledWith('run-1')
+    expect(clearSelectedLogRun).toHaveBeenCalledOnce()
+    expect(clearAllLogRuns).toHaveBeenCalledOnce()
   })
 })

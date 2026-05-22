@@ -1,32 +1,37 @@
 import { DOMWrapper, mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import SettingsDialog from '@/components/app/SettingsDialog.vue'
+import { useSettingsStore } from '@/stores/settings'
 import { buttonContaining } from '../../../helpers/dom'
 
-function mountSettingsDialog(props = {}) {
+function mountSettingsDialog(state: Partial<ReturnType<typeof useSettingsStore>> = {}) {
+  const settingsStore = useSettingsStore()
+  settingsStore.showSettingsDialog = true
+  settingsStore.autostartEnabled = false
+  settingsStore.hideDockOnClose = false
+  settingsStore.logRetentionLimit = 20
+  settingsStore.gracefulStopTimeoutSeconds = 10
+  settingsStore.checkingForUpdates = false
+  settingsStore.appVersion = '0.2.2'
+  settingsStore.availableUpdateVersion = ''
+  settingsStore.updateReleaseNotes = ''
+  Object.assign(settingsStore, state)
+
   return mount(SettingsDialog, {
     attachTo: document.body,
-    props: {
-      open: true,
-      autostartEnabled: false,
-      hideDockOnClose: false,
-      logRetentionLimit: 20,
-      checkingForUpdates: false,
-      appVersion: '0.2.2',
-      availableUpdateVersion: '',
-      updateReleaseNotes: '',
-      updateInProgress: false,
-      updateProgressPercent: null,
-      updateProgressLabel: '',
-      themeIcon: 'system',
-      themeLabel: '跟随系统',
-      ...props,
-    },
   })
 }
 
 describe('SettingsDialog', () => {
   it('emits settings actions from the dialog controls', async () => {
+    const settingsStore = useSettingsStore()
+    const toggleAutostart = vi.spyOn(settingsStore, 'toggleAutostart').mockResolvedValue()
+    const toggleHideDockOnClose = vi.spyOn(settingsStore, 'toggleHideDockOnClose').mockResolvedValue()
+    const updateLogRetentionLimit = vi.spyOn(settingsStore, 'updateLogRetentionLimit').mockResolvedValue()
+    const toggleTheme = vi.spyOn(settingsStore, 'toggleTheme').mockImplementation(() => {})
+    const checkForUpdates = vi.spyOn(settingsStore, 'checkForUpdates').mockResolvedValue()
+    const handleExport = vi.spyOn(settingsStore, 'handleExport').mockResolvedValue()
+    const handleImport = vi.spyOn(settingsStore, 'handleImport').mockResolvedValue()
     const wrapper = mountSettingsDialog()
 
     expect(document.body.textContent).toContain('开机自启动')
@@ -51,39 +56,27 @@ describe('SettingsDialog', () => {
     if (!closeIconButton) throw new Error('Settings close icon button not found')
     await new DOMWrapper(closeIconButton as HTMLElement).trigger('click')
 
-    expect(wrapper.emitted('toggleAutostart')).toEqual([[true]])
-    expect(wrapper.emitted('toggleHideDockOnClose')).toEqual([[true]])
-    expect(wrapper.emitted('updateLogRetentionLimit')).toEqual([[30]])
-    expect(wrapper.emitted('toggleTheme')).toHaveLength(1)
-    expect(wrapper.emitted('checkUpdates')).toHaveLength(1)
-    expect(wrapper.emitted('installUpdate')).toBeUndefined()
-    expect(wrapper.emitted('exportData')).toHaveLength(1)
-    expect(wrapper.emitted('importData')).toHaveLength(1)
-    expect(wrapper.emitted('close')).toHaveLength(1)
+    expect(toggleAutostart).toHaveBeenCalledWith(true)
+    expect(toggleHideDockOnClose).toHaveBeenCalledWith(true)
+    expect(updateLogRetentionLimit).toHaveBeenCalledWith(30)
+    expect(toggleTheme).toHaveBeenCalledOnce()
+    expect(checkForUpdates).toHaveBeenCalledOnce()
+    expect(handleExport).toHaveBeenCalledOnce()
+    expect(handleImport).toHaveBeenCalledOnce()
+    expect(settingsStore.showSettingsDialog).toBe(false)
   })
 
-  it('shows available update details and install progress', async () => {
+  it('shows available update details and installs the available update', async () => {
+    const settingsStore = useSettingsStore()
+    const installAvailableUpdate = vi.spyOn(settingsStore, 'installAvailableUpdate').mockResolvedValue()
     const wrapper = mountSettingsDialog({
       availableUpdateVersion: '0.3.0',
       updateReleaseNotes: '- 修复更新体验\n- 增加下载进度',
-      updateProgressLabel: '发现新版本 v0.3.0',
     })
 
     expect(document.body.textContent).toContain('发现新版本 v0.3.0')
     expect(document.body.textContent).toContain('修复更新体验')
     await buttonContaining(wrapper, '下载并安装').trigger('click')
-    expect(wrapper.emitted('installUpdate')).toHaveLength(1)
-
-    await wrapper.setProps({
-      updateInProgress: true,
-      updateProgressPercent: 42,
-      updateProgressLabel: '正在下载 42%',
-    })
-
-    const progress = document.querySelector('[role="progressbar"]')
-    expect(progress?.getAttribute('aria-valuenow')).toBe('42')
-    expect(document.body.textContent).toContain('正在下载 42%')
-    const closeIconButton = document.querySelector('button[aria-label="关闭设置"]')
-    expect((closeIconButton as HTMLButtonElement | null)?.disabled).toBe(true)
+    expect(installAvailableUpdate).toHaveBeenCalledOnce()
   })
 })

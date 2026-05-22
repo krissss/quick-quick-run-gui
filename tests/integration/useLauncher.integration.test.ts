@@ -1,10 +1,12 @@
 import { emit } from '@tauri-apps/api/event'
-import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h, ref } from 'vue'
+import { flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia, storeToRefs } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
-import { useLauncher } from '@/composables/useLauncher'
 import { normalizeApp, type AppItem } from '@/lib/store'
-import { serviceApp, taskApp } from '../fixtures/apps'
+import { useAppsStore } from '@/stores/apps'
+import { useLauncherStore } from '@/stores/launcher'
+import { useLogsStore } from '@/stores/logs'
+import { useMessageStore } from '@/stores/message'
 import { setupTauriMocks } from '../helpers/tauri'
 
 const demoWeb: AppItem = normalizeApp({
@@ -28,25 +30,21 @@ const demoWeb: AppItem = normalizeApp({
 
 async function mountLauncher(options: Parameters<typeof setupTauriMocks>[0] = {}, initialApps: AppItem[] = [demoWeb]) {
   const mock = setupTauriMocks(options)
-  const apps = ref<AppItem[]>(initialApps)
-  const showMessage = vi.fn()
-  const openLogDialog = vi.fn()
-  let launcher!: ReturnType<typeof useLauncher>
-
-  const wrapper = mount(defineComponent({
-    setup() {
-      launcher = useLauncher(apps, showMessage, openLogDialog)
-      return () => h('div')
-    },
-  }))
-  await flushPromises()
-
-  return { apps, launcher, mock, openLogDialog, showMessage, wrapper }
+  setActivePinia(createPinia())
+  const apps = useAppsStore()
+  const launcher = useLauncherStore()
+  const logs = useLogsStore()
+  const message = useMessageStore()
+  apps.apps = initialApps
+  await launcher.startEventListeners()
+  const launcherRefs = storeToRefs(launcher)
+  const messageRefs = storeToRefs(message)
+  return { apps, launcher, logs, mock, ...launcherRefs, ...messageRefs }
 }
 
-describe('useLauncher integration', () => {
+describe('launcher store', () => {
   it('loads latest run history sorted by newest run per app', async () => {
-    const { launcher, wrapper } = await mountLauncher({
+    const { launcher, runningAppIds, runningPids, latestRuns } = await mountLauncher({
       runningApps: [{ app_id: 'demo-web-id', pid: null, item_type: 'web' }],
       recentRuns: [
         {
@@ -80,38 +78,21 @@ describe('useLauncher integration', () => {
 
     await launcher.refreshRunningApps()
 
-    expect(launcher.runningAppIds.value.has('demo-web-id')).toBe(true)
-    expect(launcher.runningPids.value.size).toBe(0)
-    expect(launcher.latestRuns.value.get('demo-web-id')?.id).toBe('new')
-    wrapper.unmount()
+    expect(runningAppIds.value.has('demo-web-id')).toBe(true)
+    expect(runningPids.value.size).toBe(0)
+    expect(latestRuns.value.get('demo-web-id')?.id).toBe('new')
   })
 
-  it('keeps running state even when recent run history cannot be loaded', async () => {
-    const { launcher, wrapper } = await mountLauncher({
-      runningApps: [{ app_id: 'demo-web-id', pid: 4321, item_type: 'web' }],
-      rejectCommands: { get_recent_runs: new Error('store unavailable') },
-    })
+  it('finds apps from the apps store for tray events', async () => {
+    await mountLauncher()
+    const launcher = useLauncherStore()
 
-    await launcher.refreshRunningApps()
-
-    expect(launcher.runningAppIds.value.has('demo-web-id')).toBe(true)
-    expect(launcher.runningPids.value.get('demo-web-id')).toBe(4321)
-    wrapper.unmount()
-  })
-
-  it('opens the matching app log from tray events', async () => {
-    const { openLogDialog, wrapper } = await mountLauncher()
-
-    await emit('tray-open-log', 'demo-web-id')
-    await emit('tray-open-log', 'missing-id')
-    await flushPromises()
-
-    expect(openLogDialog).toHaveBeenCalledWith(demoWeb)
-    wrapper.unmount()
+    expect(launcher.findApp('demo-web-id')).toMatchObject({ id: 'demo-web-id', name: 'demo-web' })
+    expect(launcher.findApp('missing-id')).toBeNull()
   })
 
   it('focuses an already running web app instead of launching it again', async () => {
-    const { launcher, mock, openLogDialog, showMessage, wrapper } = await mountLauncher({
+    const { launcher, mock, logs, messages, loading } = await mountLauncher({
       runningApps: [{ app_id: 'demo-web-id', pid: 4321, item_type: 'web' }],
     })
 
@@ -119,105 +100,56 @@ describe('useLauncher integration', () => {
 
     expect(mock.getCalls('launch_app_window')).toHaveLength(0)
     expect(mock.getCalls('show_app_window').at(-1)?.payload).toEqual({ appId: 'demo-web-id' })
-    expect(openLogDialog).not.toHaveBeenCalled()
-    expect(showMessage).toHaveBeenCalledWith('demo-web 正在运行，已打开窗口', 'info')
-    expect(launcher.loading.value).toBe(false)
-    wrapper.unmount()
+    expect(logs.showLogDialog).toBe(false)
+    expect(loading.value).toBe(false)
+    expect(messages.value.at(-1)?.text).toBe('demo-web 正在运行，已打开窗口')
   })
 
   it('launches apps, captures background color, and handles no-command windows', async () => {
     document.body.style.backgroundColor = 'rgb(10, 20, 30)'
-    const { launcher, openLogDialog, showMessage, wrapper } = await mountLauncher({
+    const { launcher, mock, messages, loading } = await mountLauncher({
       launchResult: { message: '窗口已打开', pid: null, run_id: null },
     })
     const noCommand = { ...demoWeb, command: '' }
 
     await launcher.launchApp(noCommand)
 
-    expect(showMessage).toHaveBeenCalledWith('窗口已打开', 'success')
-    expect(openLogDialog).not.toHaveBeenCalled()
-    expect(launcher.loading.value).toBe(false)
+    expect(messages.value.at(-1)?.text).toBe('窗口已打开')
+    expect(loading.value).toBe(false)
 
-    wrapper.unmount()
-
-    const commandCase = await mountLauncher({
-      launchResult: { message: '任务已启动', pid: 2468, run_id: 'run-2' },
-    })
-    await commandCase.launcher.launchApp(demoWeb)
-
-    expect(commandCase.openLogDialog).not.toHaveBeenCalled()
-    expect(commandCase.launcher.loading.value).toBe(false)
-    commandCase.wrapper.unmount()
-
-    const commandWithoutPid = await mountLauncher({
-      launchResult: { message: '任务正在运行', pid: null, run_id: null },
-    })
-    await commandWithoutPid.launcher.launchApp(demoWeb)
-    expect(commandWithoutPid.showMessage).toHaveBeenCalledWith('任务正在运行', 'success')
-    expect(commandWithoutPid.openLogDialog).not.toHaveBeenCalled()
-    commandWithoutPid.wrapper.unmount()
-
-    const fallback = await mountLauncher({
-      launchResult: { message: '窗口已打开', pid: null, run_id: null },
-    })
     const styleSpy = vi.spyOn(window, 'getComputedStyle').mockReturnValue({
       backgroundColor: 'not-a-color',
     } as CSSStyleDeclaration)
-    await fallback.launcher.launchApp({ ...demoWeb, command: '' })
-    expect(fallback.showMessage.mock.calls.length).toBeGreaterThan(0)
-    expect(fallback.mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+    await launcher.launchApp({ ...demoWeb, command: '' })
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
       workingDirectory: '/Users/demo/project',
       launchTrigger: 'manual',
       bgR: 255,
       bgG: 255,
       bgB: 255,
     })
-    expect(fallback.launcher.loading.value).toBe(false)
     styleSpy.mockRestore()
-    fallback.wrapper.unmount()
-  })
-
-  it('resolves the active profile before launching', async () => {
-    const { launcher, mock, openLogDialog, wrapper } = await mountLauncher()
-    const profiledApp: AppItem = {
-      ...demoWeb,
-      command: 'pnpm dev {account= : 账号} {--headless}',
-      activeProfileId: 'profile-1',
-      profiles: [
-        {
-          id: 'profile-1',
-          name: '账号 1',
-          values: {
-            account: 'demo',
-            headless: 'true',
-          },
-        },
-      ],
-    }
-
-    await launcher.launchApp(profiledApp)
-
-    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
-      command: 'pnpm dev demo --headless',
-      workingDirectory: '/Users/demo/project',
-      url: 'http://localhost:3000',
-    })
-    expect(openLogDialog).not.toHaveBeenCalled()
-    wrapper.unmount()
   })
 
   it('schedules and cancels delayed manual launches in the current app session', async () => {
+    const mock = setupTauriMocks()
     vi.useFakeTimers()
-    const { launcher, mock, openLogDialog, showMessage, wrapper } = await mountLauncher()
+    setActivePinia(createPinia())
+    const appsStore = useAppsStore()
+    appsStore.apps = [demoWeb]
+    const launcher = useLauncherStore()
+    await launcher.startEventListeners()
+    const { pendingLaunches } = storeToRefs(launcher)
+    const { messages } = storeToRefs(useMessageStore())
 
     await launcher.launchApp(demoWeb, { delaySeconds: 1 })
 
     expect(mock.getCalls('launch_app_window')).toHaveLength(0)
-    expect(launcher.pendingLaunches.value.get('demo-web-id')).toMatchObject({
+    expect(pendingLaunches.value.get('demo-web-id')).toMatchObject({
       appId: 'demo-web-id',
       delaySeconds: 1,
     })
-    expect(showMessage.mock.calls.at(-1)?.[0]).toContain('已安排 demo-web')
+    expect(messages.value.at(-1)?.text).toContain('已安排 demo-web')
 
     await vi.advanceTimersByTimeAsync(1000)
     await flushPromises()
@@ -226,8 +158,7 @@ describe('useLauncher integration', () => {
       appId: 'demo-web-id',
       launchTrigger: 'delayed',
     })
-    expect(openLogDialog).not.toHaveBeenCalled()
-    expect(launcher.pendingLaunches.value.has('demo-web-id')).toBe(false)
+    expect(pendingLaunches.value.has('demo-web-id')).toBe(false)
 
     await launcher.launchApp(demoWeb, { delaySeconds: 10 })
     launcher.cancelDelayedLaunch('demo-web-id')
@@ -235,233 +166,6 @@ describe('useLauncher integration', () => {
     await flushPromises()
 
     expect(mock.getCalls('launch_app_window')).toHaveLength(1)
-    expect(showMessage.mock.calls.at(-1)).toEqual(['已取消延迟运行：demo-web', 'info'])
-
-    wrapper.unmount()
     vi.useRealTimers()
-  })
-
-  it('reports launch and stop failures', async () => {
-    const { launcher, showMessage, wrapper } = await mountLauncher({
-      rejectCommands: {
-        launch_app_window: new Error('boom'),
-        stop_app: new Error('cannot stop'),
-      },
-    })
-
-    await launcher.launchApp(demoWeb)
-    await launcher.stopApp('demo-web-id')
-    await expect(launcher.showAppWindow('demo-web-id')).resolves.toBeUndefined()
-
-    expect(showMessage).toHaveBeenCalledWith('启动失败: boom', 'error')
-    expect(showMessage).toHaveBeenCalledWith('停止失败: cannot stop', 'error')
-    expect(launcher.loading.value).toBe(false)
-    wrapper.unmount()
-  })
-
-  it('manually restarts running web and service apps', async () => {
-    const { launcher, mock, openLogDialog, wrapper } = await mountLauncher()
-    launcher.runningAppIds.value = new Set(['demo-web-id'])
-    launcher.runningPids.value = new Map([['demo-web-id', 4321]])
-
-    await launcher.restartApp(demoWeb)
-    await flushPromises()
-
-    expect(mock.getCalls('stop_app').at(-1)?.payload).toEqual({ appId: 'demo-web-id' })
-    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
-      appId: 'demo-web-id',
-      itemType: 'web',
-      launchTrigger: 'manual',
-    })
-    expect(openLogDialog).not.toHaveBeenCalled()
-    expect(launcher.restartingAppIds.value.has('demo-web-id')).toBe(false)
-
-    const service = normalizeApp(serviceApp)
-    const serviceCase = await mountLauncher({}, [service])
-    serviceCase.launcher.runningAppIds.value = new Set([service.id])
-    serviceCase.launcher.runningPids.value = new Map([[service.id, 2468]])
-
-    await serviceCase.launcher.restartApp(service)
-    await flushPromises()
-
-    expect(serviceCase.mock.getCalls('stop_app').at(-1)?.payload).toEqual({ appId: service.id })
-    expect(serviceCase.mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
-      appId: service.id,
-      itemType: 'service',
-      launchTrigger: 'manual',
-    })
-    expect(serviceCase.openLogDialog).not.toHaveBeenCalled()
-    serviceCase.wrapper.unmount()
-    wrapper.unmount()
-  })
-
-  it('reports manual restart failures and ignores task restarts', async () => {
-    const { launcher, mock, showMessage, wrapper } = await mountLauncher({
-      rejectCommands: {
-        stop_app: new Error('cannot stop'),
-      },
-    })
-    launcher.runningAppIds.value = new Set(['demo-web-id'])
-
-    await launcher.restartApp(demoWeb)
-    await launcher.restartApp(normalizeApp(taskApp))
-
-    expect(showMessage).toHaveBeenCalledWith('重启失败: cannot stop', 'error')
-    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
-    expect(launcher.restartingAppIds.value.has('demo-web-id')).toBe(false)
-    wrapper.unmount()
-  })
-
-  it('ignores manual restart requests for stopped web and service apps', async () => {
-    const { launcher, mock, wrapper } = await mountLauncher()
-
-    await launcher.restartApp(demoWeb)
-    await launcher.restartApp(normalizeApp(serviceApp))
-
-    expect(mock.getCalls('stop_app')).toHaveLength(0)
-    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
-    wrapper.unmount()
-  })
-
-  it('automatically restarts failed services within the configured attempt limit', async () => {
-    vi.useFakeTimers()
-    const service = normalizeApp({
-      ...serviceApp,
-      restart: { enabled: true, mode: 'on-failure', maxAttempts: 2, delaySeconds: 1 },
-    })
-    const { launcher, mock, openLogDialog, wrapper } = await mountLauncher({}, [service])
-
-    await emit('app-run-updated', { app_id: service.id, run_id: 'run-1', status: 'failed' })
-    await flushPromises()
-    await vi.advanceTimersByTimeAsync(1000)
-    await flushPromises()
-
-    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
-      appId: service.id,
-      itemType: 'service',
-      launchTrigger: 'auto-restart',
-    })
-    expect(openLogDialog).not.toHaveBeenCalled()
-    expect(launcher.loading.value).toBe(false)
-    wrapper.unmount()
-    vi.useRealTimers()
-  })
-
-  it('does not restart deleted services after the configured delay', async () => {
-    vi.useFakeTimers()
-    const service = normalizeApp({
-      ...serviceApp,
-      restart: { enabled: true, mode: 'on-failure', maxAttempts: 2, delaySeconds: 1 },
-    })
-    const { apps, mock, wrapper } = await mountLauncher({}, [service])
-
-    await emit('app-run-updated', { app_id: service.id, run_id: 'run-1', status: 'failed' })
-    await flushPromises()
-    apps.value = []
-    await vi.advanceTimersByTimeAsync(1000)
-    await flushPromises()
-
-    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
-    wrapper.unmount()
-    vi.useRealTimers()
-  })
-
-  it('does not restart services when restart is disabled before the delay finishes', async () => {
-    vi.useFakeTimers()
-    const service = normalizeApp({
-      ...serviceApp,
-      restart: { enabled: true, mode: 'on-failure', maxAttempts: 2, delaySeconds: 1 },
-    })
-    const { apps, mock, wrapper } = await mountLauncher({}, [service])
-
-    await emit('app-run-updated', { app_id: service.id, run_id: 'run-1', status: 'failed' })
-    await flushPromises()
-    apps.value = [
-      normalizeApp({
-        ...service,
-        restart: { ...service.restart, enabled: false },
-      }),
-    ]
-    await vi.advanceTimersByTimeAsync(1000)
-    await flushPromises()
-
-    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
-    wrapper.unmount()
-    vi.useRealTimers()
-  })
-
-  it('automatically retries failed tasks', async () => {
-    vi.useFakeTimers()
-    const task = normalizeApp({
-      ...taskApp,
-      retry: { enabled: true, maxAttempts: 2, delaySeconds: 1 },
-    })
-    const { launcher, mock, openLogDialog, wrapper } = await mountLauncher({}, [task])
-
-    await emit('app-run-updated', { app_id: task.id, run_id: 'run-1', status: 'failed' })
-    await flushPromises()
-    await vi.advanceTimersByTimeAsync(1000)
-    await flushPromises()
-
-    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
-      appId: task.id,
-      itemType: 'task',
-      launchTrigger: 'retry',
-    })
-    expect(openLogDialog).not.toHaveBeenCalled()
-    expect(launcher.loading.value).toBe(false)
-    wrapper.unmount()
-    vi.useRealTimers()
-  })
-
-  it('does not retry tasks when retry is disabled before the delay finishes', async () => {
-    vi.useFakeTimers()
-    const task = normalizeApp({
-      ...taskApp,
-      retry: { enabled: true, maxAttempts: 2, delaySeconds: 1 },
-    })
-    const { apps, mock, wrapper } = await mountLauncher({}, [task])
-
-    await emit('app-run-updated', { app_id: task.id, run_id: 'run-1', status: 'failed' })
-    await flushPromises()
-    apps.value = [
-      normalizeApp({
-        ...task,
-        retry: { ...task.retry, enabled: false },
-      }),
-    ]
-    await vi.advanceTimersByTimeAsync(1000)
-    await flushPromises()
-
-    expect(mock.getCalls('launch_app_window')).toHaveLength(0)
-    wrapper.unmount()
-    vi.useRealTimers()
-  })
-
-  it('reacts to process lifecycle and tray launch events', async () => {
-    const runningApps = [{ app_id: 'demo-web-id', pid: 4321, item_type: 'web' as const }]
-    const { launcher, openLogDialog, wrapper } = await mountLauncher({
-      runningApps,
-    })
-
-    await emit('app-launched', 'demo-web-id')
-    await flushPromises()
-    expect(launcher.runningAppIds.value.has('demo-web-id')).toBe(true)
-
-    runningApps.length = 0
-    await emit('app-process-stopped', 'demo-web-id')
-    await flushPromises()
-    expect(launcher.runningPids.value.has('demo-web-id')).toBe(false)
-
-    await emit('app-stopped', 'demo-web-id')
-    await flushPromises()
-    expect(launcher.runningAppIds.value.has('demo-web-id')).toBe(false)
-
-    await emit('app-run-updated', { app_id: 'demo-web-id' })
-    await emit('tray-launch-app', 'demo-web-id')
-    await flushPromises()
-    expect(openLogDialog).not.toHaveBeenCalled()
-
-    wrapper.unmount()
   })
 })

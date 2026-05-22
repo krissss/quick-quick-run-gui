@@ -40,11 +40,18 @@ pnpm tauri:build  # Tauri 生产构建
 ### 入口与边界
 
 - 前端主入口是 `src/App.vue`，独立应用窗口入口是 `src/AppWindow.vue`。
-- Tauri IPC 命令集中在 `src-tauri/src/lib.rs`；前端主要通过 `src/composables/useLauncher.ts`、`src/composables/useLogs.ts` 等 composable 调用。
+- 主窗口共享状态集中在 `src/stores/` 的 Pinia stores；`src/App.vue` 只做应用启动、生命周期和少量顶层装配，不应作为 props/emit 总线。
+- Tauri IPC 命令集中在 `src-tauri/src/lib.rs`；前端应优先通过 Pinia store action 封装 IPC、持久化和跨组件状态变化。
 - 进程生命周期、日志文件、运行记录和重启恢复主要在 `src-tauri/src/process.rs`。
 - 用户配置的规范化、导入导出和本地 store 封装在 `src/lib/store.ts`。
 - UI 基础组件在 `src/components/ui/`，业务表单位于 `src/components/app/capabilities/`。
 - Vite 是多页入口：`index.html` 对应主窗口，`app-window.html` 对应独立应用窗口。
+
+### Pinia 状态管理
+
+- 主窗口使用 Pinia 做状态管理，共享状态和跨组件动作优先放在 `src/stores/`。
+- `src/App.vue` 应保持为应用启动、生命周期和顶层装配入口，避免重新堆回大量 props/emit 中转。
+- 组件可以直接消费对应 store；局部、无全局业务状态的 UI 辅助逻辑仍可保留为 composable。
 
 ### 行为不变量
 
@@ -96,7 +103,7 @@ pnpm dlx shadcn-vue@latest add [组件名]
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **quick-quick-run-gui** (928 symbols, 2294 relationships, 72 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **quick-quick-run-gui** (936 symbols, 2341 relationships, 72 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

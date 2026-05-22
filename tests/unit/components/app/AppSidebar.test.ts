@@ -2,6 +2,9 @@ import { mount } from '@vue/test-utils'
 import { flushPromises } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import AppSidebar from '@/components/app/AppSidebar.vue'
+import { useAppsStore } from '@/stores/apps'
+import { useAppCatalogStore } from '@/stores/apps/appCatalog'
+import { useLauncherStore } from '@/stores/launcher'
 import { serviceApp, serviceFailedRun, taskApp, webApp } from '../../../fixtures/apps'
 import { buttonContaining, inputByPlaceholder, visibleAppIds } from '../../../helpers/dom'
 
@@ -13,15 +16,21 @@ function mountSidebar(options: {
   pendingLaunches?: Map<string, never>
   faviconUrl?: (appId: string) => string
 } = {}) {
+  const appsStore = useAppsStore()
+  const launcherStore = useLauncherStore()
+  appsStore.apps = [webApp, serviceApp, taskApp]
+  appsStore.isNew = options.isNew ?? false
+  if (options.selectedAppId) {
+    const selectedApp = appsStore.apps.find(app => app.id === options.selectedAppId)
+    if (selectedApp) appsStore.selectApp(selectedApp)
+  }
+  launcherStore.runningAppIds = options.runningAppIds ?? new Set()
+  launcherStore.latestRuns = options.latestRuns ?? new Map()
+  launcherStore.pendingLaunches = options.pendingLaunches ?? new Map()
+
   return mount(AppSidebar, {
     attachTo: document.body,
     props: {
-      apps: [webApp, serviceApp, taskApp],
-      selectedAppId: options.selectedAppId ?? '',
-      isNew: options.isNew ?? false,
-      runningAppIds: options.runningAppIds ?? new Set(),
-      latestRuns: options.latestRuns ?? new Map(),
-      pendingLaunches: options.pendingLaunches ?? new Map(),
       faviconUrl: (app) => options.faviconUrl?.(app.id) ?? (app.id === 'web-1' ? 'http://localhost:3000/favicon.png' : ''),
     },
   })
@@ -66,13 +75,14 @@ describe('AppSidebar', () => {
     await buttonContaining(wrapper, '设置').trigger('click')
     await appRow(wrapper, 'task-1').trigger('click')
 
-    expect(wrapper.emitted('add')).toHaveLength(1)
-    expect(wrapper.emitted('openSettings')).toHaveLength(1)
-    expect(wrapper.emitted('select')?.[0]).toEqual([taskApp])
+    const appsStore = useAppsStore()
+    expect(appsStore.isNew).toBe(false)
+    expect(appsStore.editForm.id).toBe('task-1')
   })
 
   it('emits reorder after dragging a list item', async () => {
     const wrapper = mountSidebar()
+    vi.spyOn(useAppCatalogStore(), 'persistApps').mockResolvedValue()
     const taskRow = appRow(wrapper, 'task-1')
     Object.defineProperty(document, 'elementFromPoint', {
       configurable: true,
@@ -82,8 +92,9 @@ describe('AppSidebar', () => {
     await taskRow.trigger('pointerdown', { button: 0, pointerId: 1, clientX: 10, clientY: 10 })
     await taskRow.trigger('pointermove', { pointerId: 1, clientX: 10, clientY: 20 })
     await taskRow.trigger('pointerup', { pointerId: 1, clientX: 10, clientY: 20 })
+    await flushPromises()
 
-    expect(wrapper.emitted('reorder')).toEqual([['task-1', 'web-1']])
+    expect(useAppsStore().apps.map(app => app.id)).toEqual(['task-1', 'web-1', 'service-1'])
   })
 
   it('emits favicon errors for the shared icon state owner', async () => {

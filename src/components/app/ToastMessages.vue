@@ -1,21 +1,15 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button'
-import type { MessageItem } from '@/composables/useMessage'
+import { useMessageStore } from '@/stores/message'
 
-defineProps<{
-  messages: MessageItem[]
-}>()
-
-defineEmits<{
-  dismiss: [id: number]
-}>()
+const messageStore = useMessageStore()
 </script>
 
 <template>
   <div class="pointer-events-none fixed left-4 top-4 z-[80] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
     <TransitionGroup name="toast">
       <div
-        v-for="item in messages"
+        v-for="item in messageStore.messages"
         :key="item.id"
         class="pointer-events-auto flex items-start gap-2.5 rounded-lg bg-background/98 px-3 py-2.5 text-card-foreground"
         style="box-shadow: var(--shadow-card), inset 0 0 0 1px rgba(0, 0, 0, 0.06)"
@@ -86,7 +80,7 @@ defineEmits<{
           class="h-6 w-6 shrink-0 text-muted-foreground hover:bg-muted hover:text-foreground"
           title="关闭通知"
           aria-label="关闭通知"
-          @click="$emit('dismiss', item.id)"
+          @click="messageStore.dismissMessage(item.id)"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 6 6 18" />

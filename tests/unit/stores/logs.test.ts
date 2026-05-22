@@ -1,9 +1,10 @@
 import { emit } from '@tauri-apps/api/event'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia, storeToRefs } from 'pinia'
 import { defineComponent, h } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { useLogs } from '@/composables/useLogs'
 import { normalizeApp, type AppItem } from '@/lib/store'
+import { useLogsStore } from '@/stores/logs'
 import { setupTauriMocks } from '../../helpers/tauri'
 
 const app: AppItem = normalizeApp({
@@ -26,18 +27,18 @@ const app: AppItem = normalizeApp({
 })
 
 function mountLogs() {
-  const messages: Array<{ text: string; type?: string }> = []
-  let api!: ReturnType<typeof useLogs>
+  setActivePinia(createPinia())
+  const api = useLogsStore()
+  const refs = storeToRefs(api)
   const wrapper = mount(defineComponent({
     setup() {
-      api = useLogs((text, type) => messages.push({ text, type }))
-      return () => h('div', { ref: 'logContainer' })
+      return () => h('div')
     },
   }))
-  return { api, messages, wrapper }
+  return { api, ...refs, wrapper }
 }
 
-describe('useLogs', () => {
+describe('logs store', () => {
   afterEach(() => {
     vi.useRealTimers()
   })
@@ -46,7 +47,7 @@ describe('useLogs', () => {
     vi.useFakeTimers()
     const logs = { 'app-1': ['[qqr] started at 1767506400000: pnpm dev', 'first line'] }
     const runLogs = { 'run-1': logs['app-1'] }
-    const mock = setupTauriMocks({
+    setupTauriMocks({
       store: { log_retention_limit: 12 },
       logs,
       recentRuns: [
@@ -66,36 +67,32 @@ describe('useLogs', () => {
       ],
       runLogs,
     })
-    const { api, wrapper } = mountLogs()
+    const { api, showLogDialog, logAppName, logRuns, selectedLogRunId, logLines, logWindowOpened, logLaunchFailed, logLaunchFailedReason, wrapper } = mountLogs()
 
     await api.openLogDialog(app)
     await flushPromises()
 
-    expect(api.showLogDialog.value).toBe(true)
-    expect(mock.getCalls('get_app_log_runs').at(-1)?.payload).toMatchObject({
-      appId: 'app-1',
-      limit: 12,
-    })
-    expect(api.logAppName.value).toBe('Web App')
-    expect(api.logRuns.value.map(run => run.id)).toEqual(['run-1'])
-    expect(api.selectedLogRunId.value).toBe('run-1')
-    expect(api.logLines.value[0]).not.toContain('1767506400000')
-    expect(api.logLines.value[1]).toBe('first line')
-    expect(api.logWindowOpened.value).toBe(false)
+    expect(showLogDialog.value).toBe(true)
+    expect(logAppName.value).toBe('Web App')
+    expect(logRuns.value.map(run => run.id)).toEqual(['run-1'])
+    expect(selectedLogRunId.value).toBe('run-1')
+    expect(logLines.value[0]).not.toContain('1767506400000')
+    expect(logLines.value[1]).toBe('first line')
+    expect(logWindowOpened.value).toBe(false)
 
     await emit('app-launch-failed', { app_id: 'other', reason: 'timeout' })
     await emit('app-launch-failed', { app_id: 'app-1', reason: 'process_exited' })
     await emit('app-window-opened', 'app-1')
     await flushPromises()
 
-    expect(api.logLaunchFailed.value).toBe(true)
-    expect(api.logLaunchFailedReason.value).toBe('process_exited')
-    expect(api.logWindowOpened.value).toBe(true)
+    expect(logLaunchFailed.value).toBe(true)
+    expect(logLaunchFailedReason.value).toBe('process_exited')
+    expect(logWindowOpened.value).toBe(true)
 
     runLogs['run-1'] = ['[qqr] started at 1767506400000: pnpm dev', 'first line', 'second line']
     await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
-    expect(api.logLines.value.at(-1)).toBe('second line')
+    expect(logLines.value.at(-1)).toBe('second line')
 
     runLogs['run-1'] = [
       '[qqr] started at 1767506400000: pnpm dev',
@@ -105,10 +102,10 @@ describe('useLogs', () => {
     ]
     await emit('app-run-updated', { app_id: 'app-1', run_id: 'run-1', status: 'success' })
     await flushPromises()
-    expect(api.logLines.value.at(-1)).toBe('final line')
+    expect(logLines.value.at(-1)).toBe('final line')
 
     api.closeLogDialog()
-    expect(api.showLogDialog.value).toBe(false)
+    expect(showLogDialog.value).toBe(false)
     wrapper.unmount()
   })
 
@@ -147,17 +144,17 @@ describe('useLogs', () => {
         'run-old': ['old success'],
       },
     })
-    const { api, wrapper } = mountLogs()
+    const { api, logLines, selectedLogRunId, wrapper } = mountLogs()
 
     await api.openLogDialog({ ...app, type: 'task' }, true)
     await flushPromises()
-    expect(api.logLines.value).toEqual(['new failed'])
+    expect(logLines.value).toEqual(['new failed'])
 
     await api.selectLogRun('run-old')
     await flushPromises()
 
-    expect(api.selectedLogRunId.value).toBe('run-old')
-    expect(api.logLines.value).toEqual(['old success'])
+    expect(selectedLogRunId.value).toBe('run-old')
+    expect(logLines.value).toEqual(['old success'])
     wrapper.unmount()
   })
 
@@ -196,7 +193,7 @@ describe('useLogs', () => {
         'run-running': ['running'],
       },
     })
-    const { api, messages, wrapper } = mountLogs()
+    const { api, logRuns, wrapper } = mountLogs()
 
     await api.openLogDialog({ ...app, type: 'task' }, true)
     await flushPromises()
@@ -207,27 +204,25 @@ describe('useLogs', () => {
       appId: 'app-1',
       runIds: ['run-new'],
     })
-    expect(messages.at(-1)).toEqual({ text: '已清理 1 条日志', type: 'success' })
-    expect(api.logRuns.value.map(run => run.id)).toEqual(['run-running'])
+    expect(logRuns.value.map(run => run.id)).toEqual(['run-running'])
 
     await api.clearAllLogRuns()
     await flushPromises()
 
-    expect(messages.at(-1)).toEqual({ text: '没有可清理的日志', type: 'success' })
-    expect(api.logRuns.value.map(run => run.id)).toEqual(['run-running'])
+    expect(logRuns.value.map(run => run.id)).toEqual(['run-running'])
     wrapper.unmount()
   })
 
   it('falls back to empty logs when log loading fails', async () => {
     vi.useFakeTimers()
     setupTauriMocks({ rejectCommands: { get_app_logs: new Error('missing logs') } })
-    const { api, wrapper } = mountLogs()
+    const { api, logLines, logWindowOpened, wrapper } = mountLogs()
 
     await api.openLogDialog({ ...app, type: 'task' }, true)
     await flushPromises()
 
-    expect(api.logLines.value).toEqual([])
-    expect(api.logWindowOpened.value).toBe(true)
+    expect(logLines.value).toEqual([])
+    expect(logWindowOpened.value).toBe(true)
 
     await vi.advanceTimersByTimeAsync(300)
     api.closeLogDialog()

@@ -1,4 +1,6 @@
 import { computed, ref, shallowRef } from 'vue'
+import { defineStore } from 'pinia'
+import { tryOnScopeDispose } from '@vueuse/core'
 import { getTheme, setTheme, type Theme } from '@/lib/theme'
 import { enable as autostartEnable, disable as autostartDisable, isEnabled as autostartIsEnabled } from '@tauri-apps/plugin-autostart'
 import { open as dialogOpen, save } from '@tauri-apps/plugin-dialog'
@@ -21,7 +23,9 @@ import {
   saveHideDockOnClose,
   saveLogRetentionLimit,
 } from '@/lib/store'
-import { getErrorMessage } from './useMessage'
+import { getErrorMessage } from '@/lib/error'
+import { useAppCatalogStore } from './apps/appCatalog'
+import { useMessageStore } from './message'
 
 const UPDATE_BODY_PREVIEW_LIMIT = 1200
 
@@ -79,10 +83,12 @@ function formatUpdateReleaseNotes(body?: string) {
     : updateBody
 }
 
-export function useSettings(
-  apps: { value: import('@/lib/store').AppItem[] },
-  showMessage: (msg: string, type?: 'success' | 'error' | 'info') => void,
-) {
+export const useSettingsStore = defineStore('settings', () => {
+  const catalog = useAppCatalogStore()
+  const message = useMessageStore()
+
+  tryOnScopeDispose(() => clearAvailableUpdate())
+
   const showSettingsDialog = ref(false)
   const autostartEnabled = ref(false)
   const hideDockOnClose = ref(false)
@@ -113,7 +119,6 @@ export function useSettings(
     return ''
   })
 
-  // 主题
   const currentTheme = ref<Theme>(getTheme())
   function toggleTheme() {
     const next: Record<Theme, Theme> = { light: 'dark', dark: 'system', system: 'light' }
@@ -127,33 +132,17 @@ export function useSettings(
     return '跟随系统'
   })
 
+  async function loadSetting<T>(loader: () => Promise<T>, fallback: T) {
+    try { return await loader() } catch { return fallback }
+  }
+
   async function openSettingsDialog() {
     showSettingsDialog.value = true
-    try {
-      appVersion.value = await getVersion()
-    } catch {
-      appVersion.value = ''
-    }
-    try {
-      hideDockOnClose.value = await loadHideDockOnClose()
-    } catch {
-      hideDockOnClose.value = false
-    }
-    try {
-      logRetentionLimit.value = await loadLogRetentionLimit()
-    } catch {
-      logRetentionLimit.value = DEFAULT_LOG_RETENTION_LIMIT
-    }
-    try {
-      gracefulStopTimeoutSeconds.value = await loadGracefulStopTimeoutSeconds()
-    } catch {
-      gracefulStopTimeoutSeconds.value = DEFAULT_GRACEFUL_STOP_TIMEOUT_SECONDS
-    }
-    try {
-      autostartEnabled.value = await autostartIsEnabled()
-    } catch {
-      autostartEnabled.value = false
-    }
+    appVersion.value = await loadSetting(getVersion, '')
+    hideDockOnClose.value = await loadSetting(loadHideDockOnClose, false)
+    logRetentionLimit.value = await loadSetting(loadLogRetentionLimit, DEFAULT_LOG_RETENTION_LIMIT)
+    gracefulStopTimeoutSeconds.value = await loadSetting(loadGracefulStopTimeoutSeconds, DEFAULT_GRACEFUL_STOP_TIMEOUT_SECONDS)
+    autostartEnabled.value = await loadSetting(autostartIsEnabled, false)
   }
 
   async function toggleAutostart(value: boolean) {
@@ -161,7 +150,7 @@ export function useSettings(
       if (value) { await autostartEnable(); autostartEnabled.value = true }
       else { await autostartDisable(); autostartEnabled.value = false }
     } catch (e: unknown) {
-      showMessage(`设置自启动失败: ${getErrorMessage(e)}`, 'error')
+      message.showMessage(`设置自启动失败: ${getErrorMessage(e)}`, 'error')
     }
   }
 
@@ -170,7 +159,7 @@ export function useSettings(
       await saveHideDockOnClose(value)
       hideDockOnClose.value = value
     } catch (e: unknown) {
-      showMessage(`保存菜单栏模式失败: ${getErrorMessage(e)}`, 'error')
+      message.showMessage(`保存菜单栏模式失败: ${getErrorMessage(e)}`, 'error')
     }
   }
 
@@ -181,7 +170,7 @@ export function useSettings(
       try { await invoke('prune_log_records') } catch { /* ignore; next run will prune */ }
       logRetentionLimit.value = next
     } catch (e: unknown) {
-      showMessage(`保存日志保留数量失败: ${getErrorMessage(e)}`, 'error')
+      message.showMessage(`保存日志保留数量失败: ${getErrorMessage(e)}`, 'error')
     }
   }
 
@@ -191,7 +180,7 @@ export function useSettings(
       await saveGracefulStopTimeoutSeconds(next)
       gracefulStopTimeoutSeconds.value = next
     } catch (e: unknown) {
-      showMessage(`保存停止等待时间失败: ${getErrorMessage(e)}`, 'error')
+      message.showMessage(`保存停止等待时间失败: ${getErrorMessage(e)}`, 'error')
     }
   }
 
@@ -241,7 +230,7 @@ export function useSettings(
 
       const update = await check()
       if (!update) {
-        showMessage('当前已是最新版本', 'info')
+        message.showMessage('当前已是最新版本', 'info')
         return
       }
 
@@ -249,9 +238,9 @@ export function useSettings(
       availableUpdateVersion.value = update.version
       updateReleaseNotes.value = formatUpdateReleaseNotes(update.body)
       updateStatus.value = 'available'
-      showMessage(`发现新版本 ${update.version}`, 'info')
+      message.showMessage(`发现新版本 ${update.version}`, 'info')
     } catch (e: unknown) {
-      showMessage(`检查更新失败: ${getErrorMessage(e)}`, 'error')
+      message.showMessage(`检查更新失败: ${getErrorMessage(e)}`, 'error')
     } finally {
       checkingForUpdates.value = false
     }
@@ -263,26 +252,25 @@ export function useSettings(
     resetUpdateProgress()
     updateStatus.value = 'downloading'
     try {
-      showMessage(`正在下载并安装 ${update.version}`, 'info')
+      message.showMessage(`正在下载并安装 ${update.version}`, 'info')
       await update.download(handleDownloadEvent)
       updateStatus.value = 'installing'
       await update.install()
       await clearAvailableUpdate()
-      showMessage('更新已安装，正在重启应用', 'success')
+      message.showMessage('更新已安装，正在重启应用', 'success')
       try {
         await relaunch()
       } catch (e: unknown) {
-        showMessage(`更新已安装，请手动重启应用: ${getErrorMessage(e)}`, 'error')
+        message.showMessage(`更新已安装，请手动重启应用: ${getErrorMessage(e)}`, 'error')
       }
     } catch (e: unknown) {
       await clearAvailableUpdate()
-      showMessage(`更新失败: ${getErrorMessage(e)}`, 'error')
+      message.showMessage(`更新失败: ${getErrorMessage(e)}`, 'error')
     } finally {
       if (!availableUpdate.value) resetUpdateProgress()
     }
   }
 
-  // 导入/导出
   async function handleExport() {
     try {
       const json = await exportData()
@@ -292,9 +280,9 @@ export function useSettings(
       })
       if (!filePath) return
       await writeFile(filePath, new TextEncoder().encode(json))
-      showMessage(`已导出到 ${filePath}`, 'success')
+      message.showMessage(`已导出到 ${filePath}`, 'success')
     } catch (e: unknown) {
-      showMessage(`导出失败: ${getErrorMessage(e)}`, 'error')
+      message.showMessage(`导出失败: ${getErrorMessage(e)}`, 'error')
     }
   }
 
@@ -307,11 +295,11 @@ export function useSettings(
       if (!filePath) return
       const json = await readTextFile(filePath)
       const imported = await importData(json)
-      apps.value = imported
-      showMessage(`已导入 ${imported.length} 个应用`, 'success')
+      catalog.setImportedApps(imported)
+      message.showMessage(`已导入 ${imported.length} 个应用`, 'success')
       try { await invoke('notify_apps_updated') } catch { /* ignore */ }
     } catch (e: unknown) {
-      showMessage(`导入失败: ${getErrorMessage(e)}`, 'error')
+      message.showMessage(`导入失败: ${getErrorMessage(e)}`, 'error')
     }
   }
 
@@ -323,4 +311,4 @@ export function useSettings(
     checkForUpdates, installAvailableUpdate,
     handleExport, handleImport,
   }
-}
+})
