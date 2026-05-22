@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from 'vitest'
 import AppSidebar from '@/components/app/AppSidebar.vue'
 import { serviceApp, serviceFailedRun, taskApp, webApp } from '../../../fixtures/apps'
 import { buttonContaining, inputByPlaceholder, visibleAppIds } from '../../../helpers/dom'
-import { setupTauriMocks } from '../../../helpers/tauri'
 
 function mountSidebar(options: {
   selectedAppId?: string
@@ -12,14 +11,8 @@ function mountSidebar(options: {
   runningAppIds?: Set<string>
   latestRuns?: Map<string, typeof serviceFailedRun>
   pendingLaunches?: Map<string, never>
-  faviconResolver?: (url: string) => string | null
+  faviconUrl?: (appId: string) => string
 } = {}) {
-  setupTauriMocks({
-    favicons: {
-      [webApp.url]: 'http://localhost:3000/favicon.png',
-    },
-    faviconResolver: options.faviconResolver,
-  })
   return mount(AppSidebar, {
     attachTo: document.body,
     props: {
@@ -29,6 +22,7 @@ function mountSidebar(options: {
       runningAppIds: options.runningAppIds ?? new Set(),
       latestRuns: options.latestRuns ?? new Map(),
       pendingLaunches: options.pendingLaunches ?? new Map(),
+      faviconUrl: (app) => options.faviconUrl?.(app.id) ?? (app.id === 'web-1' ? 'http://localhost:3000/favicon.png' : ''),
     },
   })
 }
@@ -92,27 +86,12 @@ describe('AppSidebar', () => {
     expect(wrapper.emitted('reorder')).toEqual([['task-1', 'web-1']])
   })
 
-  it('retries web favicon after the app becomes running', async () => {
-    vi.useFakeTimers()
-    let ready = false
-    const wrapper = mountSidebar({
-      runningAppIds: new Set(),
-      faviconResolver: () => ready ? 'http://localhost:3000/ready-icon.png' : null,
-    })
+  it('emits favicon errors for the shared icon state owner', async () => {
+    const wrapper = mountSidebar()
 
     await flushPromises()
-    expect(appRow(wrapper, 'web-1').find('img[alt="demo-web favicon"]').exists()).toBe(true)
-
     await appRow(wrapper, 'web-1').find('img[alt="demo-web favicon"]').trigger('error')
-    expect(appRow(wrapper, 'web-1').find('img[alt="demo-web favicon"]').exists()).toBe(false)
 
-    ready = true
-    await wrapper.setProps({ runningAppIds: new Set(['web-1']) })
-    await flushPromises()
-
-    expect(appRow(wrapper, 'web-1').find('img[alt="demo-web favicon"]').attributes('src')).toBe('http://localhost:3000/ready-icon.png')
-
-    wrapper.unmount()
-    vi.useRealTimers()
+    expect(wrapper.emitted('favicon-error')).toEqual([[webApp]])
   })
 })

@@ -10,6 +10,10 @@ const defaultSchedule = {
   missedPolicy: 'skip',
 }
 
+const demoFavicon =
+  'data:image/svg+xml;charset=utf-8,' +
+  encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="white"/><path d="M12 5v14" stroke="black" stroke-width="2" stroke-linecap="round"/></svg>')
+
 async function installTauriMock(page: Page, state: Record<string, unknown>) {
   await page.addInitScript((initialState) => {
     const testState = {
@@ -18,6 +22,7 @@ async function installTauriMock(page: Page, state: Record<string, unknown>) {
       runningApps: initialState.runningApps ?? [],
       recentRuns: initialState.recentRuns ?? [],
       autostartEnabled: false,
+      favicons: { ...((initialState.favicons as Record<string, string | null>) ?? {}) },
     }
     const listeners = new Map<string, number[]>()
     const callbacks = new Map<number, (payload: unknown) => void>()
@@ -111,7 +116,7 @@ async function installTauriMock(page: Page, state: Record<string, unknown>) {
           if (cmd === 'get_app_logs') return []
           if (cmd === 'clear_app_logs') return { removed: 0 }
           if (cmd === 'prune_log_records') return { removed: 0 }
-          if (cmd === 'get_web_favicon') return null
+          if (cmd === 'get_web_favicon') return testState.favicons[String(payload.url)] ?? null
           if (cmd === 'notify_apps_updated') return null
           if (cmd === 'launch_app_window') return { message: '已启动', pid: 1234, run_id: 'run-1' }
           if (cmd === 'stop_app' || cmd === 'show_app_window' || cmd === 'open_in_browser') return null
@@ -152,6 +157,35 @@ test('restores a running web app and can reopen its window', async ({ page }) =>
   await expect.poll(async () => page.evaluate(() => {
     return window.__qqrTest.calls.filter((call) => call.cmd === 'show_app_window').length
   })).toBe(1)
+})
+
+test('renders the same web favicon in the sidebar and detail header', async ({ page }) => {
+  await installTauriMock(page, {
+    storeData: {
+      apps: [
+        {
+          id: 'demo-web-id',
+          name: 'demo-web',
+          type: 'web',
+          command: 'pnpm dev',
+          url: 'http://localhost:3000',
+          width: 1200,
+          height: 800,
+          schedule: defaultSchedule,
+        },
+      ],
+    },
+    favicons: {
+      'http://localhost:3000': demoFavicon,
+    },
+  })
+
+  await page.goto('/')
+  const favicons = page.locator('img[alt="demo-web favicon"]')
+
+  await expect(favicons).toHaveCount(2)
+  await expect(favicons.nth(0)).toHaveAttribute('src', demoFavicon)
+  await expect(favicons.nth(1)).toHaveAttribute('src', demoFavicon)
 })
 
 test('shows a validation error for invalid custom task cron', async ({ page }) => {

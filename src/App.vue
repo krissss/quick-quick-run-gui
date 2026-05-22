@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog'
 import AppDetailForm from '@/components/app/AppDetailForm.vue'
 import AppSidebar from '@/components/app/AppSidebar.vue'
@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { useApps } from '@/composables/useApps'
+import { useAppFavicons } from '@/composables/useAppFavicons'
 import { useLauncher, type LaunchOptions } from '@/composables/useLauncher'
 import { useLogs } from '@/composables/useLogs'
 import { useMessage } from '@/composables/useMessage'
@@ -81,6 +82,9 @@ const {
   restartApp,
   showAppWindow,
 } = useLauncher(apps, showMessage, openLogDialog)
+
+const iconApps = computed(() => [...apps.value, editForm.value])
+const { faviconUrl, markFaviconFailed } = useAppFavicons(iconApps, runningAppIds)
 
 const {
   showSettingsDialog,
@@ -258,11 +262,13 @@ onUnmounted(() => {
       :running-app-ids="runningAppIds"
       :latest-runs="latestRuns"
       :pending-launches="pendingLaunches"
+      :favicon-url="faviconUrl"
       @add="handleOpenAddForm"
       @select="handleSelectApp"
       @reorder="reorderApps"
       @open-ports="openPortManagerDialog"
       @open-settings="openSettingsDialog"
+      @favicon-error="markFaviconFailed"
     />
 
     <AppDetailForm
@@ -273,6 +279,7 @@ onUnmounted(() => {
       :latest-runs="latestRuns"
       :pending-launches="pendingLaunches"
       :restarting-app-ids="restartingAppIds"
+      :favicon-url="faviconUrl(editForm)"
       @save="saveApp"
       @duplicate="duplicateSelectedApp"
       @launch="requestLaunch"
@@ -290,6 +297,7 @@ onUnmounted(() => {
       @open-log="openExistingLogDialog"
       @stop="stopApp"
       @restart="restartApp"
+      @favicon-error="markFaviconFailed"
     />
 
     <RunParametersDialog

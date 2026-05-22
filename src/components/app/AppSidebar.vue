@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { computed, ref } from 'vue'
 import { Search, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import AppIcon from '@/components/app/AppIcon.vue'
 import {
   InputGroup,
   InputGroupAddon,
@@ -22,6 +22,7 @@ const props = defineProps<{
   runningAppIds: Set<string>
   latestRuns: Map<string, RunRecord>
   pendingLaunches: Map<string, PendingLaunch>
+  faviconUrl: (app: AppItem) => string
 }>()
 
 const emit = defineEmits<{
@@ -30,14 +31,11 @@ const emit = defineEmits<{
   reorder: [activeId: string, targetId: string]
   openPorts: []
   openSettings: []
+  'favicon-error': [app: AppItem]
 }>()
 
 const sidebarSearch = ref('')
 const sidebarFilter = ref<'all' | AppType>('all')
-const faviconUrls = ref<Map<string, string>>(new Map())
-const faviconFailures = ref<Set<string>>(new Set())
-const faviconRequests = new Set<string>()
-const faviconRetryTimers = new Map<string, ReturnType<typeof setTimeout>[]>()
 
 const filteredApps = computed(() => {
   const query = sidebarSearch.value.trim().toLowerCase()
@@ -176,130 +174,6 @@ function primaryStatusClass(app: AppItem) {
   return 'bg-secondary text-muted-foreground'
 }
 
-function faviconKey(app: AppItem) {
-  return `${app.id}:${app.url}`
-}
-
-function webFaviconUrl(app: AppItem) {
-  return faviconUrls.value.get(faviconKey(app)) || ''
-}
-
-function fallbackFaviconUrl(app: AppItem) {
-  try {
-    return `${new URL(app.url).origin}/favicon.ico`
-  } catch {
-    return ''
-  }
-}
-
-function setFaviconUrl(key: string, url: string) {
-  const nextUrls = new Map(faviconUrls.value)
-  nextUrls.set(key, url)
-  faviconUrls.value = nextUrls
-  clearFaviconRetryTimers(key)
-
-  const nextFailures = new Set(faviconFailures.value)
-  nextFailures.delete(key)
-  faviconFailures.value = nextFailures
-}
-
-function setFaviconFailure(key: string) {
-  const nextUrls = new Map(faviconUrls.value)
-  nextUrls.delete(key)
-  faviconUrls.value = nextUrls
-
-  const nextFailures = new Set(faviconFailures.value)
-  nextFailures.add(key)
-  faviconFailures.value = nextFailures
-}
-
-function clearFaviconFailure(key: string) {
-  if (!faviconFailures.value.has(key)) return
-  const nextFailures = new Set(faviconFailures.value)
-  nextFailures.delete(key)
-  faviconFailures.value = nextFailures
-}
-
-async function loadWebFavicon(app: AppItem, force = false) {
-  if (app.type !== 'web' || !app.url) return
-  const key = faviconKey(app)
-  if (faviconRequests.has(key)) return
-  if (!force && (faviconUrls.value.has(key) || faviconFailures.value.has(key))) return
-
-  faviconRequests.add(key)
-  try {
-    const iconUrl = await invoke<string | null>('get_web_favicon', { url: app.url })
-    const nextUrl = iconUrl || fallbackFaviconUrl(app)
-    if (nextUrl) setFaviconUrl(key, nextUrl)
-    else setFaviconFailure(key)
-  } catch {
-    const fallback = fallbackFaviconUrl(app)
-    if (fallback) setFaviconUrl(key, fallback)
-    else setFaviconFailure(key)
-  } finally {
-    faviconRequests.delete(key)
-  }
-}
-
-function markFaviconFailed(app: AppItem) {
-  setFaviconFailure(faviconKey(app))
-}
-
-function clearFaviconRetryTimers(key: string) {
-  for (const timer of faviconRetryTimers.get(key) || []) {
-    window.clearTimeout(timer)
-  }
-  faviconRetryTimers.delete(key)
-}
-
-function retryWebFavicon(app: AppItem) {
-  const key = faviconKey(app)
-  if (faviconUrls.value.has(key)) return
-  clearFaviconFailure(key)
-  void loadWebFavicon(app, true)
-}
-
-function scheduleWebFaviconRetry(app: AppItem) {
-  if (app.type !== 'web' || !app.url) return
-  const key = faviconKey(app)
-  if (!props.runningAppIds.has(app.id)) {
-    clearFaviconRetryTimers(key)
-    return
-  }
-  if (faviconUrls.value.has(key)) return
-  clearFaviconRetryTimers(key)
-  retryWebFavicon(app)
-
-  const timers = [1000, 3000, 7000, 15000].map(delay =>
-    window.setTimeout(() => {
-      retryWebFavicon(app)
-    }, delay),
-  )
-  faviconRetryTimers.set(key, timers)
-}
-
-watch(
-  () => filteredApps.value.map(app => `${app.id}:${app.type}:${app.url}`).join('|'),
-  () => {
-    for (const app of filteredApps.value) {
-      loadWebFavicon(app)
-    }
-  },
-  { immediate: true },
-)
-
-watch(
-  () => filteredApps.value.map(app => `${app.id}:${app.url}:${props.runningAppIds.has(app.id) ? '1' : '0'}`).join('|'),
-  () => {
-    for (const app of filteredApps.value) {
-      scheduleWebFaviconRetry(app)
-    }
-  },
-)
-
-onUnmounted(() => {
-  for (const key of faviconRetryTimers.keys()) clearFaviconRetryTimers(key)
-})
 </script>
 
 <template>
@@ -424,37 +298,12 @@ onUnmounted(() => {
               class="absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-foreground/70"
               aria-hidden="true"
             />
-            <div class="relative shrink-0">
-              <div
-                class="flex h-8 w-8 items-center justify-center rounded-md bg-secondary text-muted-foreground shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)]"
-              >
-                <img
-                  v-if="app.type === 'web' && webFaviconUrl(app)"
-                  :src="webFaviconUrl(app)"
-                  :alt="`${app.name} favicon`"
-                  class="h-5 w-5 rounded-[3px] object-contain"
-                  loading="lazy"
-                  decoding="async"
-                  @error="markFaviconFailed(app)"
-                >
-                <svg v-else-if="app.type === 'web'" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M3 12h18" />
-                  <path d="M12 3a15 15 0 0 1 0 18" />
-                  <path d="M12 3a15 15 0 0 0 0 18" />
-                </svg>
-                <svg v-else-if="app.type === 'service'" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M4 7h16" />
-                  <path d="M4 12h16" />
-                  <path d="M4 17h16" />
-                  <path d="M7 7v10" />
-                </svg>
-                <svg v-else xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="8" />
-                  <path d="M12 8v4l3 2" />
-                </svg>
-              </div>
-            </div>
+            <AppIcon
+              :app="app"
+              :favicon-url="faviconUrl(app)"
+              size="sm"
+              @favicon-error="emit('favicon-error', app)"
+            />
             <div class="min-w-0 flex-1">
               <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
                 <div class="truncate text-sm">{{ app.name }}</div>

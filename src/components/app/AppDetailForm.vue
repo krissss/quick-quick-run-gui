@@ -2,9 +2,9 @@
 import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import AppCapabilityStack from '@/components/app/capabilities/AppCapabilityStack.vue'
+import AppIcon from '@/components/app/AppIcon.vue'
 import LaunchActionGroup from '@/components/app/LaunchActionGroup.vue'
 import {
-  iconGradient,
   itemTypeLabel,
   primaryActionLabel,
   runStatusClass,
@@ -24,6 +24,7 @@ const props = defineProps<{
   latestRuns: Map<string, RunRecord>
   pendingLaunches: Map<string, PendingLaunch>
   restartingAppIds: Set<string>
+  faviconUrl?: string
 }>()
 
 const emit = defineEmits<{
@@ -44,6 +45,7 @@ const emit = defineEmits<{
   openLog: [app: AppItem]
   stop: [appId: string]
   restart: [app: AppItem]
+  'favicon-error': [app: AppItem]
 }>()
 
 const pendingLaunch = computed(() => props.pendingLaunches.get(editForm.value.id) || null)
@@ -74,16 +76,13 @@ function emitLaunch(delaySeconds?: number) {
       <div class="rounded-lg bg-card" style="box-shadow: var(--shadow-card)">
         <div class="px-5 py-4 shadow-[inset_0_-1px_0_0_var(--border)]">
           <div class="flex min-h-[64px] items-start gap-4">
-            <div
-              v-if="!props.isNew && editForm.name"
-              class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-lg font-semibold shadow-[inset_0_0_0_1px_rgba(0,0,0,0.04)]"
-              :class="iconGradient(editForm.name)"
-            >
-              {{ editForm.name.charAt(0).toUpperCase() }}
-            </div>
-            <div v-else class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-secondary text-muted-foreground shadow-[var(--shadow-border)]">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-            </div>
+            <AppIcon
+              :app="editForm"
+              :favicon-url="props.faviconUrl || ''"
+              :is-new="props.isNew"
+              size="lg"
+              @favicon-error="emit('favicon-error', editForm)"
+            />
             <div class="min-w-0 flex-1">
               <h2 class="truncate text-base font-semibold tracking-[-0.32px]">
                 {{ props.isNew ? '添加应用' : editForm.name || '未命名' }}

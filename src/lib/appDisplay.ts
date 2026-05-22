@@ -4,18 +4,6 @@ export interface LatestRunStatus {
   status: 'running' | 'success' | 'failed' | 'killed' | 'lost'
 }
 
-const ICON_COLORS = [
-  'bg-[#f5f5f5] text-[#171717]',
-  'bg-[#e8e8e8] text-[#171717]',
-  'bg-[#f0f0f0] text-[#171717]',
-]
-
-export function iconGradient(name: string) {
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
-  return ICON_COLORS[Math.abs(hash) % ICON_COLORS.length]
-}
-
 export function itemTypeLabel(type: AppType) {
   if (type === 'task') return '任务'
   if (type === 'service') return '服务'
