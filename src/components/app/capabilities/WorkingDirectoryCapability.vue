@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { FolderOpen } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { ClearableInput } from '@/components/ui/clearable-input'
 import type { AppItem } from '@/lib/store'
@@ -32,9 +33,7 @@ const emit = defineEmits<{
         aria-label="选择工作目录"
         @click="emit('chooseWorkingDirectory')"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
-        </svg>
+        <FolderOpen :size="13" :stroke-width="2.25" aria-hidden="true" />
       </Button>
     </div>
   </div>

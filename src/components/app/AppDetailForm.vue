@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { Copy, FileText, Monitor, RefreshCcw, Square } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import AppCapabilityStack from '@/components/app/capabilities/AppCapabilityStack.vue'
 import AppIcon from '@/components/app/AppIcon.vue'
@@ -76,11 +77,11 @@ function emitLaunch(delaySeconds?: number) {
                 </span>
                 <span v-if="runState.pid != null" class="font-mono text-[11px] text-muted-foreground">PID {{ runState.pid }}</span>
                 <Button v-if="editForm.type === 'web' && isRunning" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" @click="launcherStore.showAppWindow(editForm.id)">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+                  <Monitor :size="10" :stroke-width="2.5" aria-hidden="true" />
                   窗口
                 </Button>
                 <Button v-if="hasLogSource" type="button" variant="secondary" class="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground" @click="sessionStore.openExistingLogDialog(editForm)">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+                  <FileText :size="10" :stroke-width="2.5" aria-hidden="true" />
                   日志
                 </Button>
               </div>
@@ -99,11 +100,11 @@ function emitLaunch(delaySeconds?: number) {
                 @launch="emitLaunch"
               />
               <Button v-if="isRunning" type="button" variant="destructive" class="h-9 gap-2 px-4 text-sm" :disabled="isRestarting" @click="launcherStore.stopApp(editForm.id)">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"/></svg>
+                <Square :size="14" :stroke-width="2.25" aria-hidden="true" />
                 停止
               </Button>
               <Button v-if="isRestartable" type="button" variant="secondary" class="h-9 gap-2 px-4 text-sm text-muted-foreground hover:text-foreground" :disabled="isRestarting" @click="launcherStore.restartApp(editForm)">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+                <RefreshCcw :size="14" :stroke-width="2.25" aria-hidden="true" />
                 {{ isRestarting ? '重启中' : '重启' }}
               </Button>
             </div>
@@ -145,10 +146,7 @@ function emitLaunch(delaySeconds?: number) {
             size="sm"
             @click="sessionStore.duplicateSelectedApp"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="9" y="9" width="11" height="11" rx="2" />
-              <path d="M5 15V7a2 2 0 0 1 2-2h8" />
-            </svg>
+            <Copy :size="14" :stroke-width="2" aria-hidden="true" />
             复制
           </Button>
           <div class="flex-1" />

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, useTemplateRef } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { ExternalLink, RefreshCcw } from '@lucide/vue'
 
 const params = new URLSearchParams(window.location.search)
 const targetUrl = params.get('url') || ''
@@ -93,14 +94,14 @@ async function openInBrowser() {
               title="刷新页面"
               @click="reload"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+              <RefreshCcw :size="13" :stroke-width="2" aria-hidden="true" />
             </button>
             <button
               class="h-6 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
               title="在浏览器中打开"
               @click="openInBrowser"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              <ExternalLink :size="13" :stroke-width="2" aria-hidden="true" />
             </button>
           </div>
         </div>

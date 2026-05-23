@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Check, CircleX, Info, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { useMessageStore } from '@/stores/message'
 
@@ -23,52 +24,9 @@ const messageStore = useMessageStore()
           class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md"
           :class="item.type === 'error' ? 'bg-destructive/10 text-destructive' : item.type === 'success' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'"
         >
-          <svg
-            v-if="item.type === 'success'"
-            xmlns="http://www.w3.org/2000/svg"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M20 6 9 17l-5-5" />
-          </svg>
-          <svg
-            v-else-if="item.type === 'error'"
-            xmlns="http://www.w3.org/2000/svg"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <path d="m15 9-6 6" />
-            <path d="m9 9 6 6" />
-          </svg>
-          <svg
-            v-else
-            xmlns="http://www.w3.org/2000/svg"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 16v-4" />
-            <path d="M12 8h.01" />
-          </svg>
+          <Check v-if="item.type === 'success'" :size="13" :stroke-width="2.5" aria-hidden="true" />
+          <CircleX v-else-if="item.type === 'error'" :size="13" :stroke-width="2.5" aria-hidden="true" />
+          <Info v-else :size="13" :stroke-width="2.5" aria-hidden="true" />
         </div>
         <p class="min-w-0 flex-1 break-words text-sm leading-5 text-foreground">
           {{ item.text }}
@@ -82,10 +40,7 @@ const messageStore = useMessageStore()
           aria-label="关闭通知"
           @click="messageStore.dismissMessage(item.id)"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M18 6 6 18" />
-            <path d="m6 6 12 12" />
-          </svg>
+          <X :size="13" :stroke-width="2.25" aria-hidden="true" />
         </Button>
       </div>
     </TransitionGroup>

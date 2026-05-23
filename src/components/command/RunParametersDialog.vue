@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { Trash2 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { ClearableInput } from '@/components/ui/clearable-input'
 import { DialogFrame } from '@/components/ui/dialog-frame'
@@ -300,13 +301,7 @@ function launchDraft(delaySeconds?: number) {
               aria-label="删除当前方案"
               @click="deleteSelectedProfile"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 6h18" />
-                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                <path d="M19 6 18 20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                <path d="M10 11v6" />
-                <path d="M14 11v6" />
-              </svg>
+              <Trash2 :size="13" :stroke-width="2.25" aria-hidden="true" />
             </Button>
           </div>
           <div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
