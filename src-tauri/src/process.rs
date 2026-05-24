@@ -90,6 +90,8 @@ pub struct RunRecord {
     pub exit_code: Option<i32>,
     pub started_at: u64,
     pub finished_at: Option<u64>,
+    #[serde(default)]
+    pub command: String,
     pub log_path: String,
     pub trigger: RunTrigger,
 }
@@ -995,6 +997,7 @@ mod tests {
             exit_code: None,
             started_at,
             finished_at: Some(started_at + 1),
+            command: "echo test".to_string(),
             log_path: format!("/tmp/{id}.log"),
             trigger: RunTrigger::Manual,
         }

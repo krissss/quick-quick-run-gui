@@ -61,6 +61,7 @@ describe('logs store', () => {
           exit_code: null,
           started_at: 1767506400000,
           finished_at: null,
+          command: 'pnpm dev',
           log_path: '/tmp/run-1.log',
           trigger: 'manual',
         },
@@ -122,6 +123,7 @@ describe('logs store', () => {
           exit_code: 1,
           started_at: 2000,
           finished_at: 3000,
+          command: 'pnpm job --new',
           log_path: '/tmp/run-new.log',
           trigger: 'schedule',
         },
@@ -135,6 +137,7 @@ describe('logs store', () => {
           exit_code: 0,
           started_at: 1000,
           finished_at: 1100,
+          command: 'pnpm job --old',
           log_path: '/tmp/run-old.log',
           trigger: 'manual',
         },
@@ -146,15 +149,16 @@ describe('logs store', () => {
     })
     const { api, logLines, selectedLogRunId, wrapper } = mountLogs()
 
-    await api.openLogDialog({ ...app, type: 'task' }, true)
+    await api.openLogDialog({ ...app, type: 'task' }, true, 'run-old')
     await flushPromises()
-    expect(logLines.value).toEqual(['new failed'])
-
-    await api.selectLogRun('run-old')
-    await flushPromises()
-
-    expect(selectedLogRunId.value).toBe('run-old')
     expect(logLines.value).toEqual(['old success'])
+    expect(selectedLogRunId.value).toBe('run-old')
+
+    await api.selectLogRun('run-new')
+    await flushPromises()
+
+    expect(selectedLogRunId.value).toBe('run-new')
+    expect(logLines.value).toEqual(['new failed'])
     wrapper.unmount()
   })
 
@@ -171,6 +175,7 @@ describe('logs store', () => {
           exit_code: 1,
           started_at: 2000,
           finished_at: 3000,
+          command: 'pnpm job --new',
           log_path: '/tmp/run-new.log',
           trigger: 'schedule',
         },
@@ -184,6 +189,7 @@ describe('logs store', () => {
           exit_code: null,
           started_at: 3000,
           finished_at: null,
+          command: 'pnpm job --running',
           log_path: '/tmp/run-running.log',
           trigger: 'manual',
         },

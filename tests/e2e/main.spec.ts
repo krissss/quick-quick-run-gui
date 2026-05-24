@@ -23,6 +23,8 @@ async function installTauriMock(page: Page, state: Record<string, unknown>) {
       recentRuns: initialState.recentRuns ?? [],
       autostartEnabled: false,
       favicons: { ...((initialState.favicons as Record<string, string | null>) ?? {}) },
+      logs: { ...((initialState.logs as Record<string, string[]>) ?? {}) },
+      runLogs: { ...((initialState.runLogs as Record<string, string[]>) ?? {}) },
     }
     const listeners = new Map<string, number[]>()
     const callbacks = new Map<number, (payload: unknown) => void>()
@@ -113,7 +115,10 @@ async function installTauriMock(page: Page, state: Record<string, unknown>) {
             const appId = String(payload.appId)
             return clone((testState.recentRuns as Array<{ app_id: string }>).filter(run => run.app_id === appId))
           }
-          if (cmd === 'get_app_logs') return []
+          if (cmd === 'get_app_logs') {
+            if (payload.runId != null) return clone(testState.runLogs[String(payload.runId)] ?? [])
+            return clone(testState.logs[String(payload.appId)] ?? [])
+          }
           if (cmd === 'clear_app_logs') return { removed: 0 }
           if (cmd === 'prune_log_records') return { removed: 0 }
           if (cmd === 'get_web_favicon') return testState.favicons[String(payload.url)] ?? null
@@ -148,18 +153,19 @@ test('restores a running web app and can reopen its window', async ({ page }) =>
   })
 
   await page.goto('/')
-  await expect(page.getByRole('button', { name: /demo-web/ })).toBeVisible()
-  await expect(page.locator('[data-testid="app-detail-panel"]').getByText('运行中')).toBeVisible()
+  await expect(page.locator('[data-app-id="demo-web-id"]')).toBeVisible()
+  await expect(page.locator('[data-testid="running-app-card"]').getByText('运行中')).toBeVisible()
+  await expect(page.locator('[data-testid="running-app-card"]').getByText('pnpm dev')).toBeVisible()
 
-  await page.getByRole('button', { name: /demo-web/ }).click()
-  await page.getByRole('button', { name: '窗口' }).click()
+  await page.locator('[data-app-id="demo-web-id"]').click()
+  await page.locator('[data-app-id="demo-web-id"]').getByRole('button', { name: '打开窗口：demo-web' }).click()
 
   await expect.poll(async () => page.evaluate(() => {
     return window.__qqrTest.calls.filter((call) => call.cmd === 'show_app_window').length
   })).toBe(1)
 })
 
-test('renders the same web favicon in the sidebar and detail header', async ({ page }) => {
+test('renders the web favicon in the sidebar while the edit dialog stays text-only', async ({ page }) => {
   await installTauriMock(page, {
     storeData: {
       apps: [
@@ -181,17 +187,101 @@ test('renders the same web favicon in the sidebar and detail header', async ({ p
   })
 
   await page.goto('/')
+  await page.getByRole('button', { name: '编辑：demo-web', exact: true }).click()
   const favicons = page.locator('img[alt="demo-web favicon"]')
+  const editDialog = page.getByRole('dialog', { name: 'demo-web' })
 
-  await expect(favicons).toHaveCount(2)
-  await expect(favicons.nth(0)).toHaveAttribute('src', demoFavicon)
-  await expect(favicons.nth(1)).toHaveAttribute('src', demoFavicon)
+  await expect(editDialog).toBeVisible()
+  await expect(favicons).toHaveCount(1)
+  await expect(favicons).toHaveAttribute('src', demoFavicon)
+  await expect(editDialog.locator('img[alt="demo-web favicon"]')).toHaveCount(0)
+})
+
+test('keeps the log dialog usable in a compact window', async ({ page }) => {
+  const longLogLine = `compact-log-marker ${'0123456789'.repeat(40)}`
+  const recentRuns = Array.from({ length: 8 }, (_, index) => ({
+    id: `run-${index + 1}`,
+    app_id: 'task-log-id',
+    app_name: 'task-log',
+    item_type: 'task',
+    status: index === 0 ? 'success' : 'failed',
+    pid: null,
+    exit_code: index === 0 ? 0 : 1,
+    started_at: Date.UTC(2026, 4, 4, 6, 30 - index, 0),
+    finished_at: Date.UTC(2026, 4, 4, 6, 30 - index, 2),
+    command: `pnpm run compact-log --run ${index + 1}`,
+    log_path: `/tmp/run-${index + 1}.log`,
+    trigger: 'manual',
+  }))
+
+  await page.setViewportSize({ width: 704, height: 420 })
+  await installTauriMock(page, {
+    storeData: {
+      apps: [
+        {
+          id: 'task-log-id',
+          name: 'task-log',
+          type: 'task',
+          command: 'pnpm run compact-log',
+          url: '',
+          width: 1200,
+          height: 800,
+          schedule: defaultSchedule,
+        },
+      ],
+    },
+    recentRuns,
+    runLogs: {
+      'run-1': [longLogLine, 'done'],
+    },
+  })
+
+  await page.goto('/')
+  await page.locator('[data-app-id="task-log-id"]').getByRole('button', { name: '查看日志：task-log' }).click()
+
+  const dialog = page.getByRole('dialog', { name: 'task-log — 日志' })
+  const runList = page.locator('[data-testid="log-run-list"]')
+  const logLines = page.locator('[data-testid="log-lines"]')
+
+  await expect(dialog).toBeVisible()
+  await expect(runList.getByText('最近运行')).toBeVisible()
+  await expect(logLines).toContainText('compact-log-marker')
+
+  const metrics = await page.evaluate(() => {
+    const dialogEl = document.querySelector('section[role="dialog"]')
+    const runListEl = document.querySelector('[data-testid="log-run-list"]')
+    const logLinesEl = document.querySelector('[data-testid="log-lines"]')
+    if (!dialogEl || !runListEl || !logLinesEl) throw new Error('Log dialog elements not found')
+    const dialogRect = dialogEl.getBoundingClientRect()
+    const runListRect = runListEl.getBoundingClientRect()
+    const logLinesRect = logLinesEl.getBoundingClientRect()
+    return {
+      viewportHeight: window.innerHeight,
+      dialogTop: dialogRect.top,
+      dialogBottom: dialogRect.bottom,
+      runListTop: runListRect.top,
+      runListBottom: runListRect.bottom,
+      logLinesTop: logLinesRect.top,
+      logLinesBottom: logLinesRect.bottom,
+      logClientWidth: logLinesEl.clientWidth,
+      logScrollWidth: logLinesEl.scrollWidth,
+    }
+  })
+
+  expect(metrics.dialogTop).toBeGreaterThanOrEqual(0)
+  expect(metrics.dialogBottom).toBeLessThanOrEqual(metrics.viewportHeight)
+  expect(metrics.runListTop).toBeGreaterThanOrEqual(metrics.dialogTop)
+  expect(metrics.runListBottom).toBeLessThanOrEqual(metrics.dialogBottom)
+  expect(metrics.logLinesTop).toBeGreaterThanOrEqual(metrics.runListBottom)
+  expect(metrics.logLinesBottom).toBeLessThanOrEqual(metrics.dialogBottom)
+  expect(metrics.logScrollWidth).toBeGreaterThan(metrics.logClientWidth)
 })
 
 test('shows a validation error for invalid custom task cron', async ({ page }) => {
   await installTauriMock(page, { storeData: {} })
 
   await page.goto('/')
+  await page.getByRole('button', { name: '添加应用' }).click()
   await page.getByText('任务', { exact: true }).click()
   await page.getByPlaceholder('pnpm report').fill('pnpm report')
   await page.getByRole('switch', { name: '定时执行' }).click()

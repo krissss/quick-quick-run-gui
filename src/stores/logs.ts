@@ -106,7 +106,7 @@ export const useLogsStore = defineStore('logs', () => {
     } catch { /* ignore */ }
   }, 300, { immediate: false })
 
-  async function openLogDialog(app: AppItem, windowAlreadyOpen = false) {
+  async function openLogDialog(app: AppItem, windowAlreadyOpen = false, runId?: string) {
     cleanupLogSubscriptions()
     logAppId.value = app.id
     logAppName.value = app.name
@@ -115,7 +115,7 @@ export const useLogsStore = defineStore('logs', () => {
     logWindowOpened.value = windowAlreadyOpen || app.type !== 'web'
     logLines.value = []
     logRuns.value = []
-    selectedLogRunId.value = null
+    selectedLogRunId.value = runId ?? null
 
     await loadLogRuns()
     await loadLogLines()

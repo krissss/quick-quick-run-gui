@@ -15,6 +15,7 @@ export const useAppSessionStore = defineStore('appSession', () => {
 
   const runDialogApp = ref<AppItem | null>(null)
   const runDialogLaunchOptions = ref<LaunchOptions>({})
+  const editDialogOpen = ref(false)
   const showPortManagerDialog = ref(false)
   const pendingUnsavedAction = ref<(() => void | Promise<void>) | null>(null)
   const unsavedActionRunning = ref(false)
@@ -28,6 +29,20 @@ export const useAppSessionStore = defineStore('appSession', () => {
   function closeRunDialog() {
     runDialogApp.value = null
     runDialogLaunchOptions.value = {}
+  }
+
+  function openEditDialog() {
+    editDialogOpen.value = true
+  }
+
+  function closeEditDialog() {
+    editDialogOpen.value = false
+  }
+
+  async function requestCloseEditDialog() {
+    await guardUnsavedChanges(() => {
+      closeEditDialog()
+    })
   }
 
   function openPortManagerDialog() {
@@ -76,7 +91,38 @@ export const useAppSessionStore = defineStore('appSession', () => {
   }
 
   async function openAddForm() {
-    await guardUnsavedChanges(appsStore.openAddForm)
+    await guardUnsavedChanges(async () => {
+      appsStore.openAddForm()
+      openEditDialog()
+    })
+  }
+
+  async function openEditor(app: AppItem) {
+    await guardUnsavedChanges(async () => {
+      await appsStore.selectApp(app)
+      openEditDialog()
+    })
+  }
+
+  async function duplicateApp(app: AppItem) {
+    await guardUnsavedChanges(async () => {
+      appsStore.duplicateApp(app)
+      openEditDialog()
+    })
+  }
+
+  async function deleteApp(app: AppItem) {
+    await guardUnsavedChanges(async () => {
+      await appsStore.selectApp(app)
+      await appsStore.deleteApp()
+      closeEditDialog()
+    })
+  }
+
+  async function saveAndCloseEditDialog() {
+    const saved = await appsStore.saveApp()
+    if (saved) closeEditDialog()
+    return saved
   }
 
   async function requestLaunch(app: AppItem, options: LaunchOptions = {}) {
@@ -117,18 +163,22 @@ export const useAppSessionStore = defineStore('appSession', () => {
     if (app) await requestLaunch(app)
   }
 
-  async function openExistingLogDialog(app: AppItem) {
-    await logsStore.openLogDialog(app, true)
+  async function openExistingLogDialog(app: AppItem, runId?: string) {
+    await logsStore.openLogDialog(app, true, runId)
   }
 
   return {
     runDialogApp,
     runDialogLaunchOptions,
+    editDialogOpen,
     showPortManagerDialog,
     pendingUnsavedAction,
     hasPendingUnsavedAction,
     unsavedActionRunning,
     closeRunDialog,
+    openEditDialog,
+    closeEditDialog,
+    requestCloseEditDialog,
     openPortManagerDialog,
     closePortManagerDialog,
     clearPendingUnsavedAction,
@@ -137,6 +187,10 @@ export const useAppSessionStore = defineStore('appSession', () => {
     discardAndContinue,
     selectApp,
     openAddForm,
+    openEditor,
+    duplicateApp,
+    deleteApp,
+    saveAndCloseEditDialog,
     requestLaunch,
     duplicateSelectedApp,
     chooseWorkingDirectory,

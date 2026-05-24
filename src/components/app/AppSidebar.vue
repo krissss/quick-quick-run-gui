@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Grid2x2, InspectionPanel, Clock, Globe, List, Plus, Search, Settings, X } from '@lucide/vue'
+import { Clock, Edit3, FileText, Grid2x2, Globe, InspectionPanel, List, Monitor, Plus, RefreshCcw, Search, Settings, Square, X, Zap } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import AppIcon from '@/components/app/AppIcon.vue'
+import LaunchActionGroup from '@/components/app/LaunchActionGroup.vue'
 import {
   InputGroup,
   InputGroupAddon,
@@ -12,7 +13,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { itemTypeLabel, runStatusLabel } from '@/lib/appDisplay'
 import { formatRunAtTime } from '@/lib/delay'
-import type { AppItem, AppType } from '@/lib/store'
+import { parseCommandSignature, type AppItem, type AppProfile, type AppType } from '@/lib/store'
 import { useAppSessionStore } from '@/stores/appSession'
 import { useAppsStore } from '@/stores/apps'
 import { useLauncherStore } from '@/stores/launcher'
@@ -135,6 +136,81 @@ function handleAppClick(event: MouseEvent, app: AppItem) {
   void sessionStore.selectApp(app)
 }
 
+function handleAppKeydown(event: KeyboardEvent, app: AppItem) {
+  if (event.target !== event.currentTarget) return
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  void sessionStore.selectApp(app)
+}
+
+function handleAppDoubleClick(event: MouseEvent, app: AppItem) {
+  if (suppressClickAppId.value === app.id) return
+  event.preventDefault()
+  void sessionStore.openEditor(app)
+}
+
+function handleOpenEditor(app: AppItem) {
+  void sessionStore.openEditor(app)
+}
+
+function handleLaunch(app: AppItem, delaySeconds?: number) {
+  void sessionStore.requestLaunch(app, delaySeconds ? { delaySeconds } : {})
+}
+
+function handleLaunchActiveProfile(app: AppItem) {
+  void launcherStore.launchApp(app)
+}
+
+function handleStop(app: AppItem) {
+  void launcherStore.stopApp(app.id)
+}
+
+function handleRestart(app: AppItem) {
+  void launcherStore.restartApp(app)
+}
+
+function handleShowWindow(app: AppItem) {
+  void launcherStore.showAppWindow(app.id)
+}
+
+function handleOpenLog(app: AppItem) {
+  void sessionStore.openExistingLogDialog(app)
+}
+
+function isRunning(app: AppItem) {
+  return launcherStore.appRunState(app.id).isRunning
+}
+
+function isRestartable(app: AppItem) {
+  return isRunning(app) && (app.type === 'web' || app.type === 'service')
+}
+
+function isRestarting(app: AppItem) {
+  return launcherStore.appRunState(app.id).isRestarting
+}
+
+function hasLogSource(app: AppItem) {
+  return launcherStore.hasLogSource(app)
+}
+
+function activeProfile(app: AppItem): AppProfile | null {
+  return app.profiles.find(profile => profile.id === app.activeProfileId) || null
+}
+
+function hasActiveCommandProfile(app: AppItem) {
+  return parseCommandSignature(app.command).params.length > 0 && !!activeProfile(app)
+}
+
+function commandTemplateLabel(app: AppItem) {
+  if (parseCommandSignature(app.command).params.length === 0) return ''
+  return activeProfile(app)?.name?.trim() || '默认'
+}
+
+function activeProfileLaunchTitle(app: AppItem) {
+  const name = activeProfile(app)?.name?.trim() || '当前方案'
+  return `立即运行当前方案：${name}`
+}
+
 function sidebarSubtitle(app: AppItem) {
   const value = app.type === 'web'
     ? app.url || app.command || app.workingDirectory
@@ -174,8 +250,8 @@ function primaryStatusClass(app: AppItem) {
 </script>
 
 <template>
-  <div class="flex w-72 shrink-0 flex-col bg-background shadow-[inset_-1px_0_0_0_var(--border)]">
-    <div class="space-y-3 p-3 shadow-[inset_0_-1px_0_0_var(--border)]">
+  <div class="flex min-w-[24rem] flex-1 flex-col bg-background shadow-[inset_-1px_0_0_0_var(--border)]">
+    <div class="space-y-2.5 p-3 shadow-[inset_0_-1px_0_0_var(--border)]">
       <div class="flex items-start justify-between gap-3 px-1">
         <div class="min-w-0">
           <div class="truncate text-sm font-semibold tracking-[-0.28px]">QQRun</div>
@@ -197,49 +273,51 @@ function primaryStatusClass(app: AppItem) {
         </Button>
       </div>
 
-      <InputGroup class="group h-8">
-        <InputGroupAddon>
-          <Search class="h-3.5 w-3.5" aria-hidden="true" />
-        </InputGroupAddon>
-        <InputGroupInput
-          v-model="sidebarSearch"
-          class="h-8 px-2 text-xs"
-          placeholder="搜索名称、命令或 URL"
-          aria-label="搜索应用"
-        />
-        <InputGroupAddon v-if="sidebarSearch" align="inline-end">
-          <InputGroupButton
-            class="h-6 w-6 opacity-0 pointer-events-none transition-opacity duration-150 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
-            aria-label="清空搜索"
-            title="清空搜索"
-            @mousedown.prevent.stop
-            @click.prevent.stop="clearSidebarSearch"
-          >
-            <X class="h-3 w-3" aria-hidden="true" />
-          </InputGroupButton>
-        </InputGroupAddon>
-      </InputGroup>
+      <div class="flex items-center gap-2">
+        <InputGroup class="group h-8 flex-1 min-w-0">
+          <InputGroupAddon>
+            <Search class="h-3.5 w-3.5" aria-hidden="true" />
+          </InputGroupAddon>
+          <InputGroupInput
+            v-model="sidebarSearch"
+            class="h-8 px-2 text-xs"
+            placeholder="搜索名称、命令或 URL"
+            aria-label="搜索应用"
+          />
+          <InputGroupAddon v-if="sidebarSearch" align="inline-end">
+            <InputGroupButton
+              class="h-6 w-6 opacity-0 pointer-events-none transition-opacity duration-150 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+              aria-label="清空搜索"
+              title="清空搜索"
+              @mousedown.prevent.stop
+              @click.prevent.stop="clearSidebarSearch"
+            >
+              <X class="h-3 w-3" aria-hidden="true" />
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
 
-      <ToggleGroup
-        class="grid w-full grid-cols-4 gap-1"
-        :model-value="sidebarFilter"
-        type="single"
-        aria-label="筛选应用类型"
-        @update:model-value="updateSidebarFilter"
-      >
-        <ToggleGroupItem value="all" class="h-8 px-0" aria-label="显示全部" title="全部">
-          <Grid2x2 :size="13" :stroke-width="2" aria-hidden="true" />
-        </ToggleGroupItem>
-        <ToggleGroupItem value="web" class="h-8 px-0" aria-label="筛选网页" title="网页">
-          <Globe :size="13" :stroke-width="2" aria-hidden="true" />
-        </ToggleGroupItem>
-        <ToggleGroupItem value="service" class="h-8 px-0" aria-label="筛选服务" title="服务">
-          <List :size="13" :stroke-width="2" aria-hidden="true" />
-        </ToggleGroupItem>
-        <ToggleGroupItem value="task" class="h-8 px-0" aria-label="筛选任务" title="任务">
-          <Clock :size="13" :stroke-width="2" aria-hidden="true" />
-        </ToggleGroupItem>
-      </ToggleGroup>
+        <ToggleGroup
+          class="grid w-[8.5rem] shrink-0 grid-cols-4 gap-1"
+          :model-value="sidebarFilter"
+          type="single"
+          aria-label="筛选应用类型"
+          @update:model-value="updateSidebarFilter"
+        >
+          <ToggleGroupItem value="all" class="h-8 px-0" aria-label="显示全部" title="全部">
+            <Grid2x2 :size="13" :stroke-width="2" aria-hidden="true" />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="web" class="h-8 px-0" aria-label="筛选网页" title="网页">
+            <Globe :size="13" :stroke-width="2" aria-hidden="true" />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="service" class="h-8 px-0" aria-label="筛选服务" title="服务">
+            <List :size="13" :stroke-width="2" aria-hidden="true" />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="task" class="h-8 px-0" aria-label="筛选任务" title="任务">
+            <Clock :size="13" :stroke-width="2" aria-hidden="true" />
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </div>
 
     </div>
 
@@ -248,15 +326,16 @@ function primaryStatusClass(app: AppItem) {
         没有匹配的应用
       </div>
 
-      <div class="space-y-0.5 px-2">
+      <div class="space-y-1 px-2">
         <div
           v-for="app in filteredApps"
           :key="app.id"
+          class="relative"
         >
-          <Button
-            type="button"
-            variant="ghost"
-            class="relative h-auto w-full justify-start gap-2.5 px-2 py-2 text-left cursor-grab select-none touch-none active:cursor-grabbing"
+          <div
+            role="button"
+            tabindex="0"
+            class="relative flex h-auto w-full cursor-grab select-none justify-start gap-2 rounded-md px-2 py-2 text-left transition-all touch-none active:cursor-grabbing"
             :class="[
               appsStore.editForm.id === app.id && !appsStore.isNew ? 'bg-card text-foreground shadow-[var(--shadow-border)]' : 'text-foreground hover:bg-accent/50',
               draggedAppId === app.id ? 'opacity-50' : '',
@@ -269,6 +348,8 @@ function primaryStatusClass(app: AppItem) {
             @pointerup="handleAppPointerUp"
             @pointercancel="resetAppDrag"
             @click="handleAppClick($event, app)"
+            @dblclick="handleAppDoubleClick($event, app)"
+            @keydown="handleAppKeydown($event, app)"
           >
             <span
               v-if="appsStore.editForm.id === app.id && !appsStore.isNew"
@@ -282,8 +363,90 @@ function primaryStatusClass(app: AppItem) {
               @favicon-error="emit('favicon-error', app)"
             />
             <div class="min-w-0 flex-1">
-              <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                <div class="truncate text-sm">{{ app.name }}</div>
+              <div class="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                <div class="min-w-[8rem] flex-1 truncate text-sm font-medium">{{ app.name }}</div>
+                <div class="flex shrink-0 flex-wrap items-center justify-end gap-1" @dblclick.stop>
+                  <span class="inline-flex items-center gap-0.5 rounded bg-secondary/70 p-0.5 shadow-[var(--shadow-border)]">
+                    <button
+                      v-if="isRunning(app)"
+                      type="button"
+                      class="inline-flex h-5 w-5 items-center justify-center rounded text-destructive hover:bg-destructive/10"
+                      :aria-label="`停止：${app.name}`"
+                      title="停止"
+                      @pointerdown.stop
+                      @click.stop="handleStop(app)"
+                    >
+                      <Square class="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                    <LaunchActionGroup
+                      v-else
+                      :label="`${app.type === 'task' ? '运行' : '启动'}：${app.name}`"
+                      size="row"
+                      @pointerdown.stop
+                      @click.stop
+                      @launch="(delaySeconds) => handleLaunch(app, delaySeconds)"
+                    />
+                    <button
+                      v-if="!isRunning(app) && hasActiveCommandProfile(app)"
+                      type="button"
+                      class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                      :aria-label="`立即运行当前方案：${app.name}`"
+                      :title="activeProfileLaunchTitle(app)"
+                      @pointerdown.stop
+                      @click.stop="handleLaunchActiveProfile(app)"
+                    >
+                      <Zap class="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                    <button
+                      v-if="isRestartable(app)"
+                      type="button"
+                      class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                      :disabled="isRestarting(app)"
+                      :aria-label="`重启：${app.name}`"
+                      title="重启"
+                      @pointerdown.stop
+                      @click.stop="handleRestart(app)"
+                    >
+                      <RefreshCcw class="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                    <button
+                      v-if="app.type === 'web' && isRunning(app)"
+                      type="button"
+                      class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                      :aria-label="`打开窗口：${app.name}`"
+                      title="打开窗口"
+                      @pointerdown.stop
+                      @click.stop="handleShowWindow(app)"
+                    >
+                      <Monitor class="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                    <button
+                      v-if="hasLogSource(app)"
+                      type="button"
+                      class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                      :aria-label="`查看日志：${app.name}`"
+                      title="查看日志"
+                      @pointerdown.stop
+                      @click.stop="handleOpenLog(app)"
+                    >
+                      <FileText class="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </span>
+                  <span class="inline-flex items-center gap-0.5 rounded bg-secondary/70 p-0.5 shadow-[var(--shadow-border)]">
+                    <button
+                      type="button"
+                      class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                      :aria-label="`编辑：${app.name}`"
+                      title="编辑"
+                      @pointerdown.stop
+                      @click.stop="handleOpenEditor(app)"
+                    >
+                      <Edit3 class="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </span>
+                </div>
+              </div>
+              <div class="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5">
                 <span
                   v-if="primaryStatusLabel(app)"
                   class="rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none"
@@ -291,12 +454,21 @@ function primaryStatusClass(app: AppItem) {
                 >
                   {{ primaryStatusLabel(app) }}
                 </span>
+                <span class="truncate text-[10px] text-muted-foreground">{{ itemTypeLabel(app.type) }}</span>
+                <span
+                  v-if="commandTemplateLabel(app)"
+                  class="inline-flex max-w-[9rem] items-center rounded bg-secondary/70 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground shadow-[var(--shadow-border)]"
+                  :title="`当前方案：${commandTemplateLabel(app)}`"
+                >
+                  <span class="truncate">方案：{{ commandTemplateLabel(app) }}</span>
+                </span>
               </div>
               <div class="mt-0.5 truncate text-[10px] text-muted-foreground">
                 {{ sidebarSubtitle(app) || '未配置命令' }}
               </div>
             </div>
-          </Button>
+          </div>
+
         </div>
       </div>
     </div>

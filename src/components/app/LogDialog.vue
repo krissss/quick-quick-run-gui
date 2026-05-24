@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { DialogFrame } from '@/components/ui/dialog-frame'
+import LogConsole from '@/components/app/LogConsole.vue'
 import { useAppSessionStore } from '@/stores/appSession'
 import { useLauncherStore } from '@/stores/launcher'
 import { useLogsStore } from '@/stores/logs'
@@ -12,13 +13,11 @@ const logsStore = useLogsStore()
 const launcherStore = useLauncherStore()
 const sessionStore = useAppSessionStore()
 
-const logContainer = ref<HTMLElement | null>(null)
+const logConsoleRef = ref<InstanceType<typeof LogConsole> | null>(null)
 
 function scrollToBottom() {
   nextTick(() => {
-    if (logContainer.value) {
-      logContainer.value.scrollTop = logContainer.value.scrollHeight
-    }
+    logConsoleRef.value?.scrollToBottom()
   })
 }
 
@@ -56,6 +55,10 @@ function triggerLabel(trigger: RunRecord['trigger']) {
   if (trigger === 'startup-recover') return '恢复'
   return '手动'
 }
+
+function runCommandLabel(run: RunRecord) {
+  return run.command?.trim() || '未记录命令'
+}
 </script>
 
 <template>
@@ -63,8 +66,9 @@ function triggerLabel(trigger: RunRecord['trigger']) {
     :open="logsStore.showLogDialog"
     :title="`${logsStore.logAppName} — 日志`"
     close-label="关闭日志"
-    panel-class="max-w-5xl"
-    content-class="flex min-h-[420px] flex-col"
+    panel-class="h-[min(calc(100dvh-2rem),42rem)] max-h-[calc(100dvh-2rem)] max-w-5xl"
+    content-class="flex min-h-0 flex-1 flex-col overflow-hidden"
+    footer-class="shrink-0 flex-wrap"
     @close="logsStore.closeLogDialog"
   >
     <template #header-actions>
@@ -77,10 +81,14 @@ function triggerLabel(trigger: RunRecord['trigger']) {
       </span>
     </template>
 
-    <div class="grid min-h-0 flex-1 gap-3 md:grid-cols-[240px_minmax(0,1fr)]">
+    <div
+      data-testid="log-dialog-body"
+      class="flex min-h-0 flex-1 flex-col gap-3 md:grid md:grid-cols-[240px_minmax(0,1fr)] md:grid-rows-1"
+    >
       <div
         v-if="logsStore.logRuns.length > 0"
-        class="min-h-0 overflow-y-auto rounded-md bg-secondary/50 p-2"
+        data-testid="log-run-list"
+        class="max-h-36 min-h-0 shrink-0 overflow-y-auto rounded-md bg-secondary/50 p-2 md:max-h-none md:shrink"
         style="box-shadow: inset 0 0 0 1px var(--border)"
       >
         <div class="px-2 pb-2 text-xs font-medium text-muted-foreground">最近运行</div>
@@ -96,6 +104,9 @@ function triggerLabel(trigger: RunRecord['trigger']) {
             <span class="font-medium" :class="runStatusClass(run.status)">{{ runStatusLabel(run.status) }}</span>
             <span class="shrink-0 text-[11px] text-muted-foreground">{{ triggerLabel(run.trigger) }}</span>
           </div>
+          <div class="mt-1 truncate font-mono text-[11px] text-muted-foreground" :title="runCommandLabel(run)">
+            {{ runCommandLabel(run) }}
+          </div>
           <div class="mt-1 font-mono text-[11px] text-muted-foreground">{{ formatDateTime(run.started_at) }}</div>
           <div class="mt-0.5 text-[11px] text-muted-foreground">
             {{ formatDuration(run.started_at, run.finished_at) }}
@@ -103,15 +114,13 @@ function triggerLabel(trigger: RunRecord['trigger']) {
           </div>
         </button>
       </div>
-      <div
-        ref="logContainer"
-        class="min-h-[360px] overflow-y-auto bg-background rounded-md p-4 font-mono text-xs"
+      <LogConsole
+        ref="logConsoleRef"
+        data-testid="log-lines"
+        :lines="logsStore.logLines"
+        size="dialog"
         :class="logsStore.logRuns.length > 0 ? 'min-h-0' : 'col-span-full'"
-        style="box-shadow: inset 0 0 0 1px var(--border)"
-      >
-        <div v-for="(line, i) in logsStore.logLines" :key="i" class="whitespace-pre-wrap break-all text-foreground/80 hover:text-foreground">{{ line }}</div>
-        <div v-if="logsStore.logLines.length === 0" class="text-muted-foreground text-center py-10">暂无日志</div>
-      </div>
+      />
     </div>
 
     <template #footer>

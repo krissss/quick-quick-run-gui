@@ -13,10 +13,24 @@ async function mountApp(options: Parameters<typeof setupTauriMocks>[0] = {}) {
   return { mock, wrapper }
 }
 
-function detailPanel(wrapper: ReturnType<typeof mount>) {
-  const panel = wrapper.find('[data-testid="app-detail-panel"]')
-  if (!panel.exists()) throw new Error('Detail panel not found')
+function runningCard(wrapper: ReturnType<typeof mount>) {
+  const panel = wrapper.find('[data-testid="running-app-card"]')
+  if (!panel.exists()) throw new Error('Running app card not found')
   return panel
+}
+
+function appRow(wrapper: ReturnType<typeof mount>, appId: string) {
+  const row = wrapper.find(`[data-app-id="${appId}"]`)
+  if (!row.exists()) throw new Error(`App row not found: ${appId}`)
+  return row
+}
+
+function bodySwitch(name: string) {
+  const switchElement = Array.from(document.querySelectorAll('[role="switch"]')).find((item) => {
+    return item.getAttribute('aria-label') === name
+  })
+  if (!switchElement) throw new Error(`Switch not found: ${name}`)
+  return new DOMWrapper(switchElement as HTMLElement)
 }
 
 describe('App', () => {
@@ -27,22 +41,67 @@ describe('App', () => {
 
   it('wires restored apps to launcher, log dialog, and running controls', async () => {
     const runningApps = [{ app_id: 'web-1', pid: 4321, item_type: 'web' as const }]
+    const taskOlderRun = {
+      ...taskSuccessRun,
+      id: 'run-task-older',
+      started_at: 1,
+      finished_at: 2,
+      command: 'pnpm daily --date yesterday',
+    }
+    const runningRun = {
+      ...taskSuccessRun,
+      id: 'running-run',
+      app_id: 'web-1',
+      app_name: 'demo-web',
+      item_type: 'web' as const,
+      status: 'running' as const,
+      pid: 4321,
+      exit_code: null,
+      finished_at: null,
+      command: 'pnpm dev --restored',
+      log_path: '/tmp/running.log',
+    }
     const { mock, wrapper } = await mountApp({
       store: { apps: [webApp, serviceApp, taskApp] },
       logs: { 'web-1': ['ready'] },
+      runLogs: {
+        'run-task': ['today-history line'],
+        'run-task-older': ['old-history line'],
+      },
       runningApps,
-      recentRuns: [serviceFailedRun, taskSuccessRun],
+      recentRuns: [runningRun, serviceFailedRun, taskSuccessRun, taskOlderRun],
     })
 
-    await buttonContaining(wrapper, 'demo-web').trigger('click')
-    expect(detailPanel(wrapper).text()).toContain('PID 4321')
+    await appRow(wrapper, 'web-1').trigger('click')
+    expect(runningCard(wrapper).text()).toContain('PID 4321')
+    expect(runningCard(wrapper).text()).toContain('pnpm dev --restored')
+    const recentRuns = wrapper.get('[data-testid="recent-runs"]')
+    expect(recentRuns.text()).toContain('最近执行')
+    expect(recentRuns.text()).not.toContain('demo-web')
+    expect(recentRuns.text()).toContain('daily')
+    expect(recentRuns.text()).toContain('成功')
+    expect(recentRuns.text()).toContain('pnpm daily --date today')
+    expect(recentRuns.text()).toContain('pnpm daily --date yesterday')
 
-    await buttonContaining(wrapper, '窗口').trigger('click')
-    await buttonContaining(wrapper, '停止').trigger('click')
+    await buttonContaining(wrapper, 'pnpm daily --date yesterday').trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('old-history line')
+    expect(document.body.textContent).not.toContain('today-history line')
+
+    await wrapper.get('button[aria-label="执行同命令：daily"]').trigger('click')
+    await flushPromises()
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      appId: 'task-1',
+      command: 'pnpm daily --date today',
+      launchTrigger: 'manual',
+    })
+
+    await wrapper.get('button[aria-label="打开窗口：demo-web"]').trigger('click')
+    await wrapper.get('button[aria-label="停止：demo-web"]').trigger('click')
     expect(mock.getCalls('show_app_window')).toHaveLength(1)
     expect(mock.getCalls('stop_app')).toHaveLength(1)
 
-    await buttonContaining(wrapper, '日志').trigger('click')
+    await wrapper.get('button[aria-label="查看日志：demo-web"]').trigger('click')
     await flushPromises()
     expect(document.body.textContent).toContain('demo-web — 日志')
     expect(document.body.textContent).toContain('ready')
@@ -53,7 +112,25 @@ describe('App', () => {
     await flushPromises()
     await buttonContaining(wrapper, '重新启动').trigger('click')
     await flushPromises()
-    expect(mock.getCalls('launch_app_window')).toHaveLength(1)
+    expect(mock.getCalls('launch_app_window')).toHaveLength(2)
+  })
+
+  it('resizes the runtime panel from the divider', async () => {
+    const { wrapper } = await mountApp({
+      store: { apps: [webApp] },
+    })
+    const panel = wrapper.get('[data-testid="runtime-panel"]')
+    const resizer = wrapper.get('[data-testid="runtime-panel-resizer"]')
+
+    expect(panel.attributes('style')).toContain('width: 400px')
+
+    await resizer.trigger('pointerdown', { button: 0, pointerId: 1, clientX: 400 })
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 360 }))
+    await flushPromises()
+
+    expect(panel.attributes('style')).toContain('width: 440px')
+
+    window.dispatchEvent(new PointerEvent('pointerup'))
   })
 
   it('duplicates the current app and persists the copied template', async () => {
@@ -61,7 +138,7 @@ describe('App', () => {
       store: { apps: [webApp] },
     })
 
-    await buttonContaining(wrapper, 'demo-web').trigger('click')
+    await wrapper.get('button[aria-label="编辑：demo-web"]').trigger('click')
     await buttonContaining(wrapper, '复制').trigger('click')
     await flushPromises()
 
@@ -76,6 +153,21 @@ describe('App', () => {
       { id: 'web-1', name: 'demo-web', order: 0 },
       { name: 'demo-web 副本', workingDirectory: '/Users/demo/demo-web', url: 'http://localhost:3000', order: 1 },
     ])
+  })
+
+  it('warns about unsaved changes when closing the edit dialog', async () => {
+    const { wrapper } = await mountApp({
+      store: { apps: [webApp] },
+    })
+
+    await wrapper.get('button[aria-label="编辑：demo-web"]').trigger('click')
+    await inputByPlaceholder(wrapper, 'npm run dev').setValue('pnpm dev --changed')
+    await document.querySelector<HTMLButtonElement>('button[aria-label="关闭编辑"]')?.click()
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('有未保存的更改')
+    expect(document.body.textContent).toContain('当前表单还没有保存')
+    expect(document.querySelector('[data-testid="app-detail-panel"]')).toBeTruthy()
   })
 
   it('launches startup-enabled apps after the configured delay', async () => {
@@ -110,7 +202,8 @@ describe('App', () => {
       runningApps: [],
     })
 
-    await wrapper.find('[role="switch"]').trigger('click')
+    await wrapper.get('button[aria-label="编辑：demo-web"]').trigger('click')
+    await bodySwitch('启动策略').trigger('click')
     await buttonContaining(wrapper, '保存', true).trigger('click')
     await flushPromises()
     await vi.advanceTimersByTimeAsync(1000)
@@ -125,12 +218,12 @@ describe('App', () => {
       store: { apps: [webApp] },
     })
 
-    await buttonContaining(wrapper, 'demo-web').trigger('click')
+    await wrapper.get('button[aria-label="编辑：demo-web"]').trigger('click')
     await inputByPlaceholder(wrapper, 'npm run dev').setValue('pnpm dev {account= : 账号} {--headless}')
     await buttonContaining(wrapper, '保存', true).trigger('click')
     await flushPromises()
 
-    await buttonContaining(wrapper, '启动', true).trigger('click')
+    await wrapper.get('button[aria-label="启动：demo-web"]').trigger('click')
     await flushPromises()
     await inputByPlaceholder(wrapper, '账号').setValue('demo')
     const headlessSwitch = Array.from(document.querySelectorAll('[role="switch"]')).at(-1)
@@ -169,10 +262,11 @@ describe('App', () => {
     })
     const { mock, wrapper } = await mountApp()
 
+    await wrapper.get('button[aria-label="添加应用"]').trigger('click')
     await buttonContaining(wrapper, '任务', true).trigger('click')
     await inputByPlaceholder(wrapper, 'pnpm report').setValue('pnpm report')
     await inputByPlaceholder(wrapper, '~/repo').setValue('/Users/demo/reports')
-    await wrapper.findAll('[role="switch"]')[1].trigger('click')
+    await bodySwitch('定时执行').trigger('click')
     await buttonContaining(wrapper, '自定义', true).trigger('click')
     await inputByPlaceholder(wrapper, '*/15 * * * *').setValue('bad')
     await buttonContaining(wrapper, '添加', true).trigger('click')
@@ -188,7 +282,10 @@ describe('App', () => {
       { id: 'new-task', name: 'pnpm report', type: 'task', workingDirectory: '/Users/demo/reports', schedule: { cron: '*/10 * * * *', missedPolicy: 'run-once' } },
     ])
 
+    await wrapper.get('button[aria-label="编辑：pnpm report"]').trigger('click')
     await buttonContaining(wrapper, '删除').trigger('click')
+    await flushPromises()
+    await buttonContaining(wrapper, '确认删除', true).trigger('click')
     await flushPromises()
     expect(mock.storeData.apps).toEqual([])
   })

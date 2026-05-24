@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from 'vitest'
 import AppSidebar from '@/components/app/AppSidebar.vue'
 import { useAppsStore } from '@/stores/apps'
 import { useAppCatalogStore } from '@/stores/apps/appCatalog'
+import { useAppSessionStore } from '@/stores/appSession'
 import { useLauncherStore } from '@/stores/launcher'
+import { useLogsStore } from '@/stores/logs'
+import type { AppItem } from '@/lib/store'
 import { serviceApp, serviceFailedRun, taskApp, webApp } from '../../../fixtures/apps'
 import { buttonContaining, inputByPlaceholder, visibleAppIds } from '../../../helpers/dom'
 
@@ -15,10 +18,11 @@ function mountSidebar(options: {
   latestRuns?: Map<string, typeof serviceFailedRun>
   pendingLaunches?: Map<string, never>
   faviconUrl?: (appId: string) => string
+  apps?: AppItem[]
 } = {}) {
   const appsStore = useAppsStore()
   const launcherStore = useLauncherStore()
-  appsStore.apps = [webApp, serviceApp, taskApp]
+  appsStore.apps = options.apps ?? [webApp, serviceApp, taskApp]
   appsStore.isNew = options.isNew ?? false
   if (options.selectedAppId) {
     const selectedApp = appsStore.apps.find(app => app.id === options.selectedAppId)
@@ -56,7 +60,7 @@ describe('AppSidebar', () => {
     expect(visibleAppIds()).toEqual(['web-1', 'service-1', 'task-1'])
     expect(wrapper.text()).toContain('运行中')
     expect(wrapper.text()).toContain('失败')
-    expect(appRow(wrapper, 'web-1').text()).not.toContain('网页')
+    expect(appRow(wrapper, 'web-1').text()).toContain('网页')
     expect(appRow(wrapper, 'web-1').text()).toContain('运行中')
     expect(appRow(wrapper, 'web-1').text()).toContain('localhost:3000')
     await flushPromises()
@@ -78,6 +82,86 @@ describe('AppSidebar', () => {
     const appsStore = useAppsStore()
     expect(appsStore.isNew).toBe(false)
     expect(appsStore.editForm.id).toBe('task-1')
+  })
+
+  it('keeps search and type filters on one toolbar row', () => {
+    const wrapper = mountSidebar()
+
+    expect(wrapper.get('input[aria-label="搜索应用"]').exists()).toBe(true)
+    expect(wrapper.get('button[aria-label="显示全部"]').exists()).toBe(true)
+    expect(wrapper.get('button[aria-label="筛选网页"]').exists()).toBe(true)
+    expect(wrapper.get('button[aria-label="筛选服务"]').exists()).toBe(true)
+    expect(wrapper.get('button[aria-label="筛选任务"]').exists()).toBe(true)
+  })
+
+  it('exposes grouped row actions and opens the editor on double click', async () => {
+    const wrapper = mountSidebar({
+      selectedAppId: 'web-1',
+      runningAppIds: new Set(['web-1']),
+    })
+    const launcherStore = useLauncherStore()
+    const logsStore = useLogsStore()
+    const sessionStore = useAppSessionStore()
+    const showAppWindow = vi.spyOn(launcherStore, 'showAppWindow').mockResolvedValue()
+    const stopApp = vi.spyOn(launcherStore, 'stopApp').mockResolvedValue()
+    const openLogDialog = vi.spyOn(logsStore, 'openLogDialog').mockResolvedValue()
+    const openEditor = vi.spyOn(sessionStore, 'openEditor').mockResolvedValue()
+    const selectApp = vi.spyOn(sessionStore, 'selectApp').mockResolvedValue()
+
+    expect(wrapper.find('button[aria-label="更多操作：demo-web"]').exists()).toBe(false)
+    await wrapper.get('button[aria-label="打开窗口：demo-web"]').trigger('click')
+    await wrapper.get('button[aria-label="打开窗口：demo-web"]').trigger('keydown', { key: 'Enter' })
+    await wrapper.get('button[aria-label="查看日志：demo-web"]').trigger('click')
+    await wrapper.get('button[aria-label="停止：demo-web"]').trigger('click')
+    expect(wrapper.find('button[aria-label="复制：demo-web"]').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="删除：demo-web"]').exists()).toBe(false)
+    await appRow(wrapper, 'web-1').trigger('dblclick')
+
+    expect(showAppWindow).toHaveBeenCalledWith('web-1')
+    expect(selectApp).not.toHaveBeenCalled()
+    expect(openLogDialog).toHaveBeenCalledWith(expect.objectContaining({ id: 'web-1' }), true, undefined)
+    expect(stopApp).toHaveBeenCalledWith('web-1')
+    expect(openEditor).toHaveBeenCalledWith(expect.objectContaining({ id: 'web-1' }))
+  })
+
+  it('keeps delayed launch available from each list row', async () => {
+    const wrapper = mountSidebar()
+    const sessionStore = useAppSessionStore()
+    const requestLaunch = vi.spyOn(sessionStore, 'requestLaunch').mockResolvedValue()
+
+    await wrapper.get('button[aria-label="延迟运行：daily"]').trigger('click')
+    await buttonContaining(wrapper, '1 分钟').trigger('click')
+
+    expect(requestLaunch).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-1' }), { delaySeconds: 60 })
+  })
+
+  it('runs the active profile directly for templated commands while keeping parameter launch available', async () => {
+    const templatedTask: AppItem = {
+      ...taskApp,
+      command: 'pnpm daily {account=demo : 账号} {--headless}',
+      activeProfileId: 'profile-1',
+      profiles: [
+        { id: 'profile-1', name: '账号 1', values: { account: 'alice', headless: 'true' } },
+      ],
+    }
+    const wrapper = mountSidebar({
+      apps: [webApp, serviceApp, templatedTask],
+    })
+    const sessionStore = useAppSessionStore()
+    const launcherStore = useLauncherStore()
+    const requestLaunch = vi.spyOn(sessionStore, 'requestLaunch').mockResolvedValue()
+    const launchApp = vi.spyOn(launcherStore, 'launchApp').mockResolvedValue()
+
+    await wrapper.get('button[aria-label="运行：daily"]').trigger('click')
+    expect(requestLaunch).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-1' }), {})
+    expect(launchApp).not.toHaveBeenCalled()
+    expect(appRow(wrapper, 'task-1').text()).toContain('方案：账号 1')
+
+    await wrapper.get('button[aria-label="立即运行当前方案：daily"]').trigger('click')
+    expect(launchApp).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'task-1',
+      activeProfileId: 'profile-1',
+    }))
   })
 
   it('emits reorder after dragging a list item', async () => {

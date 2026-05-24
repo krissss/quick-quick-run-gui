@@ -43,8 +43,8 @@ async function mountLauncher(options: Parameters<typeof setupTauriMocks>[0] = {}
 }
 
 describe('launcher store', () => {
-  it('loads latest run history sorted by newest run per app', async () => {
-    const { launcher, runningAppIds, runningPids, latestRuns } = await mountLauncher({
+  it('loads recent run history sorted while keeping the newest run per app', async () => {
+    const { launcher, runningAppIds, runningPids, latestRuns, recentRuns } = await mountLauncher({
       runningApps: [{ app_id: 'demo-web-id', pid: null, item_type: 'web' }],
       recentRuns: [
         {
@@ -57,6 +57,7 @@ describe('launcher store', () => {
           exit_code: 1,
           started_at: 100,
           finished_at: 110,
+          command: 'pnpm dev --old',
           log_path: '',
           trigger: 'manual',
         },
@@ -70,6 +71,7 @@ describe('launcher store', () => {
           exit_code: 0,
           started_at: 200,
           finished_at: 210,
+          command: 'pnpm dev --new',
           log_path: '',
           trigger: 'schedule',
         },
@@ -80,7 +82,33 @@ describe('launcher store', () => {
 
     expect(runningAppIds.value.has('demo-web-id')).toBe(true)
     expect(runningPids.value.size).toBe(0)
+    expect(recentRuns.value.map(run => run.id)).toEqual(['new', 'old'])
     expect(latestRuns.value.get('demo-web-id')?.id).toBe('new')
+  })
+
+  it('relaunches the exact command captured on a run record', async () => {
+    const { launcher, mock } = await mountLauncher()
+
+    await launcher.relaunchRunCommand({
+      id: 'run-history',
+      app_id: 'demo-web-id',
+      app_name: 'demo-web',
+      item_type: 'web',
+      status: 'success',
+      pid: null,
+      exit_code: 0,
+      started_at: 200,
+      finished_at: 210,
+      command: 'pnpm dev --history',
+      log_path: '',
+      trigger: 'manual',
+    })
+
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      appId: 'demo-web-id',
+      command: 'pnpm dev --history',
+      launchTrigger: 'manual',
+    })
   })
 
   it('finds apps from the apps store for tray events', async () => {

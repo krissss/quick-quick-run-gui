@@ -87,6 +87,7 @@ export const serviceFailedRun: RunRecord = {
   exit_code: 1,
   started_at: 2,
   finished_at: 3,
+  command: 'pnpm worker --once',
   log_path: '',
   trigger: 'manual',
 }
@@ -101,6 +102,7 @@ export const taskSuccessRun: RunRecord = {
   exit_code: 0,
   started_at: 4,
   finished_at: 5,
+  command: 'pnpm daily --date today',
   log_path: '',
   trigger: 'schedule',
 }

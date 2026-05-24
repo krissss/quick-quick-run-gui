@@ -75,6 +75,7 @@ describe('LogDialog', () => {
           exit_code: 0,
           started_at: Date.UTC(2026, 4, 4, 6, 30, 0),
           finished_at: Date.UTC(2026, 4, 4, 6, 30, 2),
+          command: 'pnpm daily --date today',
           log_path: '/tmp/run-1.log',
           trigger: 'schedule',
         },
@@ -86,7 +87,22 @@ describe('LogDialog', () => {
     expect(document.body.textContent).toContain('最近运行')
     expect(document.body.textContent).toContain('成功')
     expect(document.body.textContent).toContain('定时')
+    expect(document.body.textContent).toContain('pnpm daily --date today')
     expect(document.body.textContent).not.toContain('1746340200000')
+    const panel = document.querySelector('section[role="dialog"]')
+    const body = document.querySelector('[data-testid="log-dialog-body"]')
+    const runList = document.querySelector('[data-testid="log-run-list"]')
+    const logLines = document.querySelector('[data-testid="log-lines"]')
+    expect(panel?.className).toContain('h-[min(calc(100dvh-2rem),42rem)]')
+    expect(panel?.className).toContain('max-h-[calc(100dvh-2rem)]')
+    expect(body?.className).toContain('flex-col')
+    expect(body?.className).toContain('md:grid')
+    expect(runList?.className).toContain('max-h-36')
+    expect(runList?.className).toContain('overflow-y-auto')
+    expect(logLines?.className).toContain('min-h-0')
+    expect(logLines?.className).toContain('overflow-auto')
+    expect(logLines?.className).toContain('bg-[#1e1e2e]')
+    expect(logLines?.querySelector('.whitespace-pre')).toBeTruthy()
 
     await buttonContaining(wrapper, '成功').trigger('click')
     await buttonContaining(wrapper, '清理当前').trigger('click')

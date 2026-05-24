@@ -26,6 +26,7 @@ export interface RunRecord {
   exit_code: number | null
   started_at: number
   finished_at: number | null
+  command?: string
   log_path: string
   trigger: LaunchTrigger | 'schedule' | 'startup-recover'
 }
@@ -64,6 +65,7 @@ export const useLauncherStore = defineStore('launcher', () => {
   const runningAppIds = ref<Set<string>>(new Set())
   const runningPids = ref<Map<string, number>>(new Map())
   const latestRuns = ref<Map<string, RunRecord>>(new Map())
+  const recentRuns = ref<RunRecord[]>([])
   const pendingLaunches = ref<Map<string, PendingLaunch>>(new Map())
   const restartingAppIds = ref<Set<string>>(new Set())
   const automationAttempts = new Map<string, number>()
@@ -112,8 +114,9 @@ export const useLauncherStore = defineStore('launcher', () => {
           .map(info => [info.app_id, info.pid]),
       )
       const runs = await invoke<RunRecord[]>('get_recent_runs')
+      recentRuns.value = runs.slice().sort((a, b) => b.started_at - a.started_at)
       const latest = new Map<string, RunRecord>()
-      for (const run of runs.sort((a, b) => b.started_at - a.started_at)) {
+      for (const run of recentRuns.value) {
         if (!latest.has(run.app_id)) latest.set(run.app_id, run)
       }
       latestRuns.value = latest
@@ -242,6 +245,20 @@ export const useLauncherStore = defineStore('launcher', () => {
       message.showMessage(`启动失败: ${getErrorMessage(e)}`, 'error')
     }
     loading.value = false
+  }
+
+  async function relaunchRunCommand(run: RunRecord) {
+    const command = run.command?.trim() || ''
+    if (!command) {
+      message.showMessage('这条记录没有可执行命令', 'error')
+      return
+    }
+    const app = findApp(run.app_id)
+    if (!app) {
+      message.showMessage(`${run.app_name} 已不存在，无法执行`, 'error')
+      return
+    }
+    await launchApp({ ...app, command }, {})
   }
 
   function shouldRestart(app: AppItem, status: RunRecord['status']) {
@@ -399,6 +416,7 @@ export const useLauncherStore = defineStore('launcher', () => {
     runningAppIds,
     runningPids,
     latestRuns,
+    recentRuns,
     pendingLaunches,
     restartingAppIds,
     findApp,
@@ -407,6 +425,7 @@ export const useLauncherStore = defineStore('launcher', () => {
     hasLogSource,
     refreshRunningApps,
     launchApp,
+    relaunchRunCommand,
     cancelDelayedLaunch,
     stopApp,
     restartApp,
