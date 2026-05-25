@@ -150,7 +150,6 @@ pub fn kill_app_process(handle: &tauri::AppHandle, app_id: &str) {
 }
 
 /// 强制杀掉所有子进程
-#[cfg(target_os = "macos")]
 pub fn force_kill_all(handle: &tauri::AppHandle) {
     let (app_ids, infos): (HashSet<String>, Vec<ProcessInfo>) = {
         if let Some(state) = handle.try_state::<AppState>() {
