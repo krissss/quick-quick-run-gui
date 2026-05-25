@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-25
+
+### Added
+
+- ui: 支持文本输入清空操作
+- ui: 同步侧栏与详情的条目图标
+- ui: 优化任务列表运行体验
+
+### Fixed
+
+- tray: 修复 Windows 托盘图标不显示
+- 移除 force_kill_all 的 macOS 限制，支持 Windows 编译
+
 ## [0.3.0] - 2026-05-21
 
 ### Added
@@ -135,7 +148,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 为 macOS 专属代码添加条件编译守卫，修复跨平台构建
 
-[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/krissss/quick-quick-run-gui/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.6...v0.3.0
 [0.2.6]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.4...v0.2.5
