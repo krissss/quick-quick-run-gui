@@ -3,7 +3,7 @@ mod dock;
 mod html_title;
 mod port_tools;
 mod process;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 mod tray;
 mod url_check;
 
@@ -12,9 +12,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike};
 use chrono_tz::Tz;
-use tauri::{Emitter, Manager};
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+use tauri::Listener;
 #[cfg(target_os = "macos")]
-use tauri::{Listener, RunEvent};
+use tauri::RunEvent;
+use tauri::{Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
 use html_title::{extract_favicon_href, extract_html_title};
@@ -117,8 +119,8 @@ pub fn run() {
             restore_persisted_sessions(app.handle());
             start_scheduler(app.handle());
 
-            // 设置系统托盘（macOS 菜单栏图标）
-            #[cfg(target_os = "macos")]
+            // 设置系统托盘 / macOS 菜单栏图标
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             {
                 tray::setup_tray(app.handle());
 
@@ -662,9 +664,10 @@ fn show_app_window(app: tauri::AppHandle, app_id: String) -> Result<(), String> 
     show_or_create_app_window(&app, &app_id)
 }
 
-#[cfg(target_os = "macos")]
 pub(crate) fn show_main_window(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
     let _ = dock::show_dock_icon();
+
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.unminimize();
@@ -701,9 +704,13 @@ pub(crate) fn show_or_create_app_window(
 
 /// 前端通知应用列表已更新，重建托盘菜单
 #[tauri::command]
-fn notify_apps_updated(_app: tauri::AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    tray::rebuild_tray_menu(&_app);
+fn notify_apps_updated(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    tray::rebuild_tray_menu(&app);
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    let _ = app;
+
     Ok(())
 }
 

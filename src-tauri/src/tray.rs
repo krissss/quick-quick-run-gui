@@ -200,15 +200,19 @@ pub fn rebuild_tray_menu(app: &AppHandle) {
     let _ = tray.set_menu(Some(menu));
 }
 
-/// 加载菜单栏模板图标（黑色双箭头 » 轮廓）
-fn create_template_icon() -> Option<Image<'static>> {
+/// 加载托盘图标。
+fn create_tray_icon() -> Option<Image<'static>> {
+    #[cfg(target_os = "macos")]
     let bytes = include_bytes!("../icons/tray-icon.png");
+    #[cfg(not(target_os = "macos"))]
+    let bytes = include_bytes!("../icons/32x32.png");
+
     Image::from_bytes(bytes).ok()
 }
 
 /// 初始化系统托盘图标
 pub fn setup_tray(app: &AppHandle) {
-    let icon = match create_template_icon() {
+    let icon = match create_tray_icon() {
         Some(i) => i,
         None => {
             eprintln!("警告: 加载托盘图标失败，跳过托盘设置");
@@ -221,7 +225,7 @@ pub fn setup_tray(app: &AppHandle) {
     let _tray = TrayIconBuilder::with_id("main-tray")
         .tooltip("QQRun")
         .icon(icon)
-        .icon_as_template(true)
+        .icon_as_template(cfg!(target_os = "macos"))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
