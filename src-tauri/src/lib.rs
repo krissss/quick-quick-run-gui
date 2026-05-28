@@ -651,7 +651,7 @@ fn stop_app(app: tauri::AppHandle, app_id: String) -> Result<(), String> {
     let label = window_label_for(&app_id);
     if let Some(win) = app.get_webview_window(&label) {
         save_window_state(&app, &app_id, &win);
-        // 因为 on_window_event 拦截了 CloseRequested，这里需要 destroy 而非 close
+        // 停止应用时强制销毁窗口，避免触发用户关闭窗口的普通生命周期。
         let _ = win.destroy();
     }
     kill_app_process(&app, &app_id);
@@ -1550,14 +1550,10 @@ fn create_app_window(
 
     let app_save = app.clone();
     let app_id_save = app_id.to_string();
-    let label_save = label.clone();
+    let window_save = webview_window.clone();
     webview_window.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            api.prevent_close();
-            if let Some(win) = app_save.get_webview_window(&label_save) {
-                save_window_state(&app_save, &app_id_save, &win);
-                let _ = win.minimize();
-            }
+        if let tauri::WindowEvent::CloseRequested { .. } = event {
+            save_window_state(&app_save, &app_id_save, &window_save);
         }
     });
 
