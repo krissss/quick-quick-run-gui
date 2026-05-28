@@ -4,6 +4,8 @@ export interface LatestRunStatus {
   status: 'running' | 'success' | 'failed' | 'killed' | 'lost'
 }
 
+export type RunStatus = LatestRunStatus['status']
+
 export function itemTypeLabel(type: AppType) {
   if (type === 'task') return '任务'
   if (type === 'service') return '服务'
@@ -31,7 +33,23 @@ export function runStatusLabel(
   if (run.status === 'failed') return '上次失败'
   if (run.status === 'killed') return '已停止'
   if (run.status === 'lost') return '状态丢失'
-  return '运行中'
+  return '状态待确认'
+}
+
+export function runRecordStatusLabel(status: RunStatus, confirmedRunning = true) {
+  if (status === 'running') return confirmedRunning ? '运行中' : '状态待确认'
+  if (status === 'success') return '成功'
+  if (status === 'failed') return '失败'
+  if (status === 'killed') return '已停止'
+  return '丢失'
+}
+
+export function runRecordStatusClass(status: RunStatus, confirmedRunning = true) {
+  if (status === 'running' && confirmedRunning) return 'text-emerald-600 dark:text-emerald-400'
+  if (status === 'running') return 'text-muted-foreground'
+  if (status === 'success') return 'text-foreground'
+  if (status === 'failed' || status === 'lost') return 'text-destructive'
+  return 'text-muted-foreground'
 }
 
 export function runStatusClass(
@@ -54,5 +72,6 @@ export function statusDotClass(
   if (runningAppIds.has(app.id)) return 'bg-emerald-500'
   const status = latestRuns.get(app.id)?.status
   if (status === 'failed' || status === 'lost') return 'bg-destructive'
+  if (status === 'running') return 'bg-muted-foreground'
   return 'bg-muted-foreground'
 }

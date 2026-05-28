@@ -7,6 +7,7 @@ import { useAppSessionStore } from '@/stores/appSession'
 import { useLauncherStore } from '@/stores/launcher'
 import { useLogsStore } from '@/stores/logs'
 import type { RunRecord } from '@/stores/launcher'
+import { runRecordStatusClass, runRecordStatusLabel } from '@/lib/appDisplay'
 import { formatDateTime, formatDuration } from '@/lib/time'
 
 const logsStore = useLogsStore()
@@ -31,19 +32,13 @@ const hasClearableRuns = computed(() => logsStore.logRuns.some(run => run.status
 const canClearSelected = computed(() => !!selectedRun.value && selectedRun.value.status !== 'running')
 const isCurrentAppRunning = computed(() => launcherStore.appRunState(logsStore.logAppId).isRunning)
 
-function runStatusLabel(status: RunRecord['status']) {
-  if (status === 'running') return '运行中'
-  if (status === 'success') return '成功'
-  if (status === 'failed') return '失败'
-  if (status === 'killed') return '已停止'
-  return '丢失'
+function isRunConfirmedRunning(run: RunRecord) {
+  return run.status === 'running' && launcherStore.runningAppIds.has(run.app_id)
 }
 
-function runStatusClass(status: RunRecord['status']) {
-  if (status === 'running') return 'text-emerald-600 dark:text-emerald-400'
-  if (status === 'success') return 'text-foreground'
-  if (status === 'failed' || status === 'lost') return 'text-destructive'
-  return 'text-muted-foreground'
+function runDurationLabel(run: RunRecord) {
+  if (run.status === 'running' && !isRunConfirmedRunning(run)) return '待确认'
+  return formatDuration(run.started_at, run.finished_at)
 }
 
 function triggerLabel(trigger: RunRecord['trigger']) {
@@ -101,7 +96,9 @@ function runCommandLabel(run: RunRecord) {
           @click="logsStore.selectLogRun(run.id)"
         >
           <div class="flex items-center justify-between gap-2">
-            <span class="font-medium" :class="runStatusClass(run.status)">{{ runStatusLabel(run.status) }}</span>
+            <span class="font-medium" :class="runRecordStatusClass(run.status, isRunConfirmedRunning(run))">
+              {{ runRecordStatusLabel(run.status, isRunConfirmedRunning(run)) }}
+            </span>
             <span class="shrink-0 text-[11px] text-muted-foreground">{{ triggerLabel(run.trigger) }}</span>
           </div>
           <div class="mt-1 truncate font-mono text-[11px] text-muted-foreground" :title="runCommandLabel(run)">
@@ -109,7 +106,7 @@ function runCommandLabel(run: RunRecord) {
           </div>
           <div class="mt-1 font-mono text-[11px] text-muted-foreground">{{ formatDateTime(run.started_at) }}</div>
           <div class="mt-0.5 text-[11px] text-muted-foreground">
-            {{ formatDuration(run.started_at, run.finished_at) }}
+            {{ runDurationLabel(run) }}
             <span v-if="run.exit_code != null"> · code {{ run.exit_code }}</span>
           </div>
         </button>

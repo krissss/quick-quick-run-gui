@@ -106,6 +106,10 @@ export const useLauncherStore = defineStore('launcher', () => {
 
   async function refreshRunningApps() {
     try {
+      await invoke('reconcile_running_records')
+    } catch { /* best effort */ }
+
+    try {
       const infos = await invoke<RunningAppInfo[]>('get_running_apps')
       runningAppIds.value = new Set(infos.map(info => info.app_id))
       runningPids.value = new Map(

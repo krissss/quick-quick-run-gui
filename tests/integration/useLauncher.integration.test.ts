@@ -86,6 +86,36 @@ describe('launcher store', () => {
     expect(latestRuns.value.get('demo-web-id')?.id).toBe('new')
   })
 
+  it('still refreshes runtime state when reconcile fails', async () => {
+    const { launcher, runningAppIds, latestRuns } = await mountLauncher({
+      runningApps: [{ app_id: 'demo-web-id', pid: 4321, item_type: 'web' }],
+      recentRuns: [
+        {
+          id: 'run-active',
+          app_id: 'demo-web-id',
+          app_name: 'demo-web',
+          item_type: 'web',
+          status: 'running',
+          pid: 4321,
+          exit_code: null,
+          started_at: 300,
+          finished_at: null,
+          command: 'pnpm dev',
+          log_path: '/tmp/run-active.log',
+          trigger: 'manual',
+        },
+      ],
+      rejectCommands: {
+        reconcile_running_records: new Error('reconcile unavailable'),
+      },
+    })
+
+    await launcher.refreshRunningApps()
+
+    expect(runningAppIds.value.has('demo-web-id')).toBe(true)
+    expect(latestRuns.value.get('demo-web-id')?.id).toBe('run-active')
+  })
+
   it('relaunches the exact command captured on a run record', async () => {
     const { launcher, mock } = await mountLauncher()
 

@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { DialogFrame } from '@/components/ui/dialog-frame'
+import { runRecordStatusClass, runRecordStatusLabel } from '@/lib/appDisplay'
 import { formatRunAtTime } from '@/lib/delay'
 import { formatDateTime } from '@/lib/time'
 import type { AppItem } from '@/lib/store'
@@ -173,23 +174,12 @@ const recentRuns = computed(() =>
     .slice(0, 5),
 )
 
-function runStatusLabel(status: RunRecord['status']) {
-  if (status === 'running') return '运行中'
-  if (status === 'success') return '成功'
-  if (status === 'failed') return '失败'
-  if (status === 'killed') return '已停止'
-  return '丢失'
-}
-
-function runStatusClass(status: RunRecord['status']) {
-  if (status === 'running') return 'text-emerald-600 dark:text-emerald-400'
-  if (status === 'success') return 'text-foreground'
-  if (status === 'failed' || status === 'lost') return 'text-destructive'
-  return 'text-muted-foreground'
-}
-
 function appForRun(run: RunRecord) {
   return appsStore.apps.find(app => app.id === run.app_id) || null
+}
+
+function isRunConfirmedRunning(run: RunRecord) {
+  return run.status === 'running' && launcherStore.runningAppIds.has(run.app_id)
 }
 
 function pendingLabel(app: AppItem) {
@@ -331,8 +321,8 @@ function relaunchRunCommand(run: RunRecord) {
                 >
                   <div class="flex items-center justify-between gap-2">
                     <span class="min-w-0 truncate text-xs font-medium">{{ run.app_name }}</span>
-                    <span class="shrink-0 text-[10px] font-medium" :class="runStatusClass(run.status)">
-                      {{ runStatusLabel(run.status) }}
+                    <span class="shrink-0 text-[10px] font-medium" :class="runRecordStatusClass(run.status, isRunConfirmedRunning(run))">
+                      {{ runRecordStatusLabel(run.status, isRunConfirmedRunning(run)) }}
                     </span>
                   </div>
                   <div class="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" :title="runCommandLabel(run)">

@@ -94,6 +94,26 @@ describe('AppSidebar', () => {
     expect(wrapper.get('button[aria-label="筛选任务"]').exists()).toBe(true)
   })
 
+  it('does not show a stale running run as active when backend running state is missing', () => {
+    const wrapper = mountSidebar({
+      latestRuns: new Map([[
+        'web-1',
+        {
+          ...serviceFailedRun,
+          id: 'run-web',
+          app_id: 'web-1',
+          app_name: 'demo-web',
+          item_type: 'web',
+          status: 'running',
+          pid: 4321,
+        },
+      ]]),
+    })
+
+    expect(appRow(wrapper, 'web-1').text()).toContain('状态待确认')
+    expect(appRow(wrapper, 'web-1').text()).not.toContain('运行中')
+  })
+
   it('exposes grouped row actions and opens the editor on double click', async () => {
     const wrapper = mountSidebar({
       selectedAppId: 'web-1',

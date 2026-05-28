@@ -126,6 +126,8 @@ pub struct ProcessInfo {
     pub item_type: ItemType,
     pub run_id: Option<String>,
     pub window: Option<AppWindowInfo>,
+    pub command: String,
+    pub working_directory: String,
 }
 
 /// 全局进程状态，支持多个应用同时运行
@@ -303,7 +305,7 @@ pub fn spawn_process_monitor(app: &tauri::AppHandle, app_id: &str) {
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            let exit_status = {
+            let tick = {
                 let state = match app.try_state::<AppState>() {
                     Some(s) => s,
                     None => return,
@@ -313,51 +315,113 @@ pub fn spawn_process_monitor(app: &tauri::AppHandle, app_id: &str) {
                     Some(info) => {
                         if let Some(ref mut child) = info.child {
                             match child.try_wait() {
-                                Ok(Some(status)) => Some(Some(status)),
-                                Ok(None) => None,
+                                Ok(Some(status)) => {
+                                    if maybe_rebind_managed_process(&app, &app_id, info) {
+                                        MonitorTick::SwitchToRecovered
+                                    } else if info.pid.is_some_and(is_process_group_alive) {
+                                        info.child = None;
+                                        MonitorTick::SwitchToRecovered
+                                    } else {
+                                        MonitorTick::Finish(Some(status))
+                                    }
+                                }
+                                Ok(None) => MonitorTick::Continue,
                                 Err(_) => {
                                     if should_keep_monitoring_after_wait_error(info.pid) {
-                                        None
+                                        info.child = None;
+                                        MonitorTick::SwitchToRecovered
                                     } else {
-                                        Some(None)
+                                        MonitorTick::Finish(None)
                                     }
                                 }
                             }
                         } else {
-                            None
+                            MonitorTick::Continue
                         }
                     }
                     None => return, // 已被 kill_app_process 移除，停止监控
                 }
             };
-            if let Some(status) = exit_status {
-                let state = app.state::<AppState>();
-                let mut processes = recover_lock(&state.processes);
-                let info = match processes.get_mut(&app_id) {
-                    Some(info) => {
-                        info.child = None;
-                        info.pid = None;
-                        ProcessSnapshot {
-                            item_type: info.item_type,
-                            run_id: info.run_id.clone(),
+
+            match tick {
+                MonitorTick::Continue => continue,
+                MonitorTick::SwitchToRecovered => {
+                    spawn_recovered_process_monitor(&app, &app_id);
+                    return;
+                }
+                MonitorTick::Finish(status) => {
+                    let state = app.state::<AppState>();
+                    let mut processes = recover_lock(&state.processes);
+                    let info = match processes.get_mut(&app_id) {
+                        Some(info) => {
+                            info.child = None;
+                            info.pid = None;
+                            ProcessSnapshot {
+                                item_type: info.item_type,
+                                run_id: info.run_id.clone(),
+                            }
                         }
+                        None => return,
+                    };
+                    if info.item_type != ItemType::Web {
+                        processes.remove(&app_id);
+                    }
+                    drop(processes);
+
+                    remove_persisted_session(&app, &app_id);
+                    if let Some(run_id) = info.run_id {
+                        let (status, exit_code) = status
+                            .as_ref()
+                            .map(|status| (run_status_from_exit(status), status.code()))
+                            .unwrap_or((RunStatus::Lost, None));
+                        finish_run_record(&app, &run_id, status, exit_code);
+                    }
+                    if info.item_type == ItemType::Web {
+                        let _ = app.emit("app-process-stopped", app_id.clone());
+                    } else {
+                        let _ = app.emit("app-stopped", app_id.clone());
+                    }
+                    return;
+                }
+            }
+        }
+    });
+}
+
+pub fn spawn_recovered_process_monitor(app: &tauri::AppHandle, app_id: &str) {
+    let app = app.clone();
+    let app_id = app_id.to_string();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let should_stop = {
+                let Some(state) = app.try_state::<AppState>() else {
+                    return;
+                };
+                let mut processes = recover_lock(&state.processes);
+                match processes.get_mut(&app_id) {
+                    Some(info) => {
+                        !maybe_rebind_managed_process(&app, &app_id, info)
+                            && !info.pid.is_some_and(is_process_group_alive)
                     }
                     None => return,
-                };
-                if info.item_type != ItemType::Web {
-                    processes.remove(&app_id);
                 }
-                drop(processes);
+            };
 
+            if should_stop {
+                let (run_id, item_type) = if let Some(state) = app.try_state::<AppState>() {
+                    recover_lock(&state.processes)
+                        .remove(&app_id)
+                        .map(|info| (info.run_id, info.item_type))
+                        .unwrap_or((None, ItemType::Service))
+                } else {
+                    (None, ItemType::Service)
+                };
                 remove_persisted_session(&app, &app_id);
-                if let Some(run_id) = info.run_id {
-                    let (status, exit_code) = status
-                        .as_ref()
-                        .map(|status| (run_status_from_exit(status), status.code()))
-                        .unwrap_or((RunStatus::Lost, None));
-                    finish_run_record(&app, &run_id, status, exit_code);
+                if let Some(run_id) = run_id {
+                    finish_run_record(&app, &run_id, RunStatus::Lost, None);
                 }
-                if info.item_type == ItemType::Web {
+                if item_type == ItemType::Web {
                     let _ = app.emit("app-process-stopped", app_id.clone());
                 } else {
                     let _ = app.emit("app-stopped", app_id.clone());
@@ -368,44 +432,26 @@ pub fn spawn_process_monitor(app: &tauri::AppHandle, app_id: &str) {
     });
 }
 
-pub fn spawn_recovered_process_monitor(app: &tauri::AppHandle, app_id: &str, pid: u32) {
-    let app = app.clone();
-    let app_id = app_id.to_string();
-    tauri::async_runtime::spawn(async move {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            if is_process_alive(pid) {
-                continue;
-            }
-
-            let run_id = if let Some(state) = app.try_state::<AppState>() {
-                recover_lock(&state.processes)
-                    .remove(&app_id)
-                    .and_then(|info| info.run_id)
-            } else {
-                None
-            };
-            remove_persisted_session(&app, &app_id);
-            if let Some(run_id) = run_id {
-                finish_run_record(&app, &run_id, RunStatus::Lost, None);
-            }
-            let _ = app.emit("app-stopped", app_id.clone());
-            return;
-        }
-    });
-}
-
 pub fn restore_persisted_sessions(handle: &tauri::AppHandle) {
     let sessions = read_persisted_sessions(handle);
     let mut live_sessions = Vec::new();
 
-    for session in sessions {
-        if !is_process_alive(session.pid) {
+    for mut session in sessions {
+        let live_pid = if is_process_group_alive(session.pid) || is_process_alive(session.pid) {
+            Some(session.pid)
+        } else if supports_successor_rebind(session.item_type) {
+            resolve_successor_process(&session.command, &session.working_directory, session.pid)
+        } else {
+            None
+        };
+        let Some(live_pid) = live_pid else {
             if let Some(run_id) = &session.run_id {
                 finish_run_record(handle, run_id, RunStatus::Lost, None);
             }
             continue;
-        }
+        };
+        session.pid = live_pid;
+        update_running_run_pid(handle, session.run_id.as_deref(), live_pid);
 
         let mut should_monitor = false;
         if let Some(state) = handle.try_state::<AppState>() {
@@ -415,19 +461,21 @@ pub fn restore_persisted_sessions(handle: &tauri::AppHandle) {
                     session.app_id.clone(),
                     ProcessInfo {
                         child: None,
-                        pid: Some(session.pid),
+                        pid: Some(live_pid),
                         log_path: Some(PathBuf::from(&session.log_path)),
                         logs: Arc::new(Mutex::new(Vec::new())),
                         item_type: session.item_type,
                         run_id: session.run_id.clone(),
                         window: session.window.clone(),
+                        command: session.command.clone(),
+                        working_directory: session.working_directory.clone(),
                     },
                 );
                 should_monitor = true;
             }
         }
         if should_monitor {
-            spawn_recovered_process_monitor(handle, &session.app_id, session.pid);
+            spawn_recovered_process_monitor(handle, &session.app_id);
         }
         live_sessions.push(session);
     }
@@ -553,6 +601,32 @@ pub fn finish_run_record(
     }
 }
 
+fn update_running_run_pid(handle: &tauri::AppHandle, run_id: Option<&str>, pid: u32) {
+    let Some(run_id) = run_id else {
+        return;
+    };
+    let mut records = read_run_records(handle);
+    let updated = update_running_run_record_pid(&mut records, run_id, pid);
+    if let Some((app_id, run_id)) = updated {
+        save_run_records(handle, &records);
+        emit_run_updated(handle, &app_id, &run_id, RunStatus::Running);
+    }
+}
+
+fn update_running_run_record_pid(
+    records: &mut [RunRecord],
+    run_id: &str,
+    pid: u32,
+) -> Option<(String, String)> {
+    for record in records {
+        if record.id == run_id && record.status == RunStatus::Running && record.pid != Some(pid) {
+            record.pid = Some(pid);
+            return Some((record.app_id.clone(), record.id.clone()));
+        }
+    }
+    None
+}
+
 pub fn get_run_records(
     handle: &tauri::AppHandle,
     app_id: Option<&str>,
@@ -636,6 +710,20 @@ pub fn remove_persisted_session(handle: &tauri::AppHandle, app_id: &str) {
     let old_len = sessions.len();
     sessions.retain(|item| item.app_id != app_id);
     if sessions.len() != old_len {
+        save_persisted_sessions(handle, &sessions);
+    }
+}
+
+fn update_persisted_session_pid(handle: &tauri::AppHandle, app_id: &str, pid: u32) {
+    let mut sessions = read_persisted_sessions(handle);
+    let mut changed = false;
+    for session in &mut sessions {
+        if session.app_id == app_id && session.pid != pid {
+            session.pid = pid;
+            changed = true;
+        }
+    }
+    if changed {
         save_persisted_sessions(handle, &sessions);
     }
 }
@@ -754,6 +842,12 @@ fn emit_run_updated(handle: &tauri::AppHandle, app_id: &str, run_id: &str, statu
 struct ProcessSnapshot {
     item_type: ItemType,
     run_id: Option<String>,
+}
+
+enum MonitorTick {
+    Continue,
+    SwitchToRecovered,
+    Finish(Option<ExitStatus>),
 }
 
 fn finish_process_run(
@@ -879,6 +973,26 @@ fn kill_process_group(pid: u32) -> std::io::Result<ExitStatus> {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+fn read_process_group_id(pid: u32) -> Option<u32> {
+    let output = Command::new("ps")
+        .args(["-o", "pgid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .ok()
+}
+
+#[cfg(target_os = "windows")]
+fn read_process_group_id(_pid: u32) -> Option<u32> {
+    None
+}
+
 fn successful_noop_status() -> std::io::Result<ExitStatus> {
     #[cfg(unix)]
     {
@@ -953,7 +1067,295 @@ fn is_process_group_alive(pid: u32) -> bool {
 }
 
 fn should_keep_monitoring_after_wait_error(pid: Option<u32>) -> bool {
-    pid.map(is_process_alive).unwrap_or(false)
+    pid.map(is_process_group_alive).unwrap_or(false)
+}
+
+pub fn is_matching_managed_process(pid: u32, command: &str, working_directory: &str) -> bool {
+    if !is_process_group_alive(pid) && !is_process_alive(pid) {
+        return false;
+    }
+    let tokens = command_match_tokens(command);
+    if tokens.is_empty() {
+        return true;
+    }
+    let anchors = command_anchor_tokens(command, working_directory);
+    let cwd = normalize_match_path(working_directory);
+    let Some(process) = list_process_snapshots()
+        .ok()
+        .and_then(|snapshots| snapshots.into_iter().find(|process| process.pid == pid))
+    else {
+        return false;
+    };
+    successor_score(&process, &tokens, &anchors, cwd.as_deref(), Some(pid)) >= 5
+}
+
+pub fn resolve_managed_process_pid(
+    pid: u32,
+    command: &str,
+    working_directory: &str,
+    item_type: ItemType,
+) -> Option<u32> {
+    if is_matching_managed_process(pid, command, working_directory) {
+        return Some(pid);
+    }
+    if supports_successor_rebind(item_type) {
+        return resolve_successor_process(command, working_directory, pid);
+    }
+    None
+}
+
+fn maybe_rebind_managed_process(
+    handle: &tauri::AppHandle,
+    app_id: &str,
+    info: &mut ProcessInfo,
+) -> bool {
+    if !supports_successor_rebind(info.item_type) {
+        return false;
+    }
+    let Some(original_pid) = info.pid else {
+        return false;
+    };
+    if is_matching_managed_process(original_pid, &info.command, &info.working_directory) {
+        return false;
+    }
+    let Some(pid) = resolve_managed_process_pid(
+        original_pid,
+        &info.command,
+        &info.working_directory,
+        info.item_type,
+    ) else {
+        return false;
+    };
+    info.child = None;
+    info.pid = Some(pid);
+    update_persisted_session_pid(handle, app_id, pid);
+    update_running_run_pid(handle, info.run_id.as_deref(), pid);
+    true
+}
+
+fn supports_successor_rebind(item_type: ItemType) -> bool {
+    matches!(item_type, ItemType::Web | ItemType::Service)
+}
+
+fn resolve_successor_process(
+    command: &str,
+    working_directory: &str,
+    original_pid: u32,
+) -> Option<u32> {
+    let tokens = command_match_tokens(command);
+    if tokens.is_empty() {
+        return None;
+    }
+    let anchors = command_anchor_tokens(command, working_directory);
+    let cwd = normalize_match_path(working_directory);
+    let original_group_id = read_process_group_id(original_pid);
+    let snapshots = list_process_snapshots().ok()?;
+    let mut best: Option<(u32, i32)> = None;
+    let mut tied = false;
+
+    for process in snapshots {
+        if process.pid == original_pid || !is_process_alive(process.pid) {
+            continue;
+        }
+        let score = successor_score(
+            &process,
+            &tokens,
+            &anchors,
+            cwd.as_deref(),
+            original_group_id,
+        );
+        if score < 5 {
+            continue;
+        }
+        match best {
+            None => {
+                best = Some((process.pid, score));
+                tied = false;
+            }
+            Some((_, best_score)) if score > best_score => {
+                best = Some((process.pid, score));
+                tied = false;
+            }
+            Some((_, best_score)) if score == best_score => {
+                tied = true;
+            }
+            _ => {}
+        }
+    }
+
+    if tied {
+        None
+    } else {
+        best.map(|(pid, _)| pid)
+    }
+}
+
+fn successor_score(
+    process: &ProcessSnapshotForMatch,
+    tokens: &[String],
+    anchors: &[String],
+    cwd: Option<&str>,
+    original_group_id: Option<u32>,
+) -> i32 {
+    let mut score = 0;
+    let command_matches = process_command_matches_tokens(&process.command_line, tokens);
+    let anchor_matches = process_command_matches_tokens(&process.command_line, anchors);
+    if !command_matches && !anchor_matches {
+        return 0;
+    }
+    score += if command_matches { 4 } else { 3 };
+    let exact_anchor_matches = anchors
+        .iter()
+        .filter(|anchor| anchor.contains('/'))
+        .any(|anchor| process.command_line.to_lowercase().contains(anchor));
+    if exact_anchor_matches {
+        score += 1;
+    }
+    if let Some(path) = cwd {
+        if read_process_working_directory(process.pid).as_deref() == Some(path) {
+            score += 3;
+        }
+    }
+    if original_group_id.is_some() && process.group_id == original_group_id {
+        score += 2;
+    }
+    if anchor_matches && !command_matches {
+        score += 1;
+    }
+    score
+}
+
+fn process_command_matches_tokens(command_line: &str, tokens: &[String]) -> bool {
+    if tokens.is_empty() {
+        return false;
+    }
+    let command_line = command_line.to_lowercase();
+    tokens
+        .iter()
+        .all(|token| command_line.contains(token.as_str()))
+}
+
+fn command_match_tokens(command: &str) -> Vec<String> {
+    command
+        .split_whitespace()
+        .map(|token| token.trim_matches(|ch| ch == '"' || ch == '\''))
+        .filter(|token| !token.is_empty())
+        .map(|token| {
+            path_basename(token)
+                .unwrap_or_else(|| token.to_string())
+                .to_lowercase()
+        })
+        .filter(|token| token.len() > 1)
+        .collect()
+}
+
+fn command_anchor_tokens(command: &str, working_directory: &str) -> Vec<String> {
+    let mut anchors = Vec::new();
+    let working_directory = normalize_match_path(working_directory);
+    for token in command.split_whitespace() {
+        let token = token.trim_matches(|ch| ch == '"' || ch == '\'');
+        let Some(name) = path_basename(token) else {
+            continue;
+        };
+        if !name.contains('.') {
+            continue;
+        }
+        anchors.push(name.to_lowercase());
+        if let Some(dir) = &working_directory {
+            anchors.push(format!("{}/{}", dir.trim_end_matches('/'), name).to_lowercase());
+        }
+    }
+    anchors
+}
+
+fn normalize_match_path(path: &str) -> Option<String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return None;
+    }
+    std::fs::canonicalize(path)
+        .ok()
+        .map(|path| path.to_string_lossy().to_string())
+        .or_else(|| Some(path.to_string()))
+}
+
+fn path_basename(value: &str) -> Option<String> {
+    let value = value
+        .trim()
+        .trim_matches(|ch| ch == '"' || ch == '\'')
+        .trim_end_matches(['/', '\\']);
+    let name = value.rsplit(['/', '\\']).next()?.trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+struct ProcessSnapshotForMatch {
+    pid: u32,
+    group_id: Option<u32>,
+    command_line: String,
+}
+
+fn list_process_snapshots() -> Result<Vec<ProcessSnapshotForMatch>, String> {
+    #[cfg(unix)]
+    {
+        let output = Command::new("ps")
+            .args(["-axo", "pid=,pgid=,command="])
+            .output()
+            .map_err(|e| format!("执行 ps 失败: {}", e))?;
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(parse_process_snapshot_line)
+            .collect())
+    }
+
+    #[cfg(windows)]
+    {
+        Ok(Vec::new())
+    }
+}
+
+#[cfg(unix)]
+fn parse_process_snapshot_line(line: &str) -> Option<ProcessSnapshotForMatch> {
+    let line = line.trim();
+    let mut parts = line.split_whitespace();
+    let pid = parts.next()?.parse::<u32>().ok()?;
+    let group_id = parts.next().and_then(|value| value.parse::<u32>().ok());
+    let command_line = parts.collect::<Vec<_>>().join(" ");
+    if command_line.is_empty() {
+        return None;
+    }
+    Some(ProcessSnapshotForMatch {
+        pid,
+        group_id,
+        command_line,
+    })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn read_process_working_directory(pid: u32) -> Option<String> {
+    std::fs::read_link(format!("/proc/{pid}/cwd"))
+        .ok()
+        .map(|path| path.to_string_lossy().to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn read_process_working_directory(pid: u32) -> Option<String> {
+    let output = Command::new("lsof")
+        .args(["-a", "-d", "cwd", "-Fn", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix('n').map(ToString::to_string))
 }
 
 pub fn now_millis() -> u64 {
@@ -1073,6 +1475,8 @@ mod tests {
             item_type: ItemType::Service,
             run_id: None,
             window: None,
+            command,
+            working_directory: String::new(),
         };
         stop_process_info(info, Duration::from_secs(3));
 
@@ -1105,10 +1509,121 @@ mod tests {
     }
 
     #[test]
+    fn update_running_run_pid_only_updates_active_record() {
+        let mut running = test_run("app-1", "running", 2, RunStatus::Running);
+        running.pid = Some(100);
+        let mut success = test_run("app-1", "success", 1, RunStatus::Success);
+        success.pid = Some(200);
+        let mut records = vec![success.clone(), running.clone()];
+
+        let updated = update_running_run_record_pid(&mut records, "running", 300);
+
+        assert_eq!(updated, Some(("app-1".to_string(), "running".to_string())));
+        assert_eq!(records[1].pid, Some(300));
+        assert_eq!(records[0].pid, Some(200));
+        assert_eq!(
+            update_running_run_record_pid(&mut records, "success", 400),
+            None
+        );
+    }
+
+    #[test]
     fn wait_error_for_live_pid_keeps_monitoring() {
         assert!(should_keep_monitoring_after_wait_error(Some(
             std::process::id()
         )));
+    }
+
+    #[test]
+    fn successor_score_prefers_command_with_matching_cwd() {
+        let tokens = command_match_tokens("php start.php start");
+        let anchors = command_anchor_tokens("php start.php start", "/repo");
+        let process = ProcessSnapshotForMatch {
+            pid: 42,
+            group_id: Some(7),
+            command_line: "WorkerMan: master process start_file=/repo/start.php start".to_string(),
+        };
+
+        assert_eq!(
+            successor_score(&process, &tokens, &anchors, None, Some(7)),
+            7
+        );
+        assert_eq!(successor_score(&process, &tokens, &anchors, None, None), 5);
+        assert_eq!(
+            successor_score(
+                &process,
+                &tokens,
+                &anchors,
+                Some("/definitely-not-the-cwd"),
+                None,
+            ),
+            5
+        );
+    }
+
+    #[test]
+    fn successor_score_accepts_daemon_master_with_script_anchor_and_cwd() {
+        let tokens = command_match_tokens("php start.php start");
+        let anchors = command_anchor_tokens(
+            "php start.php start",
+            "/Volumes/Kriss/kriss/projects/github.com/krissss/issue-plan",
+        );
+        let process = ProcessSnapshotForMatch {
+            pid: u32::MAX,
+            group_id: Some(38238),
+            command_line:
+                "WorkerMan: master process start_file=/Volumes/Kriss/kriss/projects/github.com/krissss/issue-plan/start.php"
+                    .to_string(),
+        };
+
+        assert_eq!(successor_score(&process, &tokens, &anchors, None, None), 5);
+    }
+
+    #[test]
+    fn successor_score_requires_disambiguation_when_multiple_candidates_tie() {
+        let tokens = command_match_tokens("php start.php start");
+        let anchors = command_anchor_tokens("php start.php start", "/repo");
+        let process = ProcessSnapshotForMatch {
+            pid: 42,
+            group_id: Some(7),
+            command_line: "WorkerMan: master process start_file=/repo/start.php".to_string(),
+        };
+
+        assert_eq!(successor_score(&process, &tokens, &anchors, None, None), 5);
+        assert_eq!(
+            successor_score(&process, &tokens, &anchors, Some("/repo"), Some(7)),
+            7
+        );
+    }
+
+    #[test]
+    fn command_anchor_tokens_include_working_directory_scripts() {
+        assert_eq!(
+            command_anchor_tokens("php start.php start", "/repo"),
+            vec!["start.php", "/repo/start.php"]
+        );
+    }
+
+    #[test]
+    fn successor_rebind_applies_to_web_and_service_but_not_task() {
+        assert!(supports_successor_rebind(ItemType::Web));
+        assert!(supports_successor_rebind(ItemType::Service));
+        assert!(!supports_successor_rebind(ItemType::Task));
+    }
+
+    #[test]
+    fn service_command_tokens_match_detached_php_process() {
+        let tokens = command_match_tokens("php start.php start");
+
+        assert_eq!(tokens, vec!["php", "start.php", "start"]);
+        assert!(process_command_matches_tokens(
+            "php start.php start --daemon",
+            &tokens,
+        ));
+        assert!(!process_command_matches_tokens(
+            "php other.php start --daemon",
+            &tokens,
+        ));
     }
 
     #[test]

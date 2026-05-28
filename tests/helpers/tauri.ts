@@ -161,7 +161,11 @@ export function setupTauriMocks(options: MockOptions = {}) {
     }
     if (cmd === 'plugin:fs|write_file' || cmd === 'plugin:fs|write_text_file') return null
 
-    if (cmd === 'notify_apps_updated') return null
+    if (
+      cmd === 'notify_apps_updated'
+      || cmd === 'reconcile_running_records'
+      || cmd === 'reconcile_running_web_records'
+    ) return null
     if (cmd === 'get_running_apps') return clone(options.runningApps ?? [])
     if (cmd === 'get_recent_runs') return clone(recentRuns)
     if (cmd === 'get_web_favicon') {

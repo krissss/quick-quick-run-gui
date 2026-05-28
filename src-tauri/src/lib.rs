@@ -8,6 +8,7 @@ mod tray;
 mod url_check;
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike};
@@ -28,9 +29,9 @@ use process::{
     append_run_record, clear_run_records, create_log_path, create_run_id, get_run_records,
     kill_app_process, latest_log_path_for_app, now_millis, persist_session,
     prune_run_records_for_retention, read_log_retention_limit, read_log_tail,
-    restore_persisted_sessions, spawn_process_monitor, spawn_shell_command, window_label_for,
-    AppState, AppWindowInfo, ItemType, PersistedSession, ProcessInfo, RunRecord, RunStatus,
-    RunTrigger,
+    resolve_managed_process_pid, restore_persisted_sessions, spawn_process_monitor,
+    spawn_recovered_process_monitor, spawn_shell_command, window_label_for, AppState,
+    AppWindowInfo, ItemType, PersistedSession, ProcessInfo, RunRecord, RunStatus, RunTrigger,
 };
 use url_check::check_url_inner;
 
@@ -66,6 +67,8 @@ pub fn run() {
             prune_log_records,
             get_recent_runs,
             get_web_favicon,
+            reconcile_running_records,
+            reconcile_running_web_records,
             inspect_port,
             inspect_process_name,
             kill_port_pid,
@@ -249,6 +252,69 @@ async fn launch_app_window(
         });
     }
 
+    if has_command {
+        if let Some((record, pid)) = get_run_records(&app, Some(&app_id), 20)
+            .into_iter()
+            .find_map(|record| {
+                if record.status != RunStatus::Running || record.item_type != ItemType::Web {
+                    return None;
+                }
+                record
+                    .pid
+                    .and_then(|pid| {
+                        resolve_managed_process_pid(
+                            pid,
+                            &command,
+                            &working_directory,
+                            ItemType::Web,
+                        )
+                    })
+                    .map(|pid| (record, pid))
+            })
+        {
+            let logs = Arc::new(Mutex::new(Vec::new()));
+            recover_lock(&state.processes).insert(
+                app_id.clone(),
+                ProcessInfo {
+                    child: None,
+                    pid: Some(pid),
+                    log_path: Some(PathBuf::from(&record.log_path)),
+                    logs,
+                    item_type: ItemType::Web,
+                    run_id: Some(record.id.clone()),
+                    window: Some(window_info.clone()),
+                    command: command.clone(),
+                    working_directory: working_directory.clone(),
+                },
+            );
+            persist_session(
+                &app,
+                PersistedSession {
+                    app_id: app_id.clone(),
+                    app_name: app_name.clone(),
+                    item_type: ItemType::Web,
+                    command: command.clone(),
+                    working_directory: working_directory.clone(),
+                    url: url.clone(),
+                    pid,
+                    log_path: record.log_path.clone(),
+                    started_at: record.started_at,
+                    run_id: Some(record.id.clone()),
+                    window: Some(window_info.clone()),
+                },
+            );
+            let _ = create_app_window(&app, &app_id, &window_info)?;
+            let _ = app.emit("app-launched", app_id.clone());
+            let _ = app.emit("app-window-opened", app_id.clone());
+            spawn_recovered_process_monitor(&app, &app_id);
+            return Ok(LaunchResult {
+                message: "应用正在运行，已恢复窗口".into(),
+                pid: Some(pid),
+                run_id: Some(record.id),
+            });
+        }
+    }
+
     // 先杀掉同 app_id 的旧进程
     kill_app_process(&app, &app_id);
 
@@ -267,6 +333,8 @@ async fn launch_app_window(
                 item_type: ItemType::Web,
                 run_id: None,
                 window: Some(window_info),
+                command: command.clone(),
+                working_directory: working_directory.clone(),
             },
         );
         let _ = app.emit("app-launched", app_id.clone());
@@ -297,6 +365,8 @@ async fn launch_app_window(
             item_type: ItemType::Web,
             run_id: Some(run_id.clone()),
             window: Some(window_info.clone()),
+            command: command.clone(),
+            working_directory: working_directory.clone(),
         },
     );
     append_run_record(
@@ -492,6 +562,8 @@ fn launch_command_item(
             item_type,
             run_id: Some(run_id.clone()),
             window: None,
+            command: command.clone(),
+            working_directory: working_directory.clone(),
         },
     );
 
@@ -644,6 +716,96 @@ async fn get_web_favicon(url: String) -> Result<Option<String>, String> {
     fetch_web_favicon(&url).await
 }
 
+#[tauri::command]
+fn reconcile_running_web_records(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    reconcile_running_records(app, state)
+}
+
+#[tauri::command]
+fn reconcile_running_records(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let items = read_stored_items(&app);
+    let mut seen_app_ids = HashSet::new();
+    for record in get_run_records(&app, None, 500)
+        .into_iter()
+        .filter(|record| {
+            record.status == RunStatus::Running
+                && matches!(record.item_type, ItemType::Web | ItemType::Service)
+        })
+    {
+        let Some(pid) = record.pid else {
+            continue;
+        };
+        if seen_app_ids.contains(&record.app_id) {
+            continue;
+        }
+        let Some(item) = items.iter().find(|item| item.id == record.app_id) else {
+            continue;
+        };
+        let command = item.effective_command();
+        let working_directory = item.effective_working_directory();
+        let Some(live_pid) =
+            resolve_managed_process_pid(pid, &command, &working_directory, record.item_type)
+        else {
+            continue;
+        };
+        if recover_lock(&state.processes).contains_key(&record.app_id) {
+            continue;
+        }
+        seen_app_ids.insert(record.app_id.clone());
+        let window = if record.item_type == ItemType::Web {
+            Some(AppWindowInfo {
+                url: item.url.clone(),
+                width: item.width,
+                height: item.height,
+                app_name: item.name.clone(),
+                bg_r: 255,
+                bg_g: 255,
+                bg_b: 255,
+            })
+        } else {
+            None
+        };
+        recover_lock(&state.processes).insert(
+            record.app_id.clone(),
+            ProcessInfo {
+                child: None,
+                pid: Some(live_pid),
+                log_path: Some(PathBuf::from(&record.log_path)),
+                logs: Arc::new(Mutex::new(Vec::new())),
+                item_type: record.item_type,
+                run_id: Some(record.id.clone()),
+                window: window.clone(),
+                command: command.clone(),
+                working_directory: working_directory.clone(),
+            },
+        );
+        persist_session(
+            &app,
+            PersistedSession {
+                app_id: record.app_id.clone(),
+                app_name: record.app_name.clone(),
+                item_type: record.item_type,
+                command,
+                working_directory,
+                url: item.url.clone(),
+                pid: live_pid,
+                log_path: record.log_path.clone(),
+                started_at: record.started_at,
+                run_id: Some(record.id.clone()),
+                window,
+            },
+        );
+        spawn_recovered_process_monitor(&app, &record.app_id);
+    }
+    Ok(())
+}
+
 /// 停止应用进程（杀掉进程、关闭窗口）
 #[tauri::command]
 fn stop_app(app: tauri::AppHandle, app_id: String) -> Result<(), String> {
@@ -752,6 +914,12 @@ struct StoredRunItem {
     command: String,
     #[serde(default, rename = "workingDirectory")]
     working_directory: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default = "default_window_width")]
+    width: f64,
+    #[serde(default = "default_window_height")]
+    height: f64,
     #[serde(default)]
     profiles: Vec<StoredProfile>,
     #[serde(default, rename = "activeProfileId")]
@@ -1000,6 +1168,14 @@ fn default_missed_policy() -> String {
     "skip".to_string()
 }
 
+fn default_window_width() -> f64 {
+    1200.0
+}
+
+fn default_window_height() -> f64 {
+    800.0
+}
+
 fn start_scheduler(app: &tauri::AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -1056,7 +1232,7 @@ fn should_reuse_running_command_item(item_type: ItemType, trigger: RunTrigger) -
     item_type == ItemType::Service && trigger == RunTrigger::Startup
 }
 
-fn read_scheduled_items(app: &tauri::AppHandle) -> Vec<StoredRunItem> {
+fn read_stored_items(app: &tauri::AppHandle) -> Vec<StoredRunItem> {
     let Ok(store) = app.store("qqr-store.json") else {
         return Vec::new();
     };
@@ -1065,6 +1241,10 @@ fn read_scheduled_items(app: &tauri::AppHandle) -> Vec<StoredRunItem> {
         .get("apps")
         .and_then(|value| serde_json::from_value::<Vec<StoredRunItem>>(value).ok())
         .unwrap_or_default()
+}
+
+fn read_scheduled_items(app: &tauri::AppHandle) -> Vec<StoredRunItem> {
+    read_stored_items(app)
         .into_iter()
         .filter(|item| item.schedule.enabled)
         .collect()
@@ -1464,6 +1644,9 @@ mod scheduler_tests {
             item_type: ItemType::Task,
             command: "pnpm dev {account= : 账号} {--headless}".to_string(),
             working_directory: "/repo/default".to_string(),
+            url: String::new(),
+            width: 1200.0,
+            height: 800.0,
             profiles: vec![StoredProfile {
                 id: "profile-1".to_string(),
                 values,

@@ -112,4 +112,31 @@ describe('LogDialog', () => {
     expect(clearSelectedLogRun).toHaveBeenCalledOnce()
     expect(clearAllLogRuns).toHaveBeenCalledOnce()
   })
+
+  it('marks running run records as pending confirmation when backend running state is missing', async () => {
+    mountLogDialog({
+      logRuns: [
+        {
+          id: 'run-stale',
+          app_id: 'web-1',
+          app_name: 'demo-web',
+          item_type: 'web',
+          status: 'running',
+          pid: 4321,
+          exit_code: null,
+          started_at: Date.UTC(2026, 4, 4, 6, 30, 0),
+          finished_at: null,
+          command: 'pnpm dev',
+          log_path: '/tmp/run-stale.log',
+          trigger: 'manual',
+        },
+      ],
+      selectedLogRunId: 'run-stale',
+    })
+    useLauncherStore().runningAppIds = new Set()
+    await nextTick()
+
+    expect(document.body.textContent).toContain('状态待确认')
+    expect(document.querySelector('[data-testid="log-run-list"]')?.textContent).not.toContain('运行中')
+  })
 })
