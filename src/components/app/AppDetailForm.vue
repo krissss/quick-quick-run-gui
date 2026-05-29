@@ -62,7 +62,7 @@ async function deleteCurrentApp() {
         />
       </div>
 
-      <div class="flex flex-wrap items-center gap-2 bg-muted/40 px-5 py-3 shadow-[inset_0_1px_0_0_var(--border)]">
+      <div class="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 bg-muted/80 px-5 py-3 shadow-[inset_0_1px_0_0_var(--border)] backdrop-blur">
         <Button size="sm" @click="sessionStore.saveAndCloseEditDialog">{{ appsStore.isNew ? '添加' : '保存' }}</Button>
         <Button
           v-if="!appsStore.isNew"

@@ -116,21 +116,47 @@ describe('App', () => {
   })
 
   it('resizes the runtime panel from the divider', async () => {
+    vi.stubGlobal('innerWidth', 908)
     const { wrapper } = await mountApp({
       store: { apps: [webApp] },
     })
     const panel = wrapper.get('[data-testid="runtime-panel"]')
     const resizer = wrapper.get('[data-testid="runtime-panel-resizer"]')
 
-    expect(panel.attributes('style')).toContain('width: 400px')
+    expect(panel.attributes('style')).toContain('width: 520px')
 
     await resizer.trigger('pointerdown', { button: 0, pointerId: 1, clientX: 400 })
-    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 360 }))
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 440 }))
     await flushPromises()
 
-    expect(panel.attributes('style')).toContain('width: 440px')
+    expect(panel.attributes('style')).toContain('width: 480px')
 
     window.dispatchEvent(new PointerEvent('pointerup'))
+  })
+
+  it('lets window resizing change the runtime panel width', async () => {
+    vi.stubGlobal('innerWidth', 908)
+    const { wrapper } = await mountApp({
+      store: { apps: [webApp] },
+    })
+    const panel = wrapper.get('[data-testid="runtime-panel"]')
+
+    expect(panel.attributes('style')).toContain('width: 520px')
+
+    vi.stubGlobal('innerWidth', 1008)
+    window.dispatchEvent(new Event('resize'))
+    await flushPromises()
+
+    expect(panel.attributes('style')).toContain('width: 620px')
+  })
+
+  it('initializes the runtime panel from a restored wider window', async () => {
+    vi.stubGlobal('innerWidth', 1280)
+    const { wrapper } = await mountApp({
+      store: { apps: [webApp] },
+    })
+
+    expect(wrapper.get('[data-testid="runtime-panel"]').attributes('style')).toContain('width: 892px')
   })
 
   it('duplicates the current app and persists the copied template', async () => {

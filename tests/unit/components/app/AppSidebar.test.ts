@@ -193,12 +193,27 @@ describe('AppSidebar', () => {
       value: vi.fn(() => appRow(wrapper, 'web-1').element),
     })
 
+    expect(taskRow.classes()).not.toContain('cursor-grab')
+    expect(wrapper.find('[data-testid="drag-handle-task-1"]').exists()).toBe(false)
     await taskRow.trigger('pointerdown', { button: 0, pointerId: 1, clientX: 10, clientY: 10 })
     await taskRow.trigger('pointermove', { pointerId: 1, clientX: 10, clientY: 20 })
     await taskRow.trigger('pointerup', { pointerId: 1, clientX: 10, clientY: 20 })
     await flushPromises()
 
+    expect(useAppsStore().apps.map(app => app.id)).toEqual(['web-1', 'service-1', 'task-1'])
+
+    await wrapper.get('button[aria-label="整理排序"]').trigger('click')
+    const taskDragHandle = wrapper.get('[data-testid="drag-handle-task-1"]')
+
+    await taskDragHandle.trigger('pointerdown', { button: 0, pointerId: 1, clientX: 10, clientY: 10 })
+    await taskRow.trigger('pointermove', { pointerId: 1, clientX: 10, clientY: 20 })
+    await taskRow.trigger('pointerup', { pointerId: 1, clientX: 10, clientY: 20 })
+    await flushPromises()
+
     expect(useAppsStore().apps.map(app => app.id)).toEqual(['task-1', 'web-1', 'service-1'])
+
+    await wrapper.get('button[aria-label="完成整理"]').trigger('click')
+    expect(wrapper.find('[data-testid="drag-handle-task-1"]').exists()).toBe(false)
   })
 
   it('emits favicon errors for the shared icon state owner', async () => {

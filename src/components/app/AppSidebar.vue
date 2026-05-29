@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Clock, Edit3, FileText, Grid2x2, Globe, InspectionPanel, List, Monitor, Plus, RefreshCcw, Search, Settings, Square, X, Zap } from '@lucide/vue'
+import { Check, Clock, Edit3, FileText, GripVertical, Grid2x2, Globe, InspectionPanel, List, Monitor, Plus, RefreshCcw, Search, Settings, Square, X, Zap } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import AppIcon from '@/components/app/AppIcon.vue'
 import LaunchActionGroup from '@/components/app/LaunchActionGroup.vue'
@@ -34,6 +34,7 @@ const sessionStore = useAppSessionStore()
 
 const sidebarSearch = ref('')
 const sidebarFilter = ref<'all' | AppType>('all')
+const sortMode = ref(false)
 
 const filteredApps = computed(() => {
   const query = sidebarSearch.value.trim().toLowerCase()
@@ -56,6 +57,7 @@ const dragPointerId = ref<number | null>(null)
 const dragStartPoint = ref<{ x: number; y: number; appId: string } | null>(null)
 const suppressClickAppId = ref<string | null>(null)
 let suppressClickTimer: ReturnType<typeof setTimeout> | null = null
+let dragCaptureElement: HTMLElement | null = null
 const dragThreshold = 6
 
 function updateSidebarFilter(value: string | string[]) {
@@ -80,17 +82,26 @@ function resetAppDrag() {
   dragOverAppId.value = null
   dragPointerId.value = null
   dragStartPoint.value = null
+  dragCaptureElement = null
+}
+
+function toggleSortMode() {
+  sortMode.value = !sortMode.value
+  resetAppDrag()
 }
 
 function handleAppPointerDown(event: PointerEvent, appId: string) {
+  if (!sortMode.value) return
   if (event.button !== 0) return
   dragStartPoint.value = { x: event.clientX, y: event.clientY, appId }
   dragOverAppId.value = null
   dragPointerId.value = event.pointerId
-  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
+  dragCaptureElement = event.currentTarget as HTMLElement
+  dragCaptureElement.setPointerCapture?.(event.pointerId)
 }
 
 function handleAppPointerMove(event: PointerEvent) {
+  if (!sortMode.value) return
   if (dragPointerId.value !== event.pointerId || !dragStartPoint.value) return
   const distance = Math.hypot(
     event.clientX - dragStartPoint.value.x,
@@ -104,6 +115,7 @@ function handleAppPointerMove(event: PointerEvent) {
 }
 
 function handleAppPointerUp(event: PointerEvent) {
+  if (!sortMode.value) return
   if (dragPointerId.value !== event.pointerId || !dragStartPoint.value) return
   const activeId = dragStartPoint.value.appId
   const hasDragged = !!draggedAppId.value
@@ -117,7 +129,7 @@ function handleAppPointerUp(event: PointerEvent) {
       suppressClickTimer = null
     }, 0)
   }
-  ;(event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId)
+  dragCaptureElement?.releasePointerCapture?.(event.pointerId)
   if (hasDragged && targetId && activeId !== targetId) void appsStore.reorderApps(activeId, targetId)
   resetAppDrag()
 }
@@ -250,7 +262,7 @@ function primaryStatusClass(app: AppItem) {
 </script>
 
 <template>
-  <div class="flex min-w-[24rem] flex-1 flex-col bg-background shadow-[inset_-1px_0_0_0_var(--border)]">
+  <div class="flex w-[380px] min-w-[380px] max-w-[380px] shrink-0 flex-col bg-background shadow-[inset_-1px_0_0_0_var(--border)]">
     <div class="space-y-2.5 p-3 shadow-[inset_0_-1px_0_0_var(--border)]">
       <div class="flex items-start justify-between gap-3 px-1">
         <div class="min-w-0">
@@ -335,15 +347,14 @@ function primaryStatusClass(app: AppItem) {
           <div
             role="button"
             tabindex="0"
-            class="relative flex h-auto w-full cursor-grab select-none justify-start gap-2 rounded-md px-2 py-2 text-left transition-all touch-none active:cursor-grabbing"
+            class="group/app-row relative flex h-auto w-full select-none justify-start gap-2 rounded-md px-2 py-2 text-left transition-all"
             :class="[
               appsStore.editForm.id === app.id && !appsStore.isNew ? 'bg-card text-foreground shadow-[var(--shadow-border)]' : 'text-foreground hover:bg-accent/50',
               draggedAppId === app.id ? 'opacity-50' : '',
               dragOverAppId === app.id ? 'bg-accent/70 shadow-[inset_0_0_0_1px_var(--ring)]' : '',
             ]"
             :data-app-id="app.id"
-            :title="`拖动排序：${app.name}`"
-            @pointerdown="handleAppPointerDown($event, app.id)"
+            :title="app.name"
             @pointermove="handleAppPointerMove"
             @pointerup="handleAppPointerUp"
             @pointercancel="resetAppDrag"
@@ -356,6 +367,17 @@ function primaryStatusClass(app: AppItem) {
               class="absolute bottom-2 left-0 top-2 w-0.5 rounded-full bg-foreground/70"
               aria-hidden="true"
             />
+            <span
+              v-if="sortMode"
+              class="-ml-1 inline-flex h-7 w-5 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:cursor-grabbing"
+              :data-testid="`drag-handle-${app.id}`"
+              :title="`拖动排序：${app.name}`"
+              @pointerdown.stop="handleAppPointerDown($event, app.id)"
+              @click.stop
+              @dblclick.stop
+            >
+              <GripVertical class="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
             <AppIcon
               :app="app"
               :favicon-url="faviconUrl(app)"
@@ -365,12 +387,12 @@ function primaryStatusClass(app: AppItem) {
             <div class="min-w-0 flex-1">
               <div class="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
                 <div class="min-w-[8rem] flex-1 truncate text-sm font-medium">{{ app.name }}</div>
-                <div class="flex shrink-0 flex-wrap items-center justify-end gap-1" @dblclick.stop>
+                <div class="relative flex shrink-0 items-center justify-end gap-1" @dblclick.stop>
                   <span class="inline-flex items-center gap-0.5 rounded bg-secondary/70 p-0.5 shadow-[var(--shadow-border)]">
                     <button
                       v-if="isRunning(app)"
                       type="button"
-                      class="inline-flex h-5 w-5 items-center justify-center rounded text-destructive hover:bg-destructive/10"
+                      class="inline-flex h-6 w-6 items-center justify-center rounded text-destructive hover:bg-destructive/10"
                       :aria-label="`停止：${app.name}`"
                       title="停止"
                       @pointerdown.stop
@@ -386,6 +408,12 @@ function primaryStatusClass(app: AppItem) {
                       @click.stop
                       @launch="(delaySeconds) => handleLaunch(app, delaySeconds)"
                     />
+                  </span>
+                  <span
+                    v-if="!sortMode"
+                    class="absolute right-full top-1/2 mr-1 inline-flex -translate-y-1/2 items-center gap-0.5 rounded bg-secondary/95 p-0.5 shadow-[var(--shadow-card)] transition-opacity"
+                    :class="appsStore.editForm.id === app.id && !appsStore.isNew ? 'opacity-100' : 'opacity-0 group-hover/app-row:opacity-100 group-focus-within/app-row:opacity-100'"
+                  >
                     <button
                       v-if="!isRunning(app) && hasActiveCommandProfile(app)"
                       type="button"
@@ -431,8 +459,6 @@ function primaryStatusClass(app: AppItem) {
                     >
                       <FileText class="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
-                  </span>
-                  <span class="inline-flex items-center gap-0.5 rounded bg-secondary/70 p-0.5 shadow-[var(--shadow-border)]">
                     <button
                       type="button"
                       class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -473,7 +499,20 @@ function primaryStatusClass(app: AppItem) {
       </div>
     </div>
 
-    <div class="grid grid-cols-2 gap-1.5 p-2 shadow-[inset_0_1px_0_0_var(--border)]">
+    <div class="grid grid-cols-3 gap-1.5 p-2 shadow-[inset_0_1px_0_0_var(--border)]">
+      <Button
+        type="button"
+        variant="ghost"
+        class="h-8 w-full justify-center gap-1.5 px-2 text-muted-foreground hover:text-foreground"
+        :class="sortMode ? 'bg-card text-foreground shadow-[var(--shadow-border)]' : ''"
+        :title="sortMode ? '完成整理' : '整理排序'"
+        :aria-label="sortMode ? '完成整理' : '整理排序'"
+        @click="toggleSortMode"
+      >
+        <Check v-if="sortMode" :size="14" :stroke-width="2" aria-hidden="true" />
+        <GripVertical v-else :size="14" :stroke-width="2" aria-hidden="true" />
+        <span class="text-xs">{{ sortMode ? '完成' : '整理' }}</span>
+      </Button>
       <Button
         type="button"
         variant="ghost"

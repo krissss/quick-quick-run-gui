@@ -38,11 +38,16 @@ const launcherStore = useLauncherStore()
 const messageStore = useMessageStore()
 const sessionStore = useAppSessionStore()
 
+const sidebarWidth = 380
 const runtimePanelMinWidth = 256
-const runtimePanelDefaultWidth = 400
-const runtimePanelMaxWidth = 520
-const appListMinWidth = 384
+const runtimePanelDefaultWidth = 520
 const resizeHandleWidth = 8
+const runtimePanelDefaultWindowWidth = sidebarWidth + resizeHandleWidth + runtimePanelDefaultWidth
+const windowWidth = ref(
+  typeof window === 'undefined'
+    ? runtimePanelDefaultWindowWidth
+    : window.innerWidth,
+)
 const runtimePanelWidth = ref(runtimePanelDefaultWidth)
 const isRuntimePanelResizing = ref(false)
 
@@ -61,16 +66,22 @@ const runtimePanelStyle = computed(() => ({
   width: `${runtimePanelWidth.value}px`,
 }))
 
-function runtimePanelMaxWidthForWindow() {
+const runtimePanelMaxWidthValue = computed(() => runtimePanelMaxWidthForWindow())
+
+function runtimePanelMaxWidthForWindow(width = windowWidth.value) {
   return Math.max(
     runtimePanelMinWidth,
-    Math.min(runtimePanelMaxWidth, window.innerWidth - appListMinWidth - resizeHandleWidth),
+    width - sidebarWidth - resizeHandleWidth,
   )
 }
 
 function clampRuntimePanelWidth(width: number) {
   const maxWidth = runtimePanelMaxWidthForWindow()
   return Math.min(maxWidth, Math.max(runtimePanelMinWidth, width))
+}
+
+function runtimePanelWidthForWindow(width: number) {
+  return clampRuntimePanelWidth(runtimePanelDefaultWidth + width - runtimePanelDefaultWindowWidth)
 }
 
 function setResizeCursor() {
@@ -121,7 +132,10 @@ function handleRuntimePanelResizeKeydown(event: KeyboardEvent) {
 }
 
 function handleWindowResize() {
-  runtimePanelWidth.value = clampRuntimePanelWidth(runtimePanelWidth.value)
+  const nextWindowWidth = window.innerWidth
+  const delta = nextWindowWidth - windowWidth.value
+  windowWidth.value = nextWindowWidth
+  runtimePanelWidth.value = clampRuntimePanelWidth(runtimePanelWidth.value + delta)
 }
 
 function scheduleStartupLaunches() {
@@ -150,6 +164,8 @@ async function initializeAppState() {
 }
 
 onMounted(() => {
+  windowWidth.value = window.innerWidth
+  runtimePanelWidth.value = runtimePanelWidthForWindow(windowWidth.value)
   window.addEventListener('resize', handleWindowResize)
   void initializeAppState()
 })
@@ -224,7 +240,7 @@ function relaunchRunCommand(run: RunRecord) {
       aria-orientation="vertical"
       :aria-valuenow="Math.round(runtimePanelWidth)"
       :aria-valuemin="runtimePanelMinWidth"
-      :aria-valuemax="runtimePanelMaxWidth"
+      :aria-valuemax="runtimePanelMaxWidthValue"
       class="group relative z-10 flex w-2 shrink-0 cursor-col-resize justify-center bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring"
       :class="isRuntimePanelResizing ? 'bg-accent' : ''"
       @pointerdown="startRuntimePanelResize"

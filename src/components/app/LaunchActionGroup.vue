@@ -41,14 +41,14 @@ const customDelaySeconds = computed(() => normalizeDelaySeconds(customDelay.valu
 const hasPendingLaunch = computed(() => !!props.pendingLaunch)
 const primaryButtonClass = computed(() =>
   props.size === 'row'
-    ? 'h-5 w-5 rounded-r-none px-0 text-muted-foreground hover:bg-accent hover:text-foreground shadow-none'
+    ? 'h-6 w-6 rounded-r-none px-0 text-muted-foreground hover:bg-accent hover:text-foreground shadow-none'
     : props.size === 'large'
     ? 'h-9 rounded-r-none px-4 text-sm shadow-none'
     : 'rounded-r-none shadow-none',
 )
 const menuButtonClass = computed(() =>
   props.size === 'row'
-    ? 'h-5 w-5 rounded-l-none px-0 text-muted-foreground hover:bg-accent hover:text-foreground shadow-none'
+    ? 'h-6 w-6 rounded-l-none px-0 text-muted-foreground hover:bg-accent hover:text-foreground shadow-none'
     : props.size === 'large'
     ? 'h-9 w-9 rounded-l-none px-0 shadow-[inset_1px_0_0_0_rgba(255,255,255,0.24)]'
     : 'w-7 rounded-l-none px-0 shadow-[inset_1px_0_0_0_rgba(255,255,255,0.24)]',
