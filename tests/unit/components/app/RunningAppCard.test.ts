@@ -48,7 +48,7 @@ describe('RunningAppCard', () => {
     expect(wrapper.text()).toContain('PID 4321')
     expect(wrapper.text()).toContain('pnpm dev --actual')
     expect(wrapper.text()).toContain('日志')
-    expect(wrapper.text()).toContain('查看全部')
+    expect(wrapper.get('button[aria-label="查看全部日志：demo-web"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('ready on 3000')
     expect(logPreview.classes()).toContain('overflow-x-auto')
     expect(logPreview.find('.whitespace-pre').exists()).toBe(true)
