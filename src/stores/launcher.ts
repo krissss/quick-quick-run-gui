@@ -59,6 +59,8 @@ export interface LaunchOptions {
   trigger?: LaunchTrigger
   delaySeconds?: number
   reconcile?: boolean
+  openWindow?: boolean
+  notify?: boolean
 }
 
 export interface AppRunState {
@@ -228,13 +230,18 @@ export const useLauncherStore = defineStore('launcher', () => {
     if (trigger === 'manual' || trigger === 'delayed') resetAutomationAttempts(app.id)
     const launchTarget = resolveAppProfile(app)
     const shouldReconcile = options.reconcile ?? false
+    const shouldOpenWindow = options.openWindow ?? !(trigger === 'startup' && launchTarget.type === 'web')
+    const shouldNotify = options.notify ?? !(trigger === 'startup' && launchTarget.type === 'web')
+    if (launchTarget.type === 'web' && !launchTarget.command.trim() && !shouldOpenWindow) return
     if (shouldReconcile && (launchTarget.type === 'web' || launchTarget.type === 'service')) {
       await refreshRunningApps({ reconcile: true })
     }
     if (launchTarget.type === 'web') {
       if (runningAppIds.value.has(launchTarget.id)) {
-        await showAppWindow(launchTarget.id)
-        message.showMessage(`${launchTarget.name} 正在运行，已打开窗口`, 'info')
+        if (shouldOpenWindow) {
+          await showAppWindow(launchTarget.id)
+          if (shouldNotify) message.showMessage(`${launchTarget.name} 正在运行，已打开窗口`, 'info')
+        }
         return
       }
     }
@@ -251,6 +258,7 @@ export const useLauncherStore = defineStore('launcher', () => {
         appName: launchTarget.name,
         itemType: launchTarget.type || 'web',
         launchTrigger: trigger,
+        openWindow: shouldOpenWindow,
         bgR,
         bgG,
         bgB,
@@ -263,16 +271,16 @@ export const useLauncherStore = defineStore('launcher', () => {
         const m = new Map(runningPids.value)
         m.delete(launchTarget.id)
         runningPids.value = m
-        message.showMessage(result.message, 'success')
+        if (shouldNotify) message.showMessage(result.message, 'success')
       } else {
-        message.showMessage(result.message, 'success')
+        if (shouldNotify) message.showMessage(result.message, 'success')
       }
       const s = new Set(runningAppIds.value)
       s.add(launchTarget.id)
       runningAppIds.value = s
       refreshRunningApps()
     } catch (e: unknown) {
-      message.showMessage(`启动失败: ${getErrorMessage(e)}`, 'error')
+      if (shouldNotify) message.showMessage(`启动失败: ${getErrorMessage(e)}`, 'error')
     }
     loading.value = false
   }

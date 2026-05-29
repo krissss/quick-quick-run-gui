@@ -252,12 +252,14 @@ async fn launch_app_window(
     app_name: String,
     item_type: Option<ItemType>,
     launch_trigger: Option<RunTrigger>,
+    open_window: Option<bool>,
     bg_r: u8,
     bg_g: u8,
     bg_b: u8,
 ) -> Result<LaunchResult, String> {
     let item_type = item_type.unwrap_or_default();
     let launch_trigger = launch_trigger.unwrap_or(RunTrigger::Manual);
+    let open_window = open_window.unwrap_or(true);
     if item_type == ItemType::Service || item_type == ItemType::Task {
         return launch_command_item(
             &app,
@@ -283,10 +285,16 @@ async fn launch_app_window(
 
     // 如果窗口已存在，取消最小化并聚焦
     if let Some(existing) = app.get_webview_window(&window_label) {
-        let _ = existing.unminimize();
-        let _ = existing.set_focus();
+        if open_window {
+            let _ = existing.unminimize();
+            let _ = existing.set_focus();
+        }
         return Ok(LaunchResult {
-            message: "窗口已存在，已聚焦".into(),
+            message: if open_window {
+                "窗口已存在，已聚焦".into()
+            } else {
+                "窗口已存在".into()
+            },
             pid: None,
             run_id: None,
         });
@@ -323,7 +331,6 @@ async fn launch_app_window(
         _ => None,
     };
     if let Some(record) = quick_recover_record {
-        let _ = create_app_window(&app, &app_id, &window_info)?;
         recover_lock(&state.processes).insert(
             app_id.clone(),
             ProcessInfo {
@@ -333,15 +340,22 @@ async fn launch_app_window(
                 logs: Arc::new(Mutex::new(Vec::new())),
                 item_type: ItemType::Web,
                 run_id: Some(record.id.clone()),
-                window: Some(window_info),
+                window: Some(window_info.clone()),
                 command: command.clone(),
                 working_directory: working_directory.clone(),
             },
         );
         let _ = app.emit("app-launched", app_id.clone());
-        let _ = app.emit("app-window-opened", app_id.clone());
+        if open_window {
+            let _ = create_app_window(&app, &app_id, &window_info)?;
+            let _ = app.emit("app-window-opened", app_id.clone());
+        }
         return Ok(LaunchResult {
-            message: "应用正在运行，已恢复窗口".into(),
+            message: if open_window {
+                "应用正在运行，已恢复窗口".into()
+            } else {
+                "应用正在运行，已保留后台进程".into()
+            },
             pid: None,
             run_id: Some(record.id),
         });
@@ -353,6 +367,13 @@ async fn launch_app_window(
     kill_app_process(&app, &app_id);
 
     if !has_command {
+        if !open_window {
+            return Ok(LaunchResult {
+                message: "未自动打开窗口".into(),
+                pid: None,
+                run_id: None,
+            });
+        }
         // 无命令：直接创建窗口
         let logs = Arc::new(Mutex::new(Vec::new()));
         let _ = create_app_window(&app, &app_id, &window_info)?;
@@ -445,55 +466,57 @@ async fn launch_app_window(
     spawn_process_monitor(&app, &app_id);
 
     // 后台任务：等待 URL 可达 → 创建窗口
-    let app_bg = app.clone();
-    let app_id_bg = app_id.clone();
-    let url_bg = url.clone();
-    let window_info_bg = window_info.clone();
-    tauri::async_runtime::spawn(async move {
-        let reachable = check_url_inner(&url_bg, 15).await;
+    if open_window {
+        let app_bg = app.clone();
+        let app_id_bg = app_id.clone();
+        let url_bg = url.clone();
+        let window_info_bg = window_info.clone();
+        tauri::async_runtime::spawn(async move {
+            let reachable = check_url_inner(&url_bg, 15).await;
 
-        // 检查进程是否还在（可能已退出）
-        let still_alive = {
-            let s = app_bg.try_state::<AppState>();
-            s.is_some() && recover_lock(&s.unwrap().processes).contains_key(&app_id_bg)
-        };
-        if !still_alive {
-            return;
-        }
+            // 检查进程是否还在（可能已退出）
+            let still_alive = {
+                let s = app_bg.try_state::<AppState>();
+                s.is_some() && recover_lock(&s.unwrap().processes).contains_key(&app_id_bg)
+            };
+            if !still_alive {
+                return;
+            }
 
-        if !reachable {
-            let _ = app_bg.emit(
-                "app-launch-failed",
-                serde_json::json!({
-                    "app_id": app_id_bg,
-                    "reason": "timeout",
-                }),
-            );
-            kill_app_process(&app_bg, &app_id_bg);
-            return;
-        }
-
-        // 创建窗口
-        let webview_window = match create_app_window(&app_bg, &app_id_bg, &window_info_bg) {
-            Ok(w) => w,
-            Err(e) => {
+            if !reachable {
                 let _ = app_bg.emit(
                     "app-launch-failed",
                     serde_json::json!({
                         "app_id": app_id_bg,
-                        "reason": e,
+                        "reason": "timeout",
                     }),
                 );
                 kill_app_process(&app_bg, &app_id_bg);
                 return;
             }
-        };
 
-        // 设置窗口标题
-        let _ = set_window_title_inner(&webview_window, &url_bg).await;
+            // 创建窗口
+            let webview_window = match create_app_window(&app_bg, &app_id_bg, &window_info_bg) {
+                Ok(w) => w,
+                Err(e) => {
+                    let _ = app_bg.emit(
+                        "app-launch-failed",
+                        serde_json::json!({
+                            "app_id": app_id_bg,
+                            "reason": e,
+                        }),
+                    );
+                    kill_app_process(&app_bg, &app_id_bg);
+                    return;
+                }
+            };
 
-        let _ = app_bg.emit("app-window-opened", app_id_bg);
-    });
+            // 设置窗口标题
+            let _ = set_window_title_inner(&webview_window, &url_bg).await;
+
+            let _ = app_bg.emit("app-window-opened", app_id_bg);
+        });
+    }
 
     Ok(LaunchResult {
         message: "进程已启动".into(),

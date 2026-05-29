@@ -213,6 +213,44 @@ describe('App', () => {
     expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
       appId: 'web-1',
       launchTrigger: 'startup',
+      openWindow: false,
+    })
+    wrapper.unmount()
+  })
+
+  it('does not let an unconfirmed running record block startup launch', async () => {
+    vi.useFakeTimers()
+    const startupWeb = {
+      ...webApp,
+      startup: { enabled: true, delaySeconds: 1 },
+    }
+    const staleRunningRun = {
+      ...taskSuccessRun,
+      id: 'stale-web-run',
+      app_id: 'web-1',
+      app_name: 'demo-web',
+      item_type: 'web' as const,
+      status: 'running' as const,
+      pid: 4321,
+      exit_code: null,
+      finished_at: null,
+      command: 'pnpm dev',
+      log_path: '/tmp/stale-web-run.log',
+    }
+    const { mock, wrapper } = await mountApp({
+      store: { apps: [startupWeb] },
+      runningApps: [],
+      recentRuns: [staleRunningRun],
+    })
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(mock.getCalls('reconcile_running_records')).toHaveLength(1)
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      appId: 'web-1',
+      launchTrigger: 'startup',
+      openWindow: false,
     })
     wrapper.unmount()
   })

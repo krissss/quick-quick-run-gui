@@ -150,6 +150,7 @@ describe('launcher store', () => {
       appId: 'demo-web-id',
       command: 'pnpm dev --history',
       launchTrigger: 'manual',
+      openWindow: true,
     })
   })
 
@@ -218,6 +219,21 @@ describe('launcher store', () => {
       appId: 'demo-service-id',
       launchTrigger: 'startup',
     })
+  })
+
+  it('starts web startup commands without opening their windows', async () => {
+    const { launcher, mock, messages } = await mountLauncher({
+      launchResult: { message: '应用正在运行，已保留后台进程', pid: null, run_id: 'run-web' },
+    })
+
+    await launcher.launchApp(demoWeb, { trigger: 'startup' })
+
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      appId: 'demo-web-id',
+      launchTrigger: 'startup',
+      openWindow: false,
+    })
+    expect(messages.value).toHaveLength(0)
   })
 
   it('refreshes after the backend finishes background reconciliation', async () => {

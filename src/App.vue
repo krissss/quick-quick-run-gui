@@ -145,8 +145,13 @@ function scheduleStartupLaunches() {
       await launcherStore.refreshRunningApps()
       const currentApp = appsStore.apps.find(item => item.id === app.id)
       if (!currentApp || !currentApp.startup.enabled) return
-      const state = launcherStore.appRunState(currentApp.id)
-      if (state.isRunning || state.latestRun?.status === 'running') return
+      let state = launcherStore.appRunState(currentApp.id)
+      if (state.isRunning || state.pendingLaunch) return
+      if (state.latestRun?.status === 'running') {
+        await launcherStore.refreshRunningApps({ reconcile: true })
+        state = launcherStore.appRunState(currentApp.id)
+        if (state.isRunning || state.pendingLaunch) return
+      }
       await launcherStore.launchApp(currentApp, { trigger: 'startup', reconcile: false })
     }, Math.max(0, app.startup.delaySeconds) * 1000)
     startupTimers.push(timer)
