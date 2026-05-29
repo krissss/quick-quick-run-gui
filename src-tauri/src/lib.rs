@@ -9,7 +9,8 @@ mod url_check;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::time::Duration;
 
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, Local, TimeZone, Timelike};
 use chrono_tz::Tz;
@@ -26,21 +27,74 @@ use port_tools::{
     PortProcessInfo,
 };
 use process::{
-    append_run_record, clear_run_records, create_log_path, create_run_id, get_run_records,
-    kill_app_process, latest_log_path_for_app, now_millis, persist_session,
+    append_run_record, clear_run_records, create_log_path, create_run_id, detach_app_process,
+    get_run_records, kill_app_process, latest_log_path_for_app, now_millis, persist_session,
     prune_run_records_for_retention, read_log_retention_limit, read_log_tail,
     resolve_managed_process_pid, restore_persisted_sessions, spawn_process_monitor,
-    spawn_recovered_process_monitor, spawn_shell_command, window_label_for, AppState,
-    AppWindowInfo, ItemType, PersistedSession, ProcessInfo, RunRecord, RunStatus, RunTrigger,
+    spawn_recovered_process_monitor, spawn_restore_persisted_sessions, spawn_shell_command,
+    stop_detached_process, window_label_for, AppState, AppWindowInfo, ItemType, PersistedSession,
+    ProcessInfo, RunRecord, RunStatus, RunTrigger,
 };
-use url_check::check_url_inner;
+use url_check::{check_url_inner, check_url_quick};
 
 #[cfg(debug_assertions)]
 const DEV_SERVER_URL: &str = "http://localhost:47891";
 
+static PATH_ENV_INIT: OnceLock<Result<(), String>> = OnceLock::new();
+
 /// Lock a Mutex, recovering from poison by taking the guard.
 fn recover_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn initialize_path_env() -> Result<(), String> {
+    PATH_ENV_INIT
+        .get_or_init(|| fix_path_env::fix_all_vars().map_err(|e| e.to_string()))
+        .clone()
+}
+
+fn ensure_path_env_ready() {
+    if let Err(e) = initialize_path_env() {
+        eprintln!("fix_path_env failed: {e}");
+    }
+}
+
+fn should_wait_for_path_env(trigger: RunTrigger) -> bool {
+    matches!(
+        trigger,
+        RunTrigger::Schedule | RunTrigger::AutoRestart | RunTrigger::Retry
+    )
+}
+
+fn spawn_path_env_initialization() {
+    tauri::async_runtime::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+        tauri::async_runtime::spawn_blocking(ensure_path_env_ready);
+    });
+}
+
+fn spawn_main_window_state_restore(handle: &tauri::AppHandle) {
+    let handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+        let handle_for_load = handle.clone();
+        let state = tauri::async_runtime::spawn_blocking(move || {
+            load_window_state(&handle_for_load, "main")
+        })
+        .await
+        .ok()
+        .flatten();
+        let Some(state) = state else {
+            return;
+        };
+        let Some(window) = handle.get_webview_window("main") else {
+            return;
+        };
+        let pos = tauri::Position::Logical(tauri::LogicalPosition::new(state.x, state.y));
+        let size = tauri::Size::Logical(tauri::LogicalSize::new(state.width, state.height));
+        let _ = window.set_size(size);
+        let _ = window.set_position(pos);
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -79,12 +133,7 @@ pub fn run() {
             open_in_browser,
         ])
         .setup(|app| {
-            // 修复 macOS app bundle 环境变量缺失问题
-            // 从 Finder/Spotlight 启动时不会继承 shell 的环境（缺少 Homebrew/nvm/pnpm 等路径和变量）
-            // fix_all_vars() 通过 interactive login shell 获取完整环境并注入当前进程
-            if let Err(e) = fix_path_env::fix_all_vars() {
-                eprintln!("fix_path_env failed: {e}");
-            }
+            spawn_path_env_initialization();
 
             // 主窗口关闭时保存位置并隐藏
             if let Some(window) = app.get_webview_window("main") {
@@ -107,19 +156,9 @@ pub fn run() {
                 });
             }
 
-            // 恢复主窗口保存的位置（逻辑坐标）
-            if let Some(window) = app.get_webview_window("main") {
-                if let Some(state) = load_window_state(app.handle(), "main") {
-                    let pos =
-                        tauri::Position::Logical(tauri::LogicalPosition::new(state.x, state.y));
-                    let size =
-                        tauri::Size::Logical(tauri::LogicalSize::new(state.width, state.height));
-                    let _ = window.set_size(size);
-                    let _ = window.set_position(pos);
-                }
-            }
+            // 主窗口先显示，历史位置稍后恢复，避免启动首屏被 store reload 卡住。
+            spawn_main_window_state_restore(app.handle());
 
-            restore_persisted_sessions(app.handle());
             start_scheduler(app.handle());
 
             // 设置系统托盘 / macOS 菜单栏图标
@@ -132,15 +171,21 @@ pub fn run() {
                 let h2 = app.handle().clone();
                 let h3 = app.handle().clone();
                 let _ = app.listen("apps-updated", move |_| {
-                    tray::rebuild_tray_menu(&h1);
+                    tray::rebuild_tray_menu_deferred(&h1);
                 });
                 let _ = app.listen("app-launched", move |_| {
-                    tray::rebuild_tray_menu(&h2);
+                    tray::rebuild_tray_menu_deferred(&h2);
                 });
                 let _ = app.listen("app-stopped", move |_| {
-                    tray::rebuild_tray_menu(&h3);
+                    tray::rebuild_tray_menu_deferred(&h3);
+                });
+                let h4 = app.handle().clone();
+                let _ = app.listen("running-records-reconciled", move |_| {
+                    tray::rebuild_tray_menu_deferred(&h4);
                 });
             }
+
+            spawn_restore_persisted_sessions(app.handle());
 
             Ok(())
         })
@@ -174,6 +219,22 @@ struct ClearLogsResult {
 #[derive(serde::Serialize)]
 struct KillPortResult {
     message: String,
+}
+
+fn latest_running_record_for(
+    app: &tauri::AppHandle,
+    app_id: &str,
+    item_type: ItemType,
+    command: &str,
+) -> Option<RunRecord> {
+    let command = command.trim();
+    get_run_records(app, Some(app_id), 5)
+        .into_iter()
+        .find(|record| {
+            record.status == RunStatus::Running
+                && record.item_type == item_type
+                && record.command.trim() == command
+        })
 }
 
 /// 启动应用并在新窗口中运行
@@ -252,68 +313,41 @@ async fn launch_app_window(
         });
     }
 
-    if has_command {
-        if let Some((record, pid)) = get_run_records(&app, Some(&app_id), 20)
-            .into_iter()
-            .find_map(|record| {
-                if record.status != RunStatus::Running || record.item_type != ItemType::Web {
-                    return None;
-                }
-                record
-                    .pid
-                    .and_then(|pid| {
-                        resolve_managed_process_pid(
-                            pid,
-                            &command,
-                            &working_directory,
-                            ItemType::Web,
-                        )
-                    })
-                    .map(|pid| (record, pid))
-            })
-        {
-            let logs = Arc::new(Mutex::new(Vec::new()));
-            recover_lock(&state.processes).insert(
-                app_id.clone(),
-                ProcessInfo {
-                    child: None,
-                    pid: Some(pid),
-                    log_path: Some(PathBuf::from(&record.log_path)),
-                    logs,
-                    item_type: ItemType::Web,
-                    run_id: Some(record.id.clone()),
-                    window: Some(window_info.clone()),
-                    command: command.clone(),
-                    working_directory: working_directory.clone(),
-                },
-            );
-            persist_session(
-                &app,
-                PersistedSession {
-                    app_id: app_id.clone(),
-                    app_name: app_name.clone(),
-                    item_type: ItemType::Web,
-                    command: command.clone(),
-                    working_directory: working_directory.clone(),
-                    url: url.clone(),
-                    pid,
-                    log_path: record.log_path.clone(),
-                    started_at: record.started_at,
-                    run_id: Some(record.id.clone()),
-                    window: Some(window_info.clone()),
-                },
-            );
-            let _ = create_app_window(&app, &app_id, &window_info)?;
-            let _ = app.emit("app-launched", app_id.clone());
-            let _ = app.emit("app-window-opened", app_id.clone());
-            spawn_recovered_process_monitor(&app, &app_id);
-            return Ok(LaunchResult {
-                message: "应用正在运行，已恢复窗口".into(),
-                pid: Some(pid),
-                run_id: Some(record.id),
-            });
-        }
+    let quick_recover_record = if has_command {
+        latest_running_record_for(&app, &app_id, ItemType::Web, &command)
+    } else {
+        None
+    };
+    let quick_recover_record = match quick_recover_record {
+        Some(record) if check_url_quick(&url, Duration::from_millis(300)).await => Some(record),
+        _ => None,
+    };
+    if let Some(record) = quick_recover_record {
+        let _ = create_app_window(&app, &app_id, &window_info)?;
+        recover_lock(&state.processes).insert(
+            app_id.clone(),
+            ProcessInfo {
+                child: None,
+                pid: None,
+                log_path: Some(PathBuf::from(&record.log_path)),
+                logs: Arc::new(Mutex::new(Vec::new())),
+                item_type: ItemType::Web,
+                run_id: Some(record.id.clone()),
+                window: Some(window_info),
+                command: command.clone(),
+                working_directory: working_directory.clone(),
+            },
+        );
+        let _ = app.emit("app-launched", app_id.clone());
+        let _ = app.emit("app-window-opened", app_id.clone());
+        return Ok(LaunchResult {
+            message: "应用正在运行，已恢复窗口".into(),
+            pid: None,
+            run_id: Some(record.id),
+        });
     }
+
+    // 前台启动路径只做轻量判断；历史 PID 重绑交给后台恢复/手动对账处理。
 
     // 先杀掉同 app_id 的旧进程
     kill_app_process(&app, &app_id);
@@ -347,6 +381,9 @@ async fn launch_app_window(
     }
 
     // 有命令：启动进程，立即返回，后台等待 URL 后创建窗口
+    if should_wait_for_path_env(launch_trigger) {
+        ensure_path_env_ready();
+    }
     let log_path = create_log_path(&app, &app_id)?;
     let (child, pid) =
         spawn_shell_command(&command, Some(working_directory.as_str()), Some(&log_path))?;
@@ -517,6 +554,9 @@ fn launch_command_item(
     if command.trim().is_empty() {
         return Err("命令不能为空".to_string());
     }
+    if should_wait_for_path_env(trigger) {
+        ensure_path_env_ready();
+    }
 
     let running_item = app.try_state::<AppState>().and_then(|state| {
         recover_lock(&state.processes)
@@ -536,6 +576,62 @@ fn launch_command_item(
                 message: "服务正在运行".into(),
                 pid,
                 run_id,
+            });
+        }
+    }
+
+    if item_type != ItemType::Task {
+        if let Some((record, pid)) = get_run_records(app, Some(&app_id), 20)
+            .into_iter()
+            .find_map(|record| {
+                if record.status != RunStatus::Running || record.item_type != item_type {
+                    return None;
+                }
+                record
+                    .pid
+                    .and_then(|pid| {
+                        resolve_managed_process_pid(pid, &command, &working_directory, item_type)
+                    })
+                    .map(|pid| (record, pid))
+            })
+        {
+            let state = app.state::<AppState>();
+            recover_lock(&state.processes).insert(
+                app_id.clone(),
+                ProcessInfo {
+                    child: None,
+                    pid: Some(pid),
+                    log_path: Some(PathBuf::from(&record.log_path)),
+                    logs: Arc::new(Mutex::new(Vec::new())),
+                    item_type,
+                    run_id: Some(record.id.clone()),
+                    window: None,
+                    command: command.clone(),
+                    working_directory: working_directory.clone(),
+                },
+            );
+            persist_session(
+                app,
+                PersistedSession {
+                    app_id: app_id.clone(),
+                    app_name: app_name.clone(),
+                    item_type,
+                    command: command.clone(),
+                    working_directory: working_directory.clone(),
+                    url: String::new(),
+                    pid,
+                    log_path: record.log_path.clone(),
+                    started_at: record.started_at,
+                    run_id: Some(record.id.clone()),
+                    window: None,
+                },
+            );
+            spawn_recovered_process_monitor(app, &app_id);
+            let _ = app.emit("app-launched", app_id);
+            return Ok(LaunchResult {
+                message: "服务正在运行".into(),
+                pid: Some(pid),
+                run_id: Some(record.id),
             });
         }
     }
@@ -625,11 +721,7 @@ struct RunningAppInfo {
 
 /// 获取当前运行的 app ID 列表
 #[tauri::command]
-fn get_running_apps(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<RunningAppInfo>, String> {
-    restore_persisted_sessions(&app);
+fn get_running_apps(state: tauri::State<'_, AppState>) -> Result<Vec<RunningAppInfo>, String> {
     Ok(recover_lock(&state.processes)
         .iter()
         .map(|(app_id, info)| RunningAppInfo {
@@ -729,6 +821,7 @@ fn reconcile_running_records(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    restore_persisted_sessions(&app);
     let items = read_stored_items(&app);
     let mut seen_app_ids = HashSet::new();
     for record in get_run_records(&app, None, 500)
@@ -803,6 +896,7 @@ fn reconcile_running_records(
         );
         spawn_recovered_process_monitor(&app, &record.app_id);
     }
+    let _ = app.emit("running-records-reconciled", ());
     Ok(())
 }
 
@@ -816,7 +910,30 @@ fn stop_app(app: tauri::AppHandle, app_id: String) -> Result<(), String> {
         // 停止应用时强制销毁窗口，避免触发用户关闭窗口的普通生命周期。
         let _ = win.destroy();
     }
-    kill_app_process(&app, &app_id);
+    if let Some(info) = detach_app_process(&app, &app_id) {
+        if info.pid.is_some() {
+            if let Some(run_id) = &info.run_id {
+                process::finish_run_record(&app, run_id, RunStatus::Killed, None);
+            }
+        } else if let Some(run_id) = &info.run_id {
+            let _ = app.emit(
+                "app-run-unbound",
+                serde_json::json!({
+                    "app_id": app_id,
+                    "run_id": run_id,
+                }),
+            );
+        }
+        if info.pid.is_some() {
+            process::remove_persisted_session(&app, &app_id);
+        }
+        let _ = app.emit("app-stopped", app_id.clone());
+        if info.pid.is_some() || info.child.is_some() {
+            stop_detached_process(app, info);
+        }
+    } else {
+        let _ = app.emit("app-stopped", app_id);
+    }
     Ok(())
 }
 
@@ -868,7 +985,7 @@ pub(crate) fn show_or_create_app_window(
 #[tauri::command]
 fn notify_apps_updated(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-    tray::rebuild_tray_menu(&app);
+    tray::rebuild_tray_menu_deferred(&app);
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     let _ = app;

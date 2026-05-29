@@ -41,7 +41,6 @@ fn read_apps_from_store(app: &AppHandle) -> Vec<AppEntry> {
 /// 读取当前运行中的应用 ID
 fn read_running_ids(app: &AppHandle) -> HashSet<String> {
     use crate::process::AppState;
-    crate::process::restore_persisted_sessions(app);
     if let Some(state) = app.try_state::<AppState>() {
         recover_lock(&state.processes).keys().cloned().collect()
     } else {
@@ -65,9 +64,26 @@ fn launch_action_label(app: &AppEntry) -> &'static str {
     }
 }
 
+fn build_minimal_menu(app: &AppHandle) -> tauri::menu::Menu<tauri::Wry> {
+    let mut mb = MenuBuilder::new(app);
+    if let Ok(item) = MenuItem::with_id(app, "show-main", "显示主窗口", true, None::<&str>) {
+        mb = mb.item(&item);
+    }
+    if let Ok(sep) = PredefinedMenuItem::separator(app) {
+        mb = mb.item(&sep);
+    }
+    if let Ok(item) = MenuItem::with_id(app, "quit", "退出", true, None::<&str>) {
+        mb = mb.item(&item);
+    }
+
+    mb.build().unwrap_or_else(|e| {
+        eprintln!("构建托盘菜单失败: {}", e);
+        MenuBuilder::new(app).build().expect("构建空菜单失败")
+    })
+}
+
 /// 构建托盘菜单
-fn build_menu(app: &AppHandle) -> tauri::menu::Menu<tauri::Wry> {
-    let all_apps = read_apps_from_store(app);
+fn build_menu_with_apps(app: &AppHandle, all_apps: Vec<AppEntry>) -> tauri::menu::Menu<tauri::Wry> {
     let running = read_running_ids(app);
 
     let mut mb = MenuBuilder::new(app);
@@ -189,6 +205,10 @@ fn build_menu(app: &AppHandle) -> tauri::menu::Menu<tauri::Wry> {
     })
 }
 
+fn build_menu(app: &AppHandle) -> tauri::menu::Menu<tauri::Wry> {
+    build_menu_with_apps(app, read_apps_from_store(app))
+}
+
 /// 重建托盘菜单（应用列表变化时调用）
 pub fn rebuild_tray_menu(app: &AppHandle) {
     let tray = match app.tray_by_id("main-tray") {
@@ -198,6 +218,22 @@ pub fn rebuild_tray_menu(app: &AppHandle) {
 
     let menu = build_menu(app);
     let _ = tray.set_menu(Some(menu));
+}
+
+pub fn rebuild_tray_menu_deferred(app: &AppHandle) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let handle_for_read = handle.clone();
+        let all_apps =
+            tauri::async_runtime::spawn_blocking(move || read_apps_from_store(&handle_for_read))
+                .await
+                .unwrap_or_default();
+
+        let menu = build_menu_with_apps(&handle, all_apps);
+        if let Some(tray) = handle.tray_by_id("main-tray") {
+            let _ = tray.set_menu(Some(menu));
+        }
+    });
 }
 
 /// 加载托盘图标。
@@ -220,7 +256,7 @@ pub fn setup_tray(app: &AppHandle) {
         }
     };
 
-    let menu = build_menu(app);
+    let menu = build_minimal_menu(app);
 
     let _tray = TrayIconBuilder::with_id("main-tray")
         .tooltip("QQRun")
@@ -262,5 +298,11 @@ pub fn setup_tray(app: &AppHandle) {
         .build(app);
     if let Err(e) = &_tray {
         eprintln!("创建托盘图标失败: {}", e);
+    } else {
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1600)).await;
+            rebuild_tray_menu_deferred(&handle);
+        });
     }
 }

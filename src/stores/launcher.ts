@@ -16,6 +16,10 @@ interface RunningAppInfo {
   item_type: AppType
 }
 
+interface RefreshRunningAppsOptions {
+  reconcile?: boolean
+}
+
 export interface RunRecord {
   id: string
   app_id: string
@@ -46,9 +50,15 @@ export interface RunUpdatedPayload {
   status: RunRecord['status']
 }
 
+export interface RunUnboundPayload {
+  app_id: string
+  run_id: string
+}
+
 export interface LaunchOptions {
   trigger?: LaunchTrigger
   delaySeconds?: number
+  reconcile?: boolean
 }
 
 export interface AppRunState {
@@ -71,6 +81,7 @@ export const useLauncherStore = defineStore('launcher', () => {
   const automationAttempts = new Map<string, number>()
   const delayedLaunchTimers = new Map<string, number>()
   const unlisteners: (() => void)[] = []
+  let backgroundReconcilePromise: Promise<void> | null = null
 
   tryOnScopeDispose(() => stopEventListeners())
 
@@ -104,10 +115,22 @@ export const useLauncherStore = defineStore('launcher', () => {
     return latestRun?.status === 'running' || !!latestRun?.log_path
   }
 
-  async function refreshRunningApps() {
-    try {
-      await invoke('reconcile_running_records')
-    } catch { /* best effort */ }
+  async function reconcileRunningRecords(wait = false) {
+    if (!backgroundReconcilePromise) {
+      backgroundReconcilePromise = invoke('reconcile_running_records')
+        .catch(() => { /* best effort */ })
+        .then(() => undefined)
+        .finally(() => {
+          backgroundReconcilePromise = null
+        })
+    }
+    if (wait) await backgroundReconcilePromise
+  }
+
+  async function refreshRunningApps(options: RefreshRunningAppsOptions = {}) {
+    if (options.reconcile) {
+      await reconcileRunningRecords(true)
+    }
 
     try {
       const infos = await invoke<RunningAppInfo[]>('get_running_apps')
@@ -204,8 +227,11 @@ export const useLauncherStore = defineStore('launcher', () => {
     if (trigger === 'manual') cancelDelayedLaunch(app.id, false)
     if (trigger === 'manual' || trigger === 'delayed') resetAutomationAttempts(app.id)
     const launchTarget = resolveAppProfile(app)
+    const shouldReconcile = options.reconcile ?? false
+    if (shouldReconcile && (launchTarget.type === 'web' || launchTarget.type === 'service')) {
+      await refreshRunningApps({ reconcile: true })
+    }
     if (launchTarget.type === 'web') {
-      await refreshRunningApps()
       if (runningAppIds.value.has(launchTarget.id)) {
         await showAppWindow(launchTarget.id)
         message.showMessage(`${launchTarget.name} 正在运行，已打开窗口`, 'info')
@@ -244,7 +270,7 @@ export const useLauncherStore = defineStore('launcher', () => {
       const s = new Set(runningAppIds.value)
       s.add(launchTarget.id)
       runningAppIds.value = s
-      await refreshRunningApps()
+      refreshRunningApps()
     } catch (e: unknown) {
       message.showMessage(`启动失败: ${getErrorMessage(e)}`, 'error')
     }
@@ -343,9 +369,16 @@ export const useLauncherStore = defineStore('launcher', () => {
         runningPids.value = m
         refreshRunningApps()
       }),
-      await listen<RunUpdatedPayload>('app-run-updated', async (e) => {
-        await refreshRunningApps()
-        await handleRunUpdated(e.payload)
+      await listen<RunUpdatedPayload>('app-run-updated', (e) => {
+        refreshRunningApps()
+        void handleRunUpdated(e.payload)
+      }),
+      await listen<RunUnboundPayload>('app-run-unbound', (e) => {
+        const app = findApp(e.payload.app_id)
+        message.showMessage(`${app?.name || '应用'} 已关闭窗口，后台进程尚未绑定，未停止服务`, 'info')
+      }),
+      await listen('running-records-reconciled', () => {
+        refreshRunningApps()
       }),
       await listen<string>('app-logs-cleared', () => {
         refreshRunningApps()

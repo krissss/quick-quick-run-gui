@@ -86,7 +86,7 @@ describe('launcher store', () => {
     expect(latestRuns.value.get('demo-web-id')?.id).toBe('new')
   })
 
-  it('still refreshes runtime state when reconcile fails', async () => {
+  it('refreshes runtime state without blocking on reconcile', async () => {
     const { launcher, runningAppIds, latestRuns } = await mountLauncher({
       runningApps: [{ app_id: 'demo-web-id', pid: 4321, item_type: 'web' }],
       recentRuns: [
@@ -114,6 +114,18 @@ describe('launcher store', () => {
 
     expect(runningAppIds.value.has('demo-web-id')).toBe(true)
     expect(latestRuns.value.get('demo-web-id')?.id).toBe('run-active')
+  })
+
+  it('only runs reconcile when explicitly requested by refresh', async () => {
+    const { launcher, mock } = await mountLauncher({
+      runningApps: [{ app_id: 'demo-web-id', pid: 4321, item_type: 'web' }],
+    })
+
+    await launcher.refreshRunningApps()
+    expect(mock.getCalls('reconcile_running_records')).toHaveLength(0)
+
+    await launcher.refreshRunningApps({ reconcile: true })
+    expect(mock.getCalls('reconcile_running_records')).toHaveLength(1)
   })
 
   it('relaunches the exact command captured on a run record', async () => {
@@ -154,6 +166,7 @@ describe('launcher store', () => {
       runningApps: [{ app_id: 'demo-web-id', pid: 4321, item_type: 'web' }],
     })
 
+    await launcher.refreshRunningApps()
     await launcher.launchApp(demoWeb)
 
     expect(mock.getCalls('launch_app_window')).toHaveLength(0)
@@ -161,6 +174,71 @@ describe('launcher store', () => {
     expect(logs.showLogDialog).toBe(false)
     expect(loading.value).toBe(false)
     expect(messages.value.at(-1)?.text).toBe('demo-web 正在运行，已打开窗口')
+  })
+
+  it('launches services without a full reconcile so startup stays responsive', async () => {
+    const { launcher, mock } = await mountLauncher({
+      launchResult: { message: '服务已启动', pid: 1234, run_id: 'run-service' },
+    })
+    const service = normalizeApp({
+      ...demoWeb,
+      id: 'demo-service-id',
+      name: 'demo-service',
+      type: 'service',
+      command: 'php start.php start',
+      url: '',
+    })
+
+    await launcher.launchApp(service)
+
+    expect(mock.getCalls('reconcile_running_records')).toHaveLength(0)
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      appId: 'demo-service-id',
+      launchTrigger: 'manual',
+    })
+  })
+
+  it('does not reconcile startup launches so app startup stays responsive', async () => {
+    const { launcher, mock } = await mountLauncher({
+      launchResult: { message: '服务已启动', pid: 1234, run_id: 'run-service' },
+    })
+    const service = normalizeApp({
+      ...demoWeb,
+      id: 'demo-service-id',
+      name: 'demo-service',
+      type: 'service',
+      command: 'php start.php start',
+      url: '',
+    })
+
+    await launcher.launchApp(service, { trigger: 'startup' })
+
+    expect(mock.getCalls('reconcile_running_records')).toHaveLength(0)
+    expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
+      appId: 'demo-service-id',
+      launchTrigger: 'startup',
+    })
+  })
+
+  it('refreshes after the backend finishes background reconciliation', async () => {
+    const { runningAppIds, mock } = await mountLauncher({
+      runningApps: [{ app_id: 'demo-web-id', pid: 4321, item_type: 'web' }],
+    })
+
+    await emit('running-records-reconciled', null)
+    await flushPromises()
+
+    expect(runningAppIds.value.has('demo-web-id')).toBe(true)
+    expect(mock.getCalls('get_running_apps').length).toBeGreaterThan(0)
+  })
+
+  it('explains when stopping a web window has no bound backend process', async () => {
+    const { messages } = await mountLauncher()
+
+    await emit('app-run-unbound', { app_id: 'demo-web-id', run_id: 'run-web' })
+    await flushPromises()
+
+    expect(messages.value.at(-1)?.text).toBe('demo-web 已关闭窗口，后台进程尚未绑定，未停止服务')
   })
 
   it('launches apps, captures background color, and handles no-command windows', async () => {
@@ -178,7 +256,7 @@ describe('launcher store', () => {
     const styleSpy = vi.spyOn(window, 'getComputedStyle').mockReturnValue({
       backgroundColor: 'not-a-color',
     } as CSSStyleDeclaration)
-    await launcher.launchApp({ ...demoWeb, command: '' })
+    await launcher.launchApp({ ...demoWeb, id: 'demo-web-fallback-id', command: '' })
     expect(mock.getCalls('launch_app_window').at(-1)?.payload).toMatchObject({
       workingDirectory: '/Users/demo/project',
       launchTrigger: 'manual',

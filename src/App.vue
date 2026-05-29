@@ -130,22 +130,28 @@ function scheduleStartupLaunches() {
     const timer = window.setTimeout(async () => {
       await launcherStore.refreshRunningApps()
       const currentApp = appsStore.apps.find(item => item.id === app.id)
-      if (!currentApp || !currentApp.startup.enabled || launcherStore.appRunState(currentApp.id).isRunning) return
-      await launcherStore.launchApp(currentApp, { trigger: 'startup' })
+      if (!currentApp || !currentApp.startup.enabled) return
+      const state = launcherStore.appRunState(currentApp.id)
+      if (state.isRunning || state.latestRun?.status === 'running') return
+      await launcherStore.launchApp(currentApp, { trigger: 'startup', reconcile: false })
     }, Math.max(0, app.startup.delaySeconds) * 1000)
     startupTimers.push(timer)
   }
 }
 
-onMounted(async () => {
+async function initializeAppState() {
+  await launcherStore.startEventListeners()
   await appsStore.refreshApps()
   if (appsStore.apps.length > 0 && appsStore.isNew) {
     appsStore.selectApp(appsStore.apps[0])
   }
-  await launcherStore.refreshRunningApps()
-  await launcherStore.startEventListeners()
-  window.addEventListener('resize', handleWindowResize)
+  void launcherStore.refreshRunningApps()
   scheduleStartupLaunches()
+}
+
+onMounted(() => {
+  window.addEventListener('resize', handleWindowResize)
+  void initializeAppState()
 })
 
 onUnmounted(() => {

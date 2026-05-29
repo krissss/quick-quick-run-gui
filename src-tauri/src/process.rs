@@ -31,6 +31,7 @@ const DEFAULT_GRACEFUL_STOP_TIMEOUT_SECONDS: u64 = 10;
 const MAX_GRACEFUL_STOP_TIMEOUT_SECONDS: u64 = 120;
 const LOG_TAIL_BYTES: u64 = 1024 * 1024;
 const MAX_RUN_RECORDS: usize = 500;
+const PROCESS_INSPECT_TIMEOUT_MILLIS: u64 = 300;
 
 /// Lock a Mutex, recovering from poison by taking the guard.
 fn recover_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -135,17 +136,24 @@ pub struct AppState {
     pub processes: Mutex<HashMap<String, ProcessInfo>>,
 }
 
+pub fn detach_app_process(handle: &tauri::AppHandle, app_id: &str) -> Option<ProcessInfo> {
+    handle.try_state::<AppState>().and_then(|state| {
+        let mut processes = recover_lock(&state.processes);
+        processes.remove(app_id)
+    })
+}
+
+pub fn stop_detached_process(handle: tauri::AppHandle, info: ProcessInfo) {
+    tauri::async_runtime::spawn_blocking(move || {
+        stop_process_info(info, graceful_stop_timeout(&handle));
+    });
+}
+
 /// 杀掉指定 app_id 的进程（包括整个进程组）
 pub fn kill_app_process(handle: &tauri::AppHandle, app_id: &str) {
-    if let Some(state) = handle.try_state::<AppState>() {
-        let info = {
-            let mut processes = recover_lock(&state.processes);
-            processes.remove(app_id)
-        };
-        if let Some(info) = info {
-            finish_process_run(handle, &info, RunStatus::Killed, None);
-            stop_process_info(info, graceful_stop_timeout(handle));
-        }
+    if let Some(info) = detach_app_process(handle, app_id) {
+        finish_process_run(handle, &info, RunStatus::Killed, None);
+        stop_process_info(info, graceful_stop_timeout(handle));
     }
     remove_persisted_session(handle, app_id);
     let _ = handle.emit("app-stopped", app_id.to_string());
@@ -432,22 +440,20 @@ pub fn spawn_recovered_process_monitor(app: &tauri::AppHandle, app_id: &str) {
     });
 }
 
-pub fn restore_persisted_sessions(handle: &tauri::AppHandle) {
+fn restore_persisted_sessions_inner(handle: &tauri::AppHandle, resolve_successors: bool) {
     let sessions = read_persisted_sessions(handle);
     let mut live_sessions = Vec::new();
 
     for mut session in sessions {
         let live_pid = if is_process_group_alive(session.pid) || is_process_alive(session.pid) {
             Some(session.pid)
-        } else if supports_successor_rebind(session.item_type) {
+        } else if resolve_successors && supports_successor_rebind(session.item_type) {
             resolve_successor_process(&session.command, &session.working_directory, session.pid)
         } else {
             None
         };
         let Some(live_pid) = live_pid else {
-            if let Some(run_id) = &session.run_id {
-                finish_run_record(handle, run_id, RunStatus::Lost, None);
-            }
+            live_sessions.push(session);
             continue;
         };
         session.pid = live_pid;
@@ -456,22 +462,37 @@ pub fn restore_persisted_sessions(handle: &tauri::AppHandle) {
         let mut should_monitor = false;
         if let Some(state) = handle.try_state::<AppState>() {
             let mut processes = recover_lock(&state.processes);
-            if !processes.contains_key(&session.app_id) {
-                processes.insert(
-                    session.app_id.clone(),
-                    ProcessInfo {
-                        child: None,
-                        pid: Some(live_pid),
-                        log_path: Some(PathBuf::from(&session.log_path)),
-                        logs: Arc::new(Mutex::new(Vec::new())),
-                        item_type: session.item_type,
-                        run_id: session.run_id.clone(),
-                        window: session.window.clone(),
-                        command: session.command.clone(),
-                        working_directory: session.working_directory.clone(),
-                    },
-                );
-                should_monitor = true;
+            match processes.get_mut(&session.app_id) {
+                Some(info) => {
+                    if info.pid.is_none() {
+                        info.pid = Some(live_pid);
+                        info.run_id = session.run_id.clone();
+                        info.log_path = Some(PathBuf::from(&session.log_path));
+                        info.command = session.command.clone();
+                        info.working_directory = session.working_directory.clone();
+                        if info.window.is_none() {
+                            info.window = session.window.clone();
+                        }
+                        should_monitor = true;
+                    }
+                }
+                None => {
+                    processes.insert(
+                        session.app_id.clone(),
+                        ProcessInfo {
+                            child: None,
+                            pid: Some(live_pid),
+                            log_path: Some(PathBuf::from(&session.log_path)),
+                            logs: Arc::new(Mutex::new(Vec::new())),
+                            item_type: session.item_type,
+                            run_id: session.run_id.clone(),
+                            window: session.window.clone(),
+                            command: session.command.clone(),
+                            working_directory: session.working_directory.clone(),
+                        },
+                    );
+                    should_monitor = true;
+                }
             }
         }
         if should_monitor {
@@ -481,6 +502,34 @@ pub fn restore_persisted_sessions(handle: &tauri::AppHandle) {
     }
 
     save_persisted_sessions(handle, &live_sessions);
+}
+
+pub fn restore_persisted_sessions(handle: &tauri::AppHandle) {
+    restore_persisted_sessions_inner(handle, true);
+}
+
+pub fn restore_persisted_sessions_light(handle: &tauri::AppHandle) {
+    restore_persisted_sessions_inner(handle, false);
+}
+
+pub fn spawn_restore_persisted_sessions(handle: &tauri::AppHandle) {
+    let handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let handle_for_light_restore = handle.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            restore_persisted_sessions_light(&handle_for_light_restore);
+            let _ = handle_for_light_restore.emit("running-records-reconciled", ());
+        })
+        .await
+        .ok();
+
+        tokio::time::sleep(Duration::from_millis(2200)).await;
+        tauri::async_runtime::spawn_blocking(move || {
+            restore_persisted_sessions(&handle);
+            let _ = handle.emit("running-records-reconciled", ());
+        });
+    });
 }
 
 pub fn read_log_tail(path: &Path, max_lines: usize) -> Vec<String> {
@@ -1066,6 +1115,29 @@ fn is_process_group_alive(pid: u32) -> bool {
     }
 }
 
+fn command_output_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+) -> Option<std::process::Output> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let start = Instant::now();
+    loop {
+        if child.try_wait().ok()?.is_some() {
+            return child.wait_with_output().ok();
+        }
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn should_keep_monitoring_after_wait_error(pid: Option<u32>) -> bool {
     pid.map(is_process_group_alive).unwrap_or(false)
 }
@@ -1301,10 +1373,14 @@ struct ProcessSnapshotForMatch {
 fn list_process_snapshots() -> Result<Vec<ProcessSnapshotForMatch>, String> {
     #[cfg(unix)]
     {
-        let output = Command::new("ps")
-            .args(["-axo", "pid=,pgid=,command="])
-            .output()
-            .map_err(|e| format!("执行 ps 失败: {}", e))?;
+        let mut command = Command::new("ps");
+        command.args(["-axo", "pid=,pgid=,command="]);
+        let Some(output) = command_output_with_timeout(
+            command,
+            Duration::from_millis(PROCESS_INSPECT_TIMEOUT_MILLIS),
+        ) else {
+            return Ok(Vec::new());
+        };
         if !output.status.success() {
             return Ok(Vec::new());
         }
@@ -1346,10 +1422,12 @@ fn read_process_working_directory(pid: u32) -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn read_process_working_directory(pid: u32) -> Option<String> {
-    let output = Command::new("lsof")
-        .args(["-a", "-d", "cwd", "-Fn", "-p", &pid.to_string()])
-        .output()
-        .ok()?;
+    let mut command = Command::new("lsof");
+    command.args(["-a", "-d", "cwd", "-Fn", "-p", &pid.to_string()]);
+    let output = command_output_with_timeout(
+        command,
+        Duration::from_millis(PROCESS_INSPECT_TIMEOUT_MILLIS),
+    )?;
     if !output.status.success() {
         return None;
     }
