@@ -39,6 +39,22 @@ describe('App', () => {
     vi.unstubAllGlobals()
   })
 
+  it('shows a skeleton while the initial app state loads', async () => {
+    setupTauriMocks({
+      store: { apps: [webApp] },
+    })
+    const wrapper = mount(App, { attachTo: document.body })
+
+    expect(wrapper.get('[data-testid="app-loading-skeleton"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="runtime-panel"]').exists()).toBe(false)
+
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="app-loading-skeleton"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="runtime-panel"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('wires restored apps to launcher, log dialog, and running controls', async () => {
     const runningApps = [{ app_id: 'web-1', pid: 4321, item_type: 'web' as const }]
     const taskOlderRun = {

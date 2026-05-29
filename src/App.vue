@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { onMounted, onUnmounted } from 'vue'
 import { History, Play, Timer, Waves } from '@lucide/vue'
 import AppDetailForm from '@/components/app/AppDetailForm.vue'
+import AppLoadingSkeleton from '@/components/app/AppLoadingSkeleton.vue'
 import AppSidebar from '@/components/app/AppSidebar.vue'
 import LogDialog from '@/components/app/LogDialog.vue'
 import PortManagerDialog from '@/components/app/PortManagerDialog.vue'
@@ -50,6 +51,7 @@ const windowWidth = ref(
 )
 const runtimePanelWidth = ref(runtimePanelDefaultWidth)
 const isRuntimePanelResizing = ref(false)
+const isAppInitializing = ref(true)
 
 let runtimePanelResizeStart: { x: number; width: number } | null = null
 let previousBodyCursor = ''
@@ -159,13 +161,18 @@ function scheduleStartupLaunches() {
 }
 
 async function initializeAppState() {
-  await launcherStore.startEventListeners()
-  await appsStore.refreshApps()
-  if (appsStore.apps.length > 0 && appsStore.isNew) {
-    appsStore.selectApp(appsStore.apps[0])
+  isAppInitializing.value = true
+  try {
+    await launcherStore.startEventListeners()
+    await appsStore.refreshApps()
+    if (appsStore.apps.length > 0 && appsStore.isNew) {
+      appsStore.selectApp(appsStore.apps[0])
+    }
+    await launcherStore.refreshRunningApps()
+    scheduleStartupLaunches()
+  } finally {
+    isAppInitializing.value = false
   }
-  void launcherStore.refreshRunningApps()
-  scheduleStartupLaunches()
 }
 
 onMounted(() => {
@@ -232,12 +239,16 @@ function relaunchRunCommand(run: RunRecord) {
   <div class="flex h-screen min-w-[44rem] bg-background text-foreground font-sans">
     <ToastMessages />
 
+    <AppLoadingSkeleton v-if="isAppInitializing" :runtime-panel-style="runtimePanelStyle" />
+
     <AppSidebar
+      v-else
       :favicon-url="faviconUrl"
       @favicon-error="markFaviconFailed"
     />
 
     <div
+      v-if="!isAppInitializing"
       data-testid="runtime-panel-resizer"
       role="separator"
       tabindex="0"
@@ -258,7 +269,7 @@ function relaunchRunCommand(run: RunRecord) {
       />
     </div>
 
-    <aside data-testid="runtime-panel" class="flex shrink-0 flex-col bg-background" :style="runtimePanelStyle">
+    <aside v-if="!isAppInitializing" data-testid="runtime-panel" class="flex shrink-0 flex-col bg-background" :style="runtimePanelStyle">
       <div class="p-3 shadow-[inset_0_-1px_0_0_var(--border)]">
         <div class="grid gap-1.5" :class="pendingApps.length > 0 ? 'grid-cols-3' : 'grid-cols-2'">
           <div class="rounded-md bg-card px-2.5 py-2 shadow-[var(--shadow-border)]">
