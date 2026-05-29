@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-29
+
+### Added
+
+- ui: 优化运行面板和侧栏整理交互
+- ui: 添加启动骨架加载态
+
+### Fixed
+
+- window: 调整网页窗口关闭行为
+- process: 修复服务和网页运行态恢复
+- process: 优化网页服务运行态恢复
+- startup: 静默启动网页后台命令
+
 ## [0.4.0] - 2026-05-25
 
 ### Added
@@ -148,7 +162,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 为 macOS 专属代码添加条件编译守卫，修复跨平台构建
 
-[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/krissss/quick-quick-run-gui/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/krissss/quick-quick-run-gui/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/krissss/quick-quick-run-gui/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.6...v0.3.0
 [0.2.6]: https://github.com/krissss/quick-quick-run-gui/compare/v0.2.5...v0.2.6
