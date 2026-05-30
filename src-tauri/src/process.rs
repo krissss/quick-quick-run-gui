@@ -1436,6 +1436,11 @@ fn read_process_working_directory(pid: u32) -> Option<String> {
         .find_map(|line| line.strip_prefix('n').map(ToString::to_string))
 }
 
+#[cfg(windows)]
+fn read_process_working_directory(_pid: u32) -> Option<String> {
+    None
+}
+
 pub fn now_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
